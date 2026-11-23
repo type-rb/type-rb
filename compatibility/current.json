@@ -1,0 +1,106 @@
+{
+  "$schema": "schema-v3.json",
+  "schemaVersion": 3,
+  "status": "experimental",
+  "nativeVersion": "0.5.0-alpha.1",
+  "typeRB": {
+    "supportMode": "exact",
+    "version": "0.4.12-dev",
+    "revision": "cc8c734f73f5149464838825cdbb2165058ed26d"
+  },
+  "compilerProtocol": {
+    "stability": "experimental-unstable",
+    "version": null
+  },
+  "bootstrap": {
+    "snapshotSchemaVersion": 4,
+    "seed": {
+      "status": "experimental",
+      "releaseTag": "bootstrap-seed-2026-08-30",
+      "manifestSchemaVersion": 1
+    }
+  },
+  "nativeMIR": {
+    "stability": "internal-unstable",
+    "version": null
+  },
+  "runtimeABI": {
+    "stability": "internal-unstable",
+    "version": null
+  },
+  "backend": {
+    "name": "QBE",
+    "version": "1.3",
+    "sourceURL": "https://c9x.me/compile/release/qbe-1.3.tar.xz",
+    "sourceSHA256": "d587905d620dc5e1d2bfa7c2cc642b9b837aa89a3188c6e37b53d756cf66e320",
+    "variant": "typerb-late-product-v1",
+    "patches": [
+      {
+        "path": "tools/qbe/sqrt.patch",
+        "sha256": "ec3e3e48118f15672b79831aa693d8ebea3e300d4d72818babb560e7763007e6"
+      },
+      {
+        "path": "tools/qbe/arm64-immediates.patch",
+        "sha256": "234546fceb13a87862f1e4fecfd094b72c72386be6572b54fc4b377b857937aa"
+      },
+      {
+        "path": "tools/qbe/arm64-memory.patch",
+        "sha256": "50c59a7ae5b4d1f50e19c5390810670c261f0f9b3bea3c54be5a59ba5d3aef68"
+      },
+      {
+        "path": "tools/qbe/gcm.patch",
+        "sha256": "4d1da85db142e51e24150c7cd1d3f3b780d8f5dc4d4599385985509c030dd872"
+      },
+      {
+        "path": "tools/qbe/fma.patch",
+        "sha256": "febee716732d6cf18a628bceecd7a6b7acb6f582f6bd0429a6d9c3eef5f81f3d"
+      }
+    ]
+  },
+  "targets": [
+    {
+      "profile": "darwin-arm64-v0",
+      "status": "experimental",
+      "os": "darwin",
+      "architecture": "arm64",
+      "qbeTarget": "arm64_apple",
+      "ccBoundary": "system-cc"
+    },
+    {
+      "profile": "linux-arm64-v0",
+      "status": "experimental",
+      "os": "linux",
+      "architecture": "arm64",
+      "qbeTarget": "arm64",
+      "ccBoundary": "system-cc"
+    },
+    {
+      "profile": "linux-amd64-v0",
+      "status": "experimental",
+      "os": "linux",
+      "architecture": "amd64",
+      "qbeTarget": "amd64_sysv",
+      "ccBoundary": "system-cc"
+    }
+  ],
+  "evidence": {
+    "compatibility": {
+      "nativeRevision": "485b2312f2994e06b738b7e1f5f7b1b735654611",
+      "result": "results/2026-09-07-string-escape-reference-compatibility/oidc-transport/README.md",
+      "workflow": "https://github.com/type-rb/type-rb-native/actions/runs/43142087269"
+    },
+    "bootstrap": {
+      "nativeRevision": "0058818314977633c50393796ef9b9f8f1fda50f",
+      "result": "results/2026-08-30-gate6l-bootstrap-seed-darwin-linux-arm64/README.md",
+      "release": "https://github.com/type-rb/type-rb-native/releases/tag/bootstrap-seed-2026-08-30"
+    },
+    "targetChains": [
+      {
+        "profile": "linux-amd64-v0",
+        "nativeRevision": "f7e6b02b38c77d0ea6f7da210e91575a4fa1cdf9",
+        "result": "results/2026-08-31-gate6n-linux-amd64/README.md",
+        "workflow": "https://github.com/type-rb/type-rb-native/actions/runs/33346867401"
+      }
+    ]
+  }
+}

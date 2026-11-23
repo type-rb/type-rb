@@ -1,0 +1,106 @@
+import { token_kind_symbol } from state/token_kinds
+import { literal_type_base } from frontend/types/literal_types
+import { source_literal_type } from frontend/syntax/literal_type_syntax
+import { union_parts } from frontend/types/union_types
+import { CompilerState, diagnostic } from state/state
+import { ControlSyntax } from state/source_state
+import { load_integer, load_string } from support/storage
+
+# Empty means that the union has a non-literal or differently based alternative.
+def literal_scalar_type(name: String): String
+	base := literal_type_base(name)
+	if base != ""
+		return base
+	end
+	parts := union_parts(name)
+	mut common := ""
+	parts.each do |part|
+		current := literal_type_base(part)
+		if current == "" || (common != "" && current != common)
+			return ""
+		end
+		common = current
+	end
+	return common
+end
+
+def literal_case_type(name: String): Boolean
+	if literal_type_base(name) != ""
+		return true
+	end
+	parts := union_parts(name)
+	if parts.size() == 0
+		return false
+	end
+	parts.each do |part|
+		if literal_type_base(part) == ""
+			return false
+		end
+	end
+	return true
+end
+
+def literal_branch_types(state: CompilerState, start: Integer, finish: Integer): Array<String>
+	mut types: Array<String> := []
+	mut first := start
+	mut index := start
+	while index <= finish
+		if index == finish || (load_integer(state.source_tokens.token_kinds, index) == token_kind_symbol() && load_string(state.source_tokens.token_texts, index) == ",")
+			types.push(source_literal_type(state, first, index))
+			first = index + 1
+		end
+		index += 1
+	end
+	return types
+end
+
+# Return whether the selector has a finite, completely checked domain.
+def check_literal_case(mut state: CompilerState, control: ControlSyntax, name: String): Boolean
+	mut alternatives := union_parts(name)
+	mut base := literal_scalar_type(name)
+	closed := literal_case_type(name)
+	if closed && alternatives.size() == 0
+		alternatives.push(name)
+	end
+	if !closed
+		base = name
+	end
+	mut seen: Array<String> := []
+	mut otherwise := false
+	control.branches.each do |branch|
+		if branch.condition < 0
+			otherwise = true
+			next
+		end
+		line := load_integer(state.source_tokens.token_lines, branch.condition)
+		literal_branch_types(state, branch.condition, branch.condition_finish).each do |literal|
+			if literal == "" || (!closed && literal_type_base(literal) != base)
+				diagnostic(state, "TRBN4004", line, "case branch requires a literal matching the selector type")
+				return false
+			end
+			if closed
+				mut present := false
+				alternatives.each do |alternative|
+					if alternative == literal
+						present = true
+					end
+				end
+				if !present
+					diagnostic(state, "TRBN4004", line, "when literal is not a selector alternative")
+					return false
+				end
+			end
+			seen.each do |previous|
+				if previous == literal
+					diagnostic(state, "TRBN4004", line, "case literal is handled more than once")
+					return false
+				end
+			end
+			seen.push(literal)
+		end
+	end
+	if closed && !otherwise && seen.size() != alternatives.size()
+		diagnostic(state, "TRBN4004", load_integer(state.source_tokens.token_lines, control.origin), "literal case is not exhaustive")
+	end
+	return closed
+end

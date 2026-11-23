@@ -1,0 +1,72 @@
+record MemoryBatch
+	label: String
+	values: Array<Integer>
+end
+
+def memory_label(): String
+	prefix := "runtime-"
+	suffix := "soak"
+	return prefix + suffix
+end
+
+def memory_values(seed: Integer): Array<Integer>
+	mut values: Array<Integer> := []
+	values.push(seed)
+	values.push(seed + 1)
+	values.push(seed + 2)
+	values.push(seed + 3)
+	return values
+end
+
+def memory_batch(seed: Integer): MemoryBatch
+	label := memory_label()
+	values := memory_values(seed)
+	return MemoryBatch.new(label: label, values: values)
+end
+
+def consume_memory_batch(batch: MemoryBatch): Integer
+	return batch.values.size() + batch.label.size()
+end
+
+def run_memory_soak(phases: Integer, iterations: Integer)
+	mut phase := 0
+	mut total_checksum := 0
+	while phase < phases
+		mut iteration := 0
+		mut phase_checksum := 0
+		while iteration < iterations
+			phase_checksum += consume_memory_batch(memory_batch(iteration))
+			iteration += 1
+		end
+		if phase_checksum != iterations * 16
+			puts("native-memory-soak-bad")
+			return
+		end
+
+		mut idle_iteration := 0
+		mut idle_checksum := 0
+		while idle_iteration < 1000000
+			idle_checksum += idle_iteration
+			idle_iteration += 1
+		end
+		if idle_checksum != 499999500000
+			puts("native-memory-soak-bad")
+			return
+		end
+
+		total_checksum += phase_checksum
+		puts("native-memory-soak-phase")
+		phase += 1
+	end
+	if total_checksum == phases * iterations * 16
+		puts("native-memory-soak-ok")
+	else
+		puts("native-memory-soak-bad")
+	end
+	return
+end
+
+def main()
+	run_memory_soak(60, 5000000)
+	return
+end

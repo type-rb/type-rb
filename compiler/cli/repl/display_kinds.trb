@@ -1,0 +1,35 @@
+# Lexical spans and completion candidates share these display categories.
+# The palette is also reused for prompts and annotations; it does not type-check.
+# Incomplete marks an unfinished quote or interpolation, not a parser verdict.
+
+def repl_style_plain(): Integer
+	return 0
+end
+
+def repl_style_keyword(): Integer
+	return 1
+end
+
+def repl_style_string(): Integer
+	return 2
+end
+
+def repl_style_literal(): Integer
+	return 3
+end
+
+def repl_style_comment(): Integer
+	return 4
+end
+
+def repl_style_type(): Integer
+	return 5
+end
+
+def repl_style_callable(): Integer
+	return 6
+end
+
+def repl_style_incomplete(): Integer
+	return 7
+end

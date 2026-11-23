@@ -1,0 +1,23 @@
+import { check } from compiler
+import { expect_compiler_phase, logical_checked_source } from testing/pipeline
+import { native_read_text } from project/native_file_system
+import { CompilerState } from state/state
+import { expect } from trb/std/test
+import trb/std/result
+
+def array_mir_test_state(): CompilerState
+	mut state := logical_checked_source("def main()\nmut values := [(1).to_s()]\nvalues.push((2).to_s())\nvalues[-1] = (3).to_s()\nputs(values[0])\nputs(values.size())\nend\n")
+	expect_compiler_phase(state, "check", check(state))
+	expect(state.scalar_mir.functions.size()).to_equal(1)
+	return state
+end
+
+def array_mir_test_read(path: String): String
+	return case native_read_text(path)
+	when Result::Ok(text)
+		text
+	when Result::Err(error)
+		puts(error.message)
+		""
+	end
+end

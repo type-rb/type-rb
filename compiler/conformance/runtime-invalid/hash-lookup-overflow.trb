@@ -1,0 +1,5 @@
+def main()
+	key := 1
+	mut table := { key => 9007199254740991 }
+	table[key] = table[key] + 1
+end

@@ -1,0 +1,808 @@
+{
+  "schemaVersion": 1,
+  "milestone": "M2-v05",
+  "typeRBRevision": "cc8c734f73f5149464838825cdbb2165058ed26d",
+  "note": "Initial Native v0.5 test-runner implementation scope. The original M2 manifest remains immutable. Public test-name selection is a visible maintainer-approved deferral under #643 and never contributes a passing result.",
+  "comparison": "Native matches exit status, PASS and FAIL lines, origins, messages and summaries. Output from the Go toolchain itself, such as a trailing `exit status N` line, is backend-specific.",
+  "modeRule": "Fixtures use one go-mode configuration, as in the reference. Execution steps compare the reference in that mode with Native in mode trb over the same source, changing only the mode; see the M1 manifest's modeRule.",
+  "observedWith": {
+    "reference": "Exact TYPE_RB_REVISION compiler; all required scenarios replayed on 2026-11-02, including the accepted portable assertion display.",
+    "native": "not runnable: test command absent"
+  },
+  "scenarios": [
+    {
+      "id": "test-basic-pass",
+      "title": "Nested suites discovered and passing",
+      "source": "https://github.com/type-rb/type-rb/blob/af8e5f52e18e265d20bab7efbeaa2c36ea9342ae/docs/guides/testing.md; https://github.com/type-rb/type-rb/blob/af8e5f52e18e265d20bab7efbeaa2c36ea9342ae/internal/cli/cli_test.go (TestTestRunsPortableSuiteAcrossBackends)",
+      "steps": [
+        [
+          "test"
+        ]
+      ],
+      "dependencies": [
+        "discovery",
+        "to_equal",
+        "summary"
+      ],
+      "expectation": "match-reference",
+      "fixture": "fixtures/projects/test-basic-pass",
+      "cwd": "app",
+      "reference": [
+        {
+          "args": [
+            "test"
+          ],
+          "code": 0,
+          "stdout": "PASS Calculator / adds numbers\nPASS Calculator / negative values / preserves the sign\n\n2 test(s), 0 failure(s)\n",
+          "stderr": ""
+        }
+      ],
+      "nativeBaseline": [
+        {
+          "args": [
+            "test"
+          ],
+          "code": 1,
+          "stdout": "",
+          "stderr": "trbn: unknown command test\n"
+        }
+      ],
+      "historicalSourceManifest": "fixtures/projects/m2-manifest.json"
+    },
+    {
+      "id": "test-positional-file",
+      "title": "Selecting one test file",
+      "source": "https://github.com/type-rb/type-rb/blob/af8e5f52e18e265d20bab7efbeaa2c36ea9342ae/internal/cli/cli_test.go (TestTestPositionalPathsSelectDirectoriesAndSkipUnrelatedTests)",
+      "steps": [
+        [
+          "test",
+          "src/alpha_test.trb"
+        ]
+      ],
+      "dependencies": [
+        "path selection"
+      ],
+      "expectation": "match-reference",
+      "fixture": "fixtures/projects/test-positional-file",
+      "cwd": "app",
+      "reference": [
+        {
+          "args": [
+            "test",
+            "src/alpha_test.trb"
+          ],
+          "code": 0,
+          "stdout": "PASS Alpha / runs\n\n1 test(s), 0 failure(s)\n",
+          "stderr": ""
+        }
+      ],
+      "nativeBaseline": [
+        {
+          "args": [
+            "test",
+            "src/alpha_test.trb"
+          ],
+          "code": 1,
+          "stdout": "",
+          "stderr": "trbn: unknown command test\n"
+        }
+      ],
+      "historicalSourceManifest": "fixtures/projects/m2-manifest.json"
+    },
+    {
+      "id": "test-positional-directory",
+      "title": "Selecting a directory recursively and skipping unrelated tests",
+      "source": "https://github.com/type-rb/type-rb/blob/af8e5f52e18e265d20bab7efbeaa2c36ea9342ae/internal/cli/cli_test.go (TestTestPositionalPathsSelectDirectoriesAndSkipUnrelatedTests)",
+      "steps": [
+        [
+          "test",
+          "src/domain"
+        ]
+      ],
+      "dependencies": [
+        "path selection"
+      ],
+      "expectation": "match-reference",
+      "fixture": "fixtures/projects/test-positional-directory",
+      "cwd": "app",
+      "reference": [
+        {
+          "args": [
+            "test",
+            "src/domain"
+          ],
+          "code": 0,
+          "stdout": "PASS Orders / runs\n\n1 test(s), 0 failure(s)\n",
+          "stderr": ""
+        }
+      ],
+      "nativeBaseline": [
+        {
+          "args": [
+            "test",
+            "src/domain"
+          ],
+          "code": 1,
+          "stdout": "",
+          "stderr": "trbn: unknown command test\n"
+        }
+      ],
+      "historicalSourceManifest": "fixtures/projects/m2-manifest.json"
+    },
+    {
+      "id": "test-positional-duplicate-names",
+      "title": "A file path disambiguates identically named suites",
+      "source": "https://github.com/type-rb/type-rb/blob/af8e5f52e18e265d20bab7efbeaa2c36ea9342ae/internal/cli/cli_test.go (TestTestPositionalFileDisambiguatesDuplicateNames)",
+      "steps": [
+        [
+          "test",
+          "src/first_test.trb"
+        ]
+      ],
+      "dependencies": [
+        "path selection"
+      ],
+      "expectation": "match-reference",
+      "fixture": "fixtures/projects/test-positional-duplicate-names",
+      "cwd": "app",
+      "reference": [
+        {
+          "args": [
+            "test",
+            "src/first_test.trb"
+          ],
+          "code": 0,
+          "stdout": "PASS Shared / same\n\n1 test(s), 0 failure(s)\n",
+          "stderr": ""
+        }
+      ],
+      "nativeBaseline": [
+        {
+          "args": [
+            "test",
+            "src/first_test.trb"
+          ],
+          "status": "not-runnable",
+          "reason": "Native test command is absent; do not count this as an observed result."
+        }
+      ],
+      "historicalSourceManifest": "fixtures/projects/m2-manifest.json",
+      "note": "The v0.5 scenario selects the first file without the deferred name option. Original combined file/name observations remain in the historical manifest."
+    },
+    {
+      "id": "test-selection-invalid",
+      "title": "A missing selected path is rejected",
+      "source": "https://github.com/type-rb/type-rb/blob/af8e5f52e18e265d20bab7efbeaa2c36ea9342ae/internal/cli/cli_test.go (TestTestSelectionRejectsInvalidInputs)",
+      "steps": [
+        [
+          "test",
+          "src/missing_test.trb"
+        ]
+      ],
+      "dependencies": [
+        "path selection"
+      ],
+      "expectation": "match-reference",
+      "fixture": "fixtures/projects/test-selection-invalid",
+      "cwd": "app",
+      "reference": [
+        {
+          "args": [
+            "test",
+            "src/missing_test.trb"
+          ],
+          "code": 1,
+          "stdout": "",
+          "stderr": "trb: test path src/missing_test.trb: stat <fixture>/app/src/missing_test.trb: no such file or directory\n"
+        }
+      ],
+      "nativeBaseline": [
+        {
+          "args": [
+            "test",
+            "src/missing_test.trb"
+          ],
+          "code": 1,
+          "stdout": "",
+          "stderr": "trbn: unknown command test\n"
+        }
+      ],
+      "historicalSourceManifest": "fixtures/projects/m2-manifest.json"
+    },
+    {
+      "id": "test-failure-origin",
+      "title": "A failing assertion reports its .trb origin and fails the run",
+      "source": "https://github.com/type-rb/type-rb/blob/af8e5f52e18e265d20bab7efbeaa2c36ea9342ae/internal/cli/cli_test.go (TestTestReturnsFailureAndJSONEvents)",
+      "steps": [
+        [
+          "test"
+        ]
+      ],
+      "dependencies": [
+        "failure origins",
+        "exit status"
+      ],
+      "expectation": "match-reference",
+      "fixture": "fixtures/projects/test-failure-origin",
+      "cwd": "app",
+      "reference": [
+        {
+          "args": [
+            "test"
+          ],
+          "code": 1,
+          "stdout": "FAIL Calculator / adds wrongly\n  <fixture>/app/src/calculator_test.trb:6:3: expected 3 to equal 4\n\n1 test(s), 1 failure(s)\n",
+          "stderr": "exit status 1\n"
+        }
+      ],
+      "nativeBaseline": [
+        {
+          "args": [
+            "test"
+          ],
+          "code": 1,
+          "stdout": "",
+          "stderr": "trbn: unknown command test\n"
+        }
+      ],
+      "historicalSourceManifest": "fixtures/projects/m2-manifest.json"
+    },
+    {
+      "id": "test-json-reporter",
+      "title": "JSON events for passing and failing cases",
+      "source": "https://github.com/type-rb/type-rb/blob/af8e5f52e18e265d20bab7efbeaa2c36ea9342ae/internal/cli/cli_test.go (TestTestReturnsFailureAndJSONEvents)",
+      "steps": [
+        [
+          "test",
+          "--reporter",
+          "json"
+        ]
+      ],
+      "dependencies": [
+        "JSON reporter",
+        "failure origins"
+      ],
+      "expectation": "match-reference",
+      "fixture": "fixtures/projects/test-json-reporter",
+      "cwd": "app",
+      "reference": [
+        {
+          "args": [
+            "test",
+            "--reporter",
+            "json"
+          ],
+          "code": 1,
+          "stdout": "{\"column\":2,\"file\":\"<fixture>/app/src/sample_test.trb\",\"line\":4,\"name\":\"Sample / passes\",\"test_file\":\"<fixture>/app/src/sample_test.trb\",\"type\":\"test_started\"}\n{\"column\":2,\"file\":\"<fixture>/app/src/sample_test.trb\",\"line\":4,\"name\":\"Sample / passes\",\"test_file\":\"<fixture>/app/src/sample_test.trb\",\"type\":\"test_passed\"}\n{\"column\":2,\"file\":\"<fixture>/app/src/sample_test.trb\",\"line\":7,\"name\":\"Sample / fails\",\"test_file\":\"<fixture>/app/src/sample_test.trb\",\"type\":\"test_started\"}\n{\"column\":3,\"file\":\"<fixture>/app/src/sample_test.trb\",\"line\":8,\"message\":\"expected \\\"a\\\" to equal \\\"b\\\"\",\"name\":\"Sample / fails\",\"test_file\":\"<fixture>/app/src/sample_test.trb\",\"type\":\"test_failed\"}\n{\"failed\":1,\"total\":2,\"type\":\"test_summary\"}\n",
+          "stderr": "exit status 1\n"
+        }
+      ],
+      "nativeBaseline": [
+        {
+          "args": [
+            "test",
+            "--reporter",
+            "json"
+          ],
+          "code": 1,
+          "stdout": "",
+          "stderr": "trbn: unknown command test\n"
+        }
+      ],
+      "historicalSourceManifest": "fixtures/projects/m2-manifest.json"
+    },
+    {
+      "id": "test-continue-after-failure",
+      "title": "A failing case does not stop later cases",
+      "source": "https://github.com/type-rb/type-rb/blob/af8e5f52e18e265d20bab7efbeaa2c36ea9342ae/docs/guides/testing.md",
+      "steps": [
+        [
+          "test"
+        ]
+      ],
+      "dependencies": [
+        "case isolation",
+        "summary"
+      ],
+      "expectation": "match-reference",
+      "fixture": "fixtures/projects/test-continue-after-failure",
+      "cwd": "app",
+      "reference": [
+        {
+          "args": [
+            "test"
+          ],
+          "code": 1,
+          "stdout": "FAIL Sample / fails first\n  <fixture>/app/src/sample_test.trb:5:3: expected 1 to equal 2\nPASS Sample / passes later\n\n2 test(s), 1 failure(s)\n",
+          "stderr": "exit status 1\n"
+        }
+      ],
+      "nativeBaseline": [
+        {
+          "args": [
+            "test"
+          ],
+          "code": 1,
+          "stdout": "",
+          "stderr": "trbn: unknown command test\n"
+        }
+      ],
+      "historicalSourceManifest": "fixtures/projects/m2-manifest.json"
+    },
+    {
+      "id": "assert-basic-forms",
+      "title": "Inequality, Boolean and nil assertions",
+      "source": "https://github.com/type-rb/type-rb/blob/af8e5f52e18e265d20bab7efbeaa2c36ea9342ae/docs/guides/testing.md",
+      "steps": [
+        [
+          "test"
+        ]
+      ],
+      "dependencies": [
+        "assertions"
+      ],
+      "expectation": "match-reference",
+      "fixture": "fixtures/projects/assert-basic-forms",
+      "cwd": "app",
+      "reference": [
+        {
+          "args": [
+            "test"
+          ],
+          "code": 0,
+          "stdout": "PASS Assertions / not equal\nPASS Assertions / true\nPASS Assertions / false\nPASS Assertions / nil\n\n4 test(s), 0 failure(s)\n",
+          "stderr": ""
+        }
+      ],
+      "nativeBaseline": [
+        {
+          "args": [
+            "test"
+          ],
+          "code": 1,
+          "stdout": "",
+          "stderr": "trbn: unknown command test\n"
+        }
+      ],
+      "historicalSourceManifest": "fixtures/projects/m2-manifest.json"
+    },
+    {
+      "id": "assert-structural-equality",
+      "title": "Structural equality for Arrays, Hashes, records and payload enums",
+      "source": "https://github.com/type-rb/type-rb/blob/af8e5f52e18e265d20bab7efbeaa2c36ea9342ae/docs/guides/testing.md",
+      "steps": [
+        [
+          "test"
+        ]
+      ],
+      "dependencies": [
+        "structural equality"
+      ],
+      "expectation": "match-reference",
+      "fixture": "fixtures/projects/assert-structural-equality",
+      "cwd": "app",
+      "reference": [
+        {
+          "args": [
+            "test"
+          ],
+          "code": 0,
+          "stdout": "PASS Structure / array\nPASS Structure / hash\nPASS Structure / record\nPASS Structure / enum\n\n4 test(s), 0 failure(s)\n",
+          "stderr": ""
+        }
+      ],
+      "nativeBaseline": [
+        {
+          "args": [
+            "test"
+          ],
+          "code": 1,
+          "stdout": "",
+          "stderr": "trbn: unknown command test\n"
+        }
+      ],
+      "historicalSourceManifest": "fixtures/projects/m2-manifest.json"
+    },
+    {
+      "id": "assert-structural-failure",
+      "title": "A record inequality failure message",
+      "source": "https://github.com/type-rb/type-rb/blob/af8e5f52e18e265d20bab7efbeaa2c36ea9342ae/docs/guides/testing.md",
+      "steps": [
+        [
+          "test"
+        ]
+      ],
+      "dependencies": [
+        "structural equality",
+        "failure messages"
+      ],
+      "expectation": "match-reference-status",
+      "note": "Go mode renders values in Go syntax; the portable failure text is settled with the M2 runner.",
+      "fixture": "fixtures/projects/assert-structural-failure",
+      "cwd": "app",
+      "reference": [
+        {
+          "args": [
+            "test"
+          ],
+          "code": 1,
+          "stdout": "FAIL Structure / record\n  <fixture>/app/src/sample_test.trb:15:3: expected Point(x: 1, y: 2) to equal Point(x: 1, y: 3)\n\n1 test(s), 1 failure(s)\n",
+          "stderr": "exit status 1\n"
+        }
+      ],
+      "nativeBaseline": [
+        {
+          "args": [
+            "test"
+          ],
+          "code": 1,
+          "stdout": "",
+          "stderr": "trbn: unknown command test\n"
+        }
+      ],
+      "historicalSourceManifest": "fixtures/projects/m2-manifest.json"
+    },
+    {
+      "id": "expect-ok-err-pass",
+      "title": "expect_ok and expect_err return payloads",
+      "source": "https://github.com/type-rb/type-rb/blob/af8e5f52e18e265d20bab7efbeaa2c36ea9342ae/docs/guides/testing.md",
+      "steps": [
+        [
+          "test"
+        ]
+      ],
+      "dependencies": [
+        "Result assertions"
+      ],
+      "expectation": "match-reference",
+      "fixture": "fixtures/projects/expect-ok-err-pass",
+      "cwd": "app",
+      "reference": [
+        {
+          "args": [
+            "test"
+          ],
+          "code": 0,
+          "stdout": "PASS Parser / ok\nPASS Parser / err\n\n2 test(s), 0 failure(s)\n",
+          "stderr": ""
+        }
+      ],
+      "nativeBaseline": [
+        {
+          "args": [
+            "test"
+          ],
+          "code": 1,
+          "stdout": "",
+          "stderr": "trbn: unknown command test\n"
+        }
+      ],
+      "historicalSourceManifest": "fixtures/projects/m2-manifest.json"
+    },
+    {
+      "id": "expect-ok-on-err-fails",
+      "title": "expect_ok fails at its call site for Err",
+      "source": "https://github.com/type-rb/type-rb/blob/af8e5f52e18e265d20bab7efbeaa2c36ea9342ae/internal/cli/cli_test.go (TestTestResultExpectationsFailAtTheirCallSitesAcrossBackends)",
+      "steps": [
+        [
+          "test"
+        ]
+      ],
+      "dependencies": [
+        "Result assertions",
+        "failure origins"
+      ],
+      "expectation": "match-reference",
+      "fixture": "fixtures/projects/expect-ok-on-err-fails",
+      "cwd": "app",
+      "reference": [
+        {
+          "args": [
+            "test"
+          ],
+          "code": 1,
+          "stdout": "FAIL Parser / ok\n  <fixture>/app/src/parser_test.trb:6:12: expected Ok, got Err(\"bad two\")\n\n1 test(s), 1 failure(s)\n",
+          "stderr": "exit status 1\n"
+        }
+      ],
+      "nativeBaseline": [
+        {
+          "args": [
+            "test"
+          ],
+          "code": 1,
+          "stdout": "",
+          "stderr": "trbn: unknown command test\n"
+        }
+      ],
+      "historicalSourceManifest": "fixtures/projects/m2-manifest.json"
+    },
+    {
+      "id": "expect-err-on-ok-fails",
+      "title": "expect_err fails at its call site for Ok",
+      "source": "https://github.com/type-rb/type-rb/blob/af8e5f52e18e265d20bab7efbeaa2c36ea9342ae/internal/cli/cli_test.go (TestTestResultExpectationsFailAtTheirCallSitesAcrossBackends)",
+      "steps": [
+        [
+          "test"
+        ]
+      ],
+      "dependencies": [
+        "Result assertions",
+        "failure origins"
+      ],
+      "expectation": "match-reference",
+      "fixture": "fixtures/projects/expect-err-on-ok-fails",
+      "cwd": "app",
+      "reference": [
+        {
+          "args": [
+            "test"
+          ],
+          "code": 1,
+          "stdout": "FAIL Parser / err\n  <fixture>/app/src/parser_test.trb:6:12: expected Err, got Ok(1)\n\n1 test(s), 1 failure(s)\n",
+          "stderr": "exit status 1\n"
+        }
+      ],
+      "nativeBaseline": [
+        {
+          "args": [
+            "test"
+          ],
+          "code": 1,
+          "stdout": "",
+          "stderr": "trbn: unknown command test\n"
+        }
+      ],
+      "historicalSourceManifest": "fixtures/projects/m2-manifest.json"
+    },
+    {
+      "id": "test-runtime-trap",
+      "title": "A runtime trap inside a case",
+      "source": "https://github.com/type-rb/type-rb/blob/af8e5f52e18e265d20bab7efbeaa2c36ea9342ae/internal/cli/cli_test.go (TestTestReportsRuntimeStartFailure)",
+      "steps": [
+        [
+          "test"
+        ]
+      ],
+      "dependencies": [
+        "runtime failures",
+        "exit status"
+      ],
+      "expectation": "match-reference",
+      "fixture": "fixtures/projects/test-runtime-trap",
+      "cwd": "app",
+      "reference": [
+        {
+          "args": [
+            "test"
+          ],
+          "code": 1,
+          "stdout": "FAIL Traps / index\n  <fixture>/app/src/sample_test.trb:4:2: Array index is out of bounds\nPASS Traps / later\n\n2 test(s), 1 failure(s)\n",
+          "stderr": "exit status 1\n"
+        }
+      ],
+      "nativeBaseline": [
+        {
+          "args": [
+            "test"
+          ],
+          "code": 1,
+          "stdout": "",
+          "stderr": "trbn: unknown command test\n"
+        }
+      ],
+      "historicalSourceManifest": "fixtures/projects/m2-manifest.json"
+    },
+    {
+      "id": "test-compile-error",
+      "title": "A type error in a test file",
+      "source": "https://github.com/type-rb/type-rb/blob/af8e5f52e18e265d20bab7efbeaa2c36ea9342ae/internal/testsuite/testsuite_test.go",
+      "steps": [
+        [
+          "test"
+        ]
+      ],
+      "dependencies": [
+        "checking",
+        "exit status"
+      ],
+      "expectation": "match-reference",
+      "fixture": "fixtures/projects/test-compile-error",
+      "cwd": "app",
+      "reference": [
+        {
+          "args": [
+            "test"
+          ],
+          "code": 1,
+          "stdout": "",
+          "stderr": "<fixture>/app/src/sample_test.trb:5:22: error[TRB3000]: argument 1 to to_equal() has type String, expected Integer\n"
+        }
+      ],
+      "nativeBaseline": [
+        {
+          "args": [
+            "test"
+          ],
+          "code": 1,
+          "stdout": "",
+          "stderr": "trbn: unknown command test\n"
+        }
+      ],
+      "historicalSourceManifest": "fixtures/projects/m2-manifest.json"
+    },
+    {
+      "id": "test-namespaced-import-rejected",
+      "title": "Namespaced test imports are rejected",
+      "source": "https://github.com/type-rb/type-rb/blob/af8e5f52e18e265d20bab7efbeaa2c36ea9342ae/internal/testsuite/testsuite_test.go (TestPrepareRejectsNamespacedTestImports)",
+      "steps": [
+        [
+          "test"
+        ]
+      ],
+      "dependencies": [
+        "discovery"
+      ],
+      "expectation": "match-reference",
+      "fixture": "fixtures/projects/test-namespaced-import-rejected",
+      "cwd": "app",
+      "reference": [
+        {
+          "args": [
+            "test"
+          ],
+          "code": 1,
+          "stdout": "",
+          "stderr": "<fixture>/app/src/sample_test.trb:1:1: error[TRB3000]: test suites require named imports from trb/std/test\n"
+        }
+      ],
+      "nativeBaseline": [
+        {
+          "args": [
+            "test"
+          ],
+          "code": 1,
+          "stdout": "",
+          "stderr": "trbn: unknown command test\n"
+        }
+      ],
+      "historicalSourceManifest": "fixtures/projects/m2-manifest.json"
+    },
+    {
+      "id": "test-nonliteral-name-rejected",
+      "title": "Suite and case names must be literals",
+      "source": "https://github.com/type-rb/type-rb/blob/af8e5f52e18e265d20bab7efbeaa2c36ea9342ae/internal/testsuite/testsuite_test.go (TestPrepareRejectsAmbiguousTestDeclarations)",
+      "steps": [
+        [
+          "test"
+        ]
+      ],
+      "dependencies": [
+        "discovery"
+      ],
+      "expectation": "match-reference",
+      "fixture": "fixtures/projects/test-nonliteral-name-rejected",
+      "cwd": "app",
+      "reference": [
+        {
+          "args": [
+            "test"
+          ],
+          "code": 1,
+          "stdout": "",
+          "stderr": "<fixture>/app/src/sample_test.trb:5:10: error[TRB3000]: describe() name must be a String literal\n"
+        }
+      ],
+      "nativeBaseline": [
+        {
+          "args": [
+            "test"
+          ],
+          "code": 1,
+          "stdout": "",
+          "stderr": "trbn: unknown command test\n"
+        }
+      ],
+      "historicalSourceManifest": "fixtures/projects/m2-manifest.json"
+    },
+    {
+      "id": "test-no-tests",
+      "title": "A project without test files",
+      "source": "https://github.com/type-rb/type-rb/blob/af8e5f52e18e265d20bab7efbeaa2c36ea9342ae/docs/guides/testing.md",
+      "steps": [
+        [
+          "test"
+        ]
+      ],
+      "dependencies": [
+        "discovery"
+      ],
+      "expectation": "match-reference",
+      "fixture": "fixtures/projects/test-no-tests",
+      "cwd": "app",
+      "reference": [
+        {
+          "args": [
+            "test"
+          ],
+          "code": 1,
+          "stdout": "",
+          "stderr": "trb: no *_test.trb files found\n"
+        }
+      ],
+      "nativeBaseline": [
+        {
+          "args": [
+            "test"
+          ],
+          "code": 1,
+          "stdout": "",
+          "stderr": "trbn: unknown command test\n"
+        }
+      ],
+      "historicalSourceManifest": "fixtures/projects/m2-manifest.json"
+    }
+  ],
+  "deferrals": [
+    {
+      "id": "test-name-filter",
+      "issue": "https://github.com/type-rb/type-rb-native/issues/643",
+      "scope": "Native v0.5 public -t, --test-name-pattern and suite selection",
+      "historicalManifest": "fixtures/projects/m2-manifest.json",
+      "companion": "Both unsupported flags must diagnose unavailability without widening execution."
+    }
+  ],
+  "fixtureHashes": {
+    "fixtures/projects/test-basic-pass/app/src/calculator.trb": "ec32671c45d4f9e9ebaf3e65de8b1b5758774da1536cb6f1afe56f7675dbf7eb",
+    "fixtures/projects/test-basic-pass/app/src/calculator_test.trb": "e6d3a330530be7fe9b4ca3102cb6fb5bf92cbd0c8da8461e9f3d4f9c47b37970",
+    "fixtures/projects/test-basic-pass/app/trbconfig.jsonc": "2cf9057af9aa16e11b5c7f7ac5c7380de7a617410f49674227573439faafe7ba",
+    "fixtures/projects/test-positional-file/app/src/alpha_test.trb": "0c50f8be0ad217ab4d5a9efc9930d2b9c0cf70751e66365403938c1862daeb40",
+    "fixtures/projects/test-positional-file/app/src/beta_test.trb": "92eaefdfe28d8e705924fa4b8e2eada562057ff1f2ade78f53b0e99f59c87423",
+    "fixtures/projects/test-positional-file/app/trbconfig.jsonc": "2cf9057af9aa16e11b5c7f7ac5c7380de7a617410f49674227573439faafe7ba",
+    "fixtures/projects/test-positional-directory/app/src/domain/orders/order_test.trb": "3faa9588660c90014d77859c3cc86669c99798ded3955b513f2476a7ca296a68",
+    "fixtures/projects/test-positional-directory/app/src/other_test.trb": "9522cd961a846a5616d74aaef31ac7a3dc775e891e7f6ed85f9f74f57d636d01",
+    "fixtures/projects/test-positional-directory/app/trbconfig.jsonc": "2cf9057af9aa16e11b5c7f7ac5c7380de7a617410f49674227573439faafe7ba",
+    "fixtures/projects/test-positional-duplicate-names/app/src/first_test.trb": "c496f7a1837705c6c3df01f7c7b7e1b96c389fc4210ff6c341e49ba6a8b68c06",
+    "fixtures/projects/test-positional-duplicate-names/app/src/second_test.trb": "051ab711aafd6a802a4c16e3e1c005adbbbda74b8b213e6d3fd6505f2cb38e2b",
+    "fixtures/projects/test-positional-duplicate-names/app/trbconfig.jsonc": "2cf9057af9aa16e11b5c7f7ac5c7380de7a617410f49674227573439faafe7ba",
+    "fixtures/projects/test-selection-invalid/app/src/calculator.trb": "ec32671c45d4f9e9ebaf3e65de8b1b5758774da1536cb6f1afe56f7675dbf7eb",
+    "fixtures/projects/test-selection-invalid/app/src/calculator_test.trb": "e6d3a330530be7fe9b4ca3102cb6fb5bf92cbd0c8da8461e9f3d4f9c47b37970",
+    "fixtures/projects/test-selection-invalid/app/trbconfig.jsonc": "2cf9057af9aa16e11b5c7f7ac5c7380de7a617410f49674227573439faafe7ba",
+    "fixtures/projects/test-failure-origin/app/src/calculator.trb": "ec32671c45d4f9e9ebaf3e65de8b1b5758774da1536cb6f1afe56f7675dbf7eb",
+    "fixtures/projects/test-failure-origin/app/src/calculator_test.trb": "954c96c3dba4f900e27495133fe2e9960dc7e185cfe3b76e94775a13c2673cd2",
+    "fixtures/projects/test-failure-origin/app/trbconfig.jsonc": "2cf9057af9aa16e11b5c7f7ac5c7380de7a617410f49674227573439faafe7ba",
+    "fixtures/projects/test-json-reporter/app/src/sample_test.trb": "a913dd330c6058a46a6b42551327d079f46908824a6b71e6ee7d90b85970e8bc",
+    "fixtures/projects/test-json-reporter/app/trbconfig.jsonc": "2cf9057af9aa16e11b5c7f7ac5c7380de7a617410f49674227573439faafe7ba",
+    "fixtures/projects/test-continue-after-failure/app/src/sample_test.trb": "71e2d72ba610e6fa2cc68eb314def02b33e49dadeea969369927ba0f616a50d6",
+    "fixtures/projects/test-continue-after-failure/app/trbconfig.jsonc": "2cf9057af9aa16e11b5c7f7ac5c7380de7a617410f49674227573439faafe7ba",
+    "fixtures/projects/assert-basic-forms/app/src/sample_test.trb": "445c6487d976787ac81bc8653ae152bcbe68c22c8c5b849ff2b7050c4dcaecba",
+    "fixtures/projects/assert-basic-forms/app/trbconfig.jsonc": "2cf9057af9aa16e11b5c7f7ac5c7380de7a617410f49674227573439faafe7ba",
+    "fixtures/projects/assert-structural-equality/app/src/sample_test.trb": "9e50710118146464d953a09942b34541755b96fec70b209d1e27ad6f16786fa1",
+    "fixtures/projects/assert-structural-equality/app/trbconfig.jsonc": "2cf9057af9aa16e11b5c7f7ac5c7380de7a617410f49674227573439faafe7ba",
+    "fixtures/projects/assert-structural-failure/app/src/sample_test.trb": "5632d51a4bbb898b6630a41a4977bda5cc181a43e0d63f79e063338ce61368e2",
+    "fixtures/projects/assert-structural-failure/app/trbconfig.jsonc": "2cf9057af9aa16e11b5c7f7ac5c7380de7a617410f49674227573439faafe7ba",
+    "fixtures/projects/expect-ok-err-pass/app/src/parser.trb": "3b01cc54e0a7e6a3ad2a18a3d4416c8961a7348e939bd1839c8a5284ed9bcbe5",
+    "fixtures/projects/expect-ok-err-pass/app/src/parser_test.trb": "875f77694a138e7fb56d01ba23ce7c7613c928b264edabf78cd0aa6c0b68d1f1",
+    "fixtures/projects/expect-ok-err-pass/app/trbconfig.jsonc": "2cf9057af9aa16e11b5c7f7ac5c7380de7a617410f49674227573439faafe7ba",
+    "fixtures/projects/expect-ok-on-err-fails/app/src/parser.trb": "3b01cc54e0a7e6a3ad2a18a3d4416c8961a7348e939bd1839c8a5284ed9bcbe5",
+    "fixtures/projects/expect-ok-on-err-fails/app/src/parser_test.trb": "b5323d8110db342df5eda96f48619b991d181df990b0e2d9fdb3cbc23d00af07",
+    "fixtures/projects/expect-ok-on-err-fails/app/trbconfig.jsonc": "2cf9057af9aa16e11b5c7f7ac5c7380de7a617410f49674227573439faafe7ba",
+    "fixtures/projects/expect-err-on-ok-fails/app/src/parser.trb": "3b01cc54e0a7e6a3ad2a18a3d4416c8961a7348e939bd1839c8a5284ed9bcbe5",
+    "fixtures/projects/expect-err-on-ok-fails/app/src/parser_test.trb": "d50c7eaf66f9049c4eba734d9c0164cfc1dfe11be1fbc379f8e43f78a6167ef0",
+    "fixtures/projects/expect-err-on-ok-fails/app/trbconfig.jsonc": "2cf9057af9aa16e11b5c7f7ac5c7380de7a617410f49674227573439faafe7ba",
+    "fixtures/projects/test-runtime-trap/app/src/sample_test.trb": "c54cdba2359d2a32ff812ac84cba69f963b881c63715eaf3c75b468ad7033304",
+    "fixtures/projects/test-runtime-trap/app/trbconfig.jsonc": "2cf9057af9aa16e11b5c7f7ac5c7380de7a617410f49674227573439faafe7ba",
+    "fixtures/projects/test-compile-error/app/src/sample_test.trb": "f1f60a699b0f9f905c81dbb37029e4a28d73159f9aeff5c3c24e38c6d3aca702",
+    "fixtures/projects/test-compile-error/app/trbconfig.jsonc": "2cf9057af9aa16e11b5c7f7ac5c7380de7a617410f49674227573439faafe7ba",
+    "fixtures/projects/test-namespaced-import-rejected/app/src/sample_test.trb": "e3e3779d1fc84f7e6f23d944d1c81c09b5d9786547435ff7b7720c52fce7348e",
+    "fixtures/projects/test-namespaced-import-rejected/app/trbconfig.jsonc": "2cf9057af9aa16e11b5c7f7ac5c7380de7a617410f49674227573439faafe7ba",
+    "fixtures/projects/test-nonliteral-name-rejected/app/src/sample_test.trb": "c3ebae513ec68ac2fe7854ad18c3fc32792854905201b4b04bda5e1a4d36327e",
+    "fixtures/projects/test-nonliteral-name-rejected/app/trbconfig.jsonc": "2cf9057af9aa16e11b5c7f7ac5c7380de7a617410f49674227573439faafe7ba",
+    "fixtures/projects/test-no-tests/app/src/calculator.trb": "ec32671c45d4f9e9ebaf3e65de8b1b5758774da1536cb6f1afe56f7675dbf7eb",
+    "fixtures/projects/test-no-tests/app/trbconfig.jsonc": "2cf9057af9aa16e11b5c7f7ac5c7380de7a617410f49674227573439faafe7ba"
+  },
+  "referenceCompilerSha256": "71d6975dd1f0ad799adb14c1e3d2cb49447f47ad1bd8cdea2cd38e7897e2997b",
+  "historicalManifest": "fixtures/projects/m2-manifest.json",
+  "preparedManifestSha256": "303a554c96c70f1a8d5a1c93cc7a30350c7e468f1bdafd5a60f4fec622fb596c",
+  "approvedDisplayContract": "https://github.com/type-rb/type-rb/pull/849"
+}

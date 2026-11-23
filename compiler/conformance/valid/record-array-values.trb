@@ -1,0 +1,34 @@
+record Entry
+	id: Integer
+	label: String
+end
+record Entries
+	values: Array<Entry>
+end
+def first(values: Array<Entry>): Entry
+	return values[0]
+end
+def extend(mut values: Array<Entry>, value: Entry)
+	values.push(value)
+end
+def main()
+	mut values: Array<Entry> := []
+	values.push(Entry.new(id: 1, label: "first"))
+	extend(values, Entry.new(id: 2, label: "second"))
+	mut shared := values
+	shared[0] = Entry.new(id: 3, label: "replaced")
+	puts(first(values).id)
+	puts(values[-1].label)
+	mut holder := Entries.new(values: values)
+	holder.values[1] = Entry.new(id: 4, label: "field")
+	puts(values[1].id)
+	mut nested: Array<Array<Array<Entry>>> := [[[Entry.new(id: 5, label: "nested")]]]
+	mut inner := nested[0][0]
+	inner.push(Entry.new(id: 6, label: "tail"))
+	puts(nested[0][0][-1].label)
+	mut empty: Array<Array<Entry>> := []
+	empty.push([])
+	puts(empty[0].size())
+	inferred := [Entry.new(id: 7, label: "inferred")]
+	puts(first(inferred).id)
+end

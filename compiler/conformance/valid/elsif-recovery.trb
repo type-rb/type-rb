@@ -1,0 +1,29 @@
+def observe(label: String, value: Boolean): Boolean
+	puts(label)
+	return value
+end
+
+def choose(first: Boolean, second: Boolean, third: Boolean): String
+	mut text := "start"
+	if observe("if", first)
+		local := "-first"
+		text += local
+	elsif observe("elsif", second) && !first
+		local := "-second"
+		text += local
+	elsif observe("late", third)
+		local := "-third"
+		text += local
+	else
+		local := "-else"
+		text += local
+	end
+	return text
+end
+
+def main()
+	puts(choose(true, true, true))
+	puts(choose(false, true, true))
+	puts(choose(false, false, true))
+	puts(choose(false, false, false))
+end

@@ -1,0 +1,197 @@
+import { web_openapi_document } from frontend/checking/program/web_openapi
+import { BrowserClientBuilder, browser_client_builder, browser_client_error, browser_client_import, browser_client_imports, browser_client_method_name, browser_client_name_valid, browser_client_type } from frontend/checking/program/web_client_types
+import { browser_client_input, browser_client_path, browser_client_query } from frontend/checking/program/web_client_request
+import { lex_module } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { package_json_quote, package_sorted_indices } from project/package_json
+import { CompilerState, add_module, compiler_new, has_diagnostic } from state/state
+import { ProjectWebEndpoint } from state/web_routes
+import { integer_string } from support/literals
+import { load_integer, load_string, store_string } from support/storage
+
+def browser_client_no_body(status: Integer): Boolean
+	return (status >= 100 && status < 200) || status == 204 || status == 205 || status == 304
+end
+
+def browser_client_status_order(endpoint: ProjectWebEndpoint): Array<Integer>
+	mut keys: Array<String> := []
+	endpoint.responses.each do |response|
+		keys.push(integer_string(response.status))
+	end
+	return package_sorted_indices(keys)
+end
+
+# The pinned formatter tokenizes adjacent closers as pairs. A final single
+# angle gets a space before the call unless it follows a type identifier.
+def browser_client_decode_call(type_name: String): String
+	mut index := type_name.size() - 1
+	mut angles := 0
+	while index >= 0 && type_name[index] == ">"
+		angles += 1
+		index -= 1
+	end
+	if angles % 2 == 0 && (angles > 0 || (index >= 0 && type_name[index] == "?"))
+		return "raw.json<" + type_name + "> ()"
+	end
+	return "raw.json<" + type_name + ">()"
+end
+
+def browser_client_enum(mut state: CompilerState, mut builder: BrowserClientBuilder, endpoint: ProjectWebEndpoint, name: String): String
+	row := state.nominal.objects[endpoint.object_id]
+	mut result := "enum " + name + "\n"
+	browser_client_status_order(endpoint).each do |index|
+		response := endpoint.responses[index]
+		mut type_name := "NoBody"
+		if browser_client_no_body(response.status)
+			browser_client_import(builder, "trb/platform/typescript/browser", "NoBody")
+		else
+			type_name = browser_client_type(state, builder, row.source_id, response.authored_type, load_integer(state.source_tokens.token_lines, response.origin), 0)
+		end
+		result += "\tStatus" + integer_string(response.status) + "(response: Response<" + type_name + ">)\n"
+	end
+	return result + "end\n\n"
+end
+
+def browser_client_method(mut state: CompilerState, mut builder: BrowserClientBuilder, endpoint: ProjectWebEndpoint, result_name: String, method_name: String): String
+	row := state.nominal.objects[endpoint.object_id]
+	input := browser_client_input(state, endpoint)
+	result_type := "Result<" + result_name + ", RequestError>"
+	mut source := "\n\tdef " + method_name + "("
+	if endpoint.input_name != ""
+		source += "input: " + browser_client_type(state, builder, row.source_id, endpoint.input_name, row.line, 0) + ", "
+	end
+	source += "*, headers: Headers = Headers.new(), timeout_milliseconds: Integer? = nil): " + result_type + "\n"
+	source += "\t\tpath := " + browser_client_path(state, builder, endpoint, input) + "\n"
+	if input.query >= 0
+		browser_client_import(builder, "trb/std/url", "")
+		source += "\t\tmut query: Array<URL::QueryParameter> := []\n"
+		mut field := load_integer(state.declarations.record_field_starts, input.query)
+		finish := field + load_integer(state.declarations.record_field_counts, input.query)
+		while field < finish
+			name := load_string(state.declarations.field_names, field)
+			source += browser_client_query(state, builder, load_string(state.declarations.field_types, field), "input.query." + name, name, "\t\t", 0)
+			field += 1
+		end
+	end
+	if input.body >= 0
+		browser_client_import(builder, "trb/platform/typescript/browser", "json_body")
+		source += "\t\tbody := try json_body(input.body)\n"
+	end
+	source += "\t\traw := try @_http.request(\n\t\t\tpath,\n\t\t\tmethod: HttpMethod." + state.module_graph.web_routes[endpoint.route_index].method.downcase() + "(),\n"
+	if input.query >= 0
+		source += "\t\t\tquery: query,\n"
+	end
+	source += "\t\t\theaders: headers,\n"
+	if input.body >= 0
+		source += "\t\t\tbody: body,\n"
+	end
+	source += "\t\t\ttimeout_milliseconds: timeout_milliseconds,\n\t\t)\n\t\tcase raw.status\n"
+	browser_client_status_order(endpoint).each do |index|
+		response := endpoint.responses[index]
+		status := integer_string(response.status)
+		source += "\t\twhen " + status + "\n"
+		if browser_client_no_body(response.status)
+			source += "\t\t\tdecoded := try raw.no_body()\n"
+		else
+			type_name := browser_client_type(state, builder, row.source_id, response.authored_type, row.line, 0)
+			source += "\t\t\tdecoded := try " + browser_client_decode_call(type_name) + "\n"
+		end
+		source += "\t\t\treturn " + result_type + "::Ok(" + result_name + "::Status" + status + "(decoded))\n"
+	end
+	# Emit the reference formatter's canonical indentation directly, without
+	# invoking an external formatter, target toolchain or application code.
+	source += "\t\telse\n\t\t\treturn " + result_type + "::Err(RequestError.new(\n\t\t\t\t\tRequestErrorKind::Contract,\n\t\t\t\t\t\"unexpected response status \" + raw.status.to_s() + " + package_json_quote(" for " + row.name) + ",\n\t\t\t\t\traw,\n\t\t\t\t))\n\t\tend\n\tend\n"
+	return source
+end
+
+def web_client_source(mut state: CompilerState, requested_name: String): String
+	previous_source := state.module_graph.active_module[0]
+	previous_owner := state.global_bindings.declaration_owner[0]
+	source := web_client_checked_source(state, requested_name)
+	state.module_graph.active_module[0] = previous_source
+	state.global_bindings.declaration_owner[0] = previous_owner
+	if source != "" && !has_diagnostic(state)
+		mut generated := compiler_new(1048576)
+		add_module(generated, "generated/client", "generated/client.trb")
+		if !lex_module(generated, source, 0) || !parse_module(generated, 0, 0)
+			return browser_client_error(state, 1, "format generated browser client: " + load_string(generated.diagnostics.messages, 0))
+		end
+	end
+	return source
+end
+
+def web_client_checked_source(mut state: CompilerState, requested_name: String): String
+	mut name := requested_name.strip()
+	if name == ""
+		name = "ApiClient"
+	end
+	if !browser_client_name_valid(name)
+		return browser_client_error(state, 1, "browser client name " + package_json_quote(name) + " must be a TypeRB class identifier")
+	end
+	# The pinned generators share the same wire subset. Keep that acceptance
+	# contract while the package ownership review remains a separate task.
+	web_openapi_document(state, "TypeRB browser client", "1")
+	if has_diagnostic(state)
+		store_string(state.diagnostics.messages, 0, load_string(state.diagnostics.messages, 0).split("OpenAPI").join("browser client"))
+		return ""
+	end
+	mut builder := browser_client_builder()
+	mut generated := [name]
+	mut method_names: Array<String> := []
+	mut method_endpoints: Array<String> := []
+	mut keys: Array<String> := []
+	state.module_graph.web_endpoints.each do |endpoint|
+		row := state.nominal.objects[endpoint.object_id]
+		route := state.module_graph.web_routes[endpoint.route_index]
+		keys.push(route.path + "\n" + route.method + "\n" + row.name)
+	end
+	mut enums := ""
+	mut methods := ""
+	package_sorted_indices(keys).each do |selected|
+		endpoint := state.module_graph.web_endpoints[selected]
+		row := state.nominal.objects[endpoint.object_id]
+		state.module_graph.active_module[0] = row.source_id
+		state.global_bindings.declaration_owner[0] = row.name
+		result_name := row.name + "Result"
+		generated.each do |previous|
+			if previous == result_name
+				return browser_client_error(state, row.line, "generated browser client type " + result_name + " is declared more than once")
+			end
+		end
+		generated.push(result_name)
+		method_name := browser_client_method_name(row.name)
+		if method_name == "initialize"
+			return browser_client_error(state, row.line, "endpoint " + row.name + " generates reserved browser client method initialize; rename the endpoint contract")
+		end
+		mut index := 0
+		while index < method_names.size()
+			if method_names[index] == method_name
+				return browser_client_error(state, row.line, "endpoint names " + method_endpoints[index] + " and " + row.name + " both generate browser client method " + method_name)
+			end
+			index += 1
+		end
+		method_names.push(method_name)
+		method_endpoints.push(row.name)
+		enums += browser_client_enum(state, builder, endpoint, result_name)
+		methods += browser_client_method(state, builder, endpoint, result_name, method_name)
+	end
+	if has_diagnostic(state)
+		return ""
+	end
+	browser_client_import(builder, "trb/http", "Headers")
+	browser_client_import(builder, "trb/http", "HttpMethod")
+	["HttpClient", "RequestError", "RequestErrorKind", "Response"].each do |symbol|
+		browser_client_import(builder, "trb/platform/typescript/browser", symbol)
+	end
+	browser_client_import(builder, "trb/std/result", "")
+	generated.each do |symbol|
+		mut index := 0
+		while index < builder.paths.size()
+			if builder.symbols[index] == symbol
+				return browser_client_error(state, 1, "generated browser client type " + symbol + " conflicts with import from " + builder.paths[index] + "; choose another client name or rename the endpoint contract")
+			end
+			index += 1
+		end
+	end
+	return "# Generated by trb web client. Do not edit.\n\n" + browser_client_imports(builder) + "\n" + enums + "class " + name + "\n\treadonly @_http: HttpClient\n\n\tdef initialize(http: HttpClient)\n\t\t@_http = http\n\tend\n" + methods + "end\n"
+end

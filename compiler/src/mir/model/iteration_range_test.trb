@@ -1,0 +1,117 @@
+import { check, emit_qbe } from compiler
+import { lex } from frontend/syntax/lexer
+import { checked_range_require } from frontend/checking/collections/iteration
+import { MirRangeConstruction } from mir/model/iteration
+import { binary_operator_id, syntax_expression_precedence } from frontend/syntax/syntax_forms
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { CompilerState, compiler_new, has_diagnostic } from state/state
+import { store_integer, store_string } from support/storage
+import { describe, expect, test } from trb/std/test
+
+def range_test_state(source: String): CompilerState
+	mut state := compiler_new(source.size() * 3 + 16)
+	expect(lex(state, source)).to_be_true()
+	expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+	expect(resolve(state)).to_be_true()
+	expect(check(state)).to_be_true()
+	return state
+end
+
+describe("checked Range construction") do
+	test("has its own precedence and no scalar arithmetic identity") do
+		expect(syntax_expression_precedence("..")).to_equal(3)
+		expect(syntax_expression_precedence("...")).to_equal(3)
+		expect(binary_operator_id("..")).to_equal(0)
+		expect(binary_operator_id("...")).to_equal(0)
+		mut state := range_test_state("def main()\n(1 + 1...2 * 2).each.with_index { |value, index| puts(value + index) }\nend\n")
+		expect(state.callables.checked[0].ranges.size()).to_equal(1)
+		expect(state.callables.checked[0].ranges[0].exclusive).to_equal(1)
+		expect(state.callables.checked[0].iterations[0].source_kind).to_equal(2)
+		expect(state.callables.checked[0].iterations[0].type_name).to_equal("Range<Integer>")
+		expect(state.callables.checked[0].iterations[0].syntax.origin).to_equal(state.parsed.iterations[0].origin)
+		emit_qbe(state)
+		expect(has_diagnostic(state)).to_be_false()
+	end
+
+	test("rejects missing, malformed, stale and mistyped construction proofs") do
+		mut mode := 0
+		while mode < 13
+			mut state := range_test_state("def main()\nspan := 1..\n3\nspan.each { |value| puts(value) }\nend\n")
+			plan := state.callables.checked[0].ranges[0]
+			mut origin := plan.origin
+			mut operator_origin := plan.operator_origin
+			mut end_origin := plan.end_origin
+			mut finish := plan.finish
+			mut exclusive := plan.exclusive
+			mut start_type := plan.start_type
+			mut end_type := plan.end_type
+			if mode == 0
+				store_integer(state.callables.checked[0].range_origins, operator_origin, 0)
+			elsif mode == 1
+				store_integer(state.callables.checked[0].range_origins, operator_origin, 99)
+			elsif mode == 2
+				origin += 1
+			elsif mode == 3
+				operator_origin += 1
+			elsif mode == 4
+				end_origin -= 1
+			elsif mode == 5
+				finish += 1
+			elsif mode == 6
+				exclusive = 2
+			elsif mode == 7
+				start_type = "Float"
+			elsif mode == 8
+				end_type = "String"
+			elsif mode == 9
+				store_string(state.source_tokens.token_texts, operator_origin, "...")
+			elsif mode == 10
+				store_integer(state.source_tokens.token_kinds, operator_origin, 3)
+			elsif mode == 11
+				store_integer(state.source_tokens.token_kinds, operator_origin + 1, 2)
+			else
+				finish = state.source_tokens.token_count[0]
+			end
+			state.callables.checked[0].ranges[0] = MirRangeConstruction.new(origin: origin, operator_origin: operator_origin, end_origin: end_origin, finish: finish, exclusive: exclusive, start_type: start_type, end_type: end_type)
+			checked_range_require(state, plan.origin, plan.operator_origin, plan.end_origin, plan.finish)
+			expect(has_diagnostic(state)).to_be_true()
+			mode += 1
+		end
+	end
+
+	test("MIR emission no longer depends on constructor source proofs") do
+		mut state := range_test_state("def main()\n(1..2).each { |value| puts(value) }\nend\n")
+		expect(state.scalar_mir.functions.size()).to_equal(1)
+		store_integer(state.callables.checked[0].range_origins, state.callables.checked[0].ranges[0].operator_origin, 0)
+		emit_qbe(state)
+		expect(has_diagnostic(state)).to_be_false()
+	end
+
+	test("rejects out of bounds source requests without indexing invalid tokens") do
+		mut mode := 0
+		while mode < 2
+			mut state := range_test_state("def main()\n_span := 1..2\nend\n")
+			plan := state.callables.checked[0].ranges[0]
+			mut origin := -1
+			if mode == 1
+				origin = state.source_tokens.token_count[0]
+			end
+			checked_range_require(state, plan.origin, origin, plan.end_origin, plan.finish)
+			expect(has_diagnostic(state)).to_be_true()
+			mode += 1
+		end
+	end
+
+	test("rejects non Integer endpoints and unsupported Range operations") do
+		cases := ["span := 1.0..2.0", "span := 1..2.0", "span := \"a\"..\"z\"", "span := 1..2..3", "puts((1..2) == (1..2))", "span := 1..2\nputs(span[0])", "span := 1..2\nspan.push(3)"]
+		cases.each do |body|
+			source := "def main()\n" + body + "\nend\n"
+			mut state := compiler_new(source.size() * 3 + 16)
+			expect(lex(state, source)).to_be_true()
+			expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+			expect(resolve(state)).to_be_true()
+			expect(check(state)).to_be_false()
+		end
+	end
+end

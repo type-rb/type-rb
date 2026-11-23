@@ -1,0 +1,16 @@
+import { check } from compiler
+import { expect_compiler_phase, logical_checked_source } from testing/pipeline
+import { verify_mir } from mir/verify/module
+import { describe, expect, test } from trb/std/test
+
+describe("Implicit standard source capacity") do
+	test("grows sparse catalogs beyond a short authored source hint") do
+		source := "def main()\nvalue := \"7\".try_to_i() catch |_error|\n0\nend\nputs(value)\nend\n"
+		mut state := logical_checked_source(source)
+		expect(state.source_tokens.token_count[0] > source.size() + 1).to_be_true()
+		expect(state.source_tokens.token_count[0] <= state.source_tokens.token_texts.limit[0]).to_be_true()
+		expect(state.diagnostics.codes.limit[0]).to_equal(1)
+		expect_compiler_phase(state, "check", check(state))
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	end
+end

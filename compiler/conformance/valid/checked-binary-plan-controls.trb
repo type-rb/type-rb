@@ -1,0 +1,64 @@
+def add_values(left: Integer, right: Integer): Integer
+	return left + right
+end
+
+def add_separated(value: Integer): Integer
+	return value + 1_024
+end
+
+def scale_separated(value: Integer): Integer
+	return value * 1_024
+end
+
+def direct_operations(seed: Integer): Integer
+	mut result := seed + 1
+	result = 1 + result
+	result = result + (1_024)
+	result = (1_024) + result
+	result = result + 1025
+	result = result + (-1)
+	result = result + 0
+	result += +1
+	result *= 2
+	result -= 4
+	result /= 2
+	return result
+end
+
+def main()
+	seed := -7
+	mut result := 0
+	mut index := 0
+	while index < 1
+		result = add_values(1 + seed, -2)
+		index += 1
+	end
+	puts(result.to_s())
+	puts(direct_operations(seed).to_s())
+	puts(add_separated(seed).to_s())
+	puts(scale_separated(seed).to_s())
+	puts(add_values(seed, +1).to_s())
+	puts(add_values(1_024, seed).to_s())
+	puts(add_values(seed, 1025).to_s())
+	negative_dividend_quotient := seed / 2
+	negative_dividend_remainder := seed % 2
+	negative_divisor_quotient := 7 / -2
+	negative_divisor_remainder := 7 % -2
+	puts(negative_dividend_quotient.to_s())
+	puts(negative_dividend_remainder.to_s())
+	puts(negative_divisor_quotient.to_s())
+	puts(negative_divisor_remainder.to_s())
+	text := "left" + seed.to_s()
+	puts(text + "right")
+	mut widened: Float := 3
+	widened += 0.5
+	widened *= 2
+	widened -= 1.0
+	widened /= 2
+	if widened == 3.0
+		puts("mixed-float-ok")
+	else
+		puts("mixed-float-bad")
+	end
+	return
+end

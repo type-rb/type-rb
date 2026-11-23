@@ -1,0 +1,176 @@
+import { check } from compiler
+import { compiler_test_instruction_with_cell } from testing/compiler
+import { managed_mir_test_fixture } from testing/mir/managed
+import { logical_checked_source } from testing/pipeline
+import { literal_integer_type, literal_string_type } from frontend/types/literal_types
+import { union_type } from frontend/types/union_types
+import { mir_managed_type, mir_storage_type_name } from mir/model/types
+import { mir_instruction_effects } from mir/analysis/call_effects
+import { verify_mir } from mir/verify/module
+import { MirType } from mir/model/module
+import { CompilerState } from state/state
+import { object_execution_run, object_execution_state } from testing/objects
+import { describe, expect, test } from trb/std/test
+
+def literal_mir_state(): CompilerState
+	mut state := logical_checked_source("def read(value: \"held\"): String\nreturn value\nend\ndef main()\nvalue: 201 := 201\nputs(value + 1)\nputs(read(\"held\"))\nend\n")
+	expect(check(state)).to_be_true()
+	expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	return state
+end
+
+describe("Literal constraints and discriminant MIR") do
+	test("canonicalizes constraints and subsumes literals without delimiter ambiguity") do
+		expect(literal_integer_type("-0")).to_equal(literal_integer_type("0"))
+		expect(literal_integer_type("2_01")).to_equal(literal_integer_type("201"))
+		expect(literal_integer_type("9007199254740992")).to_equal("")
+		text := literal_string_type("a,?>")
+		expect(union_type([text, "String"])).to_equal("String")
+		expect(union_type([literal_integer_type("201"), "Integer"])).to_equal("Integer")
+		expect(union_type([literal_integer_type("201"), "Float"])).to_equal("Float")
+	end
+	test("executes literal signatures containers and nominal values from erased MIR") do
+		managed_mir_test_fixture("literal-values-mir", 4)
+	end
+	test("preserves overlapping discriminants closures and else narrowing after collection") do
+		managed_mir_test_fixture("literal-discriminants-mir", 6)
+	end
+	test("preserves readonly class alternatives and managed fields after source erasure") do
+		# The Go-hosted byte adapter remains ASCII-only; ordinary Native lifetime
+		# tests also execute the separate Unicode discriminant fixture.
+		["class-union-overlap-else", "class-union-captured-discriminants", "class-union-collections", "class-union-nullable-container", "class-union-result-payload", "class-union-generic-field", "class-union-common-managed-field", "class-union-common-numeric-field", "class-union-common-callable"].each do |name|
+			managed_mir_test_fixture(name, 2)
+		end
+	end
+	test("independently verifies extracted class identities and common field types") do
+		mut state := object_execution_state("class Count\n@value: Integer := 3\nend\nclass Ratio\n@value: Float := 2.5\nend\nalias NumericChoice = Count | Ratio\ndef read(value: NumericChoice): Float\nreturn value.value\nend\ndef main()\nputs(read(Count.new()))\nputs(read(Ratio.new()))\nend\n")
+		mut extractions := 0
+		mut fields := 0
+		state.scalar_mir.instructions.each.with_index do |instruction, index|
+			if instruction.kind == 54 || instruction.kind == 64
+				if instruction.kind == 54
+					extractions += 1
+				else
+					fields += 1
+				end
+				[1, 2, 4].each do |cell|
+					state.scalar_mir.instructions[index] = compiler_test_instruction_with_cell(instruction, cell, 999999)
+					expect(verify_mir(state.scalar_mir, true).empty?()).to_be_false()
+				end
+				state.scalar_mir.instructions[index] = instruction
+			end
+		end
+		expect(extractions).to_equal(2)
+		expect(fields).to_equal(2)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	end
+	test("stores through common class union fields using verified object MIR") do
+		mut state := object_execution_state("class First\n@value: Integer := 1\nend\nclass Second\n@value: Integer := 2\nend\nalias Choice = First | Second\ndef update(mut item: Choice)\nitem.value = 3\nitem.value += 4\nputs(item.value)\nend\ndef main()\nmut first: Choice := First.new()\nupdate(first)\nputs(first.value)\nmut second: Choice := Second.new()\nupdate(second)\nputs(second.value)\nmut current: Choice := First.new()\noriginal := current\nreplace := fn(): Integer\ncurrent = Second.new()\nreturn 9\nend\ncurrent.value = replace()\nputs(original.value)\nputs(current.value)\nend\n")
+		object_execution_run(state, "7\n7\n7\n7\n9\n2\n")
+	end
+	test("rejects unsafe class union field stores before publishing MIR") do
+		prefix := "class First\n@value: Integer := 1\nend\n"
+		["class Second\nreadonly @value: Integer := 2\nend\n", "class Second\n@value: String := \"two\"\nend\n", "class Second\n@_value: Integer := 2\nend\n"].each do |second|
+			mut state := logical_checked_source(prefix + second + "alias Choice = First | Second\ndef main()\nmut item: Choice := First.new()\nitem.value = 3\nend\n")
+			expect(check(state)).to_be_false()
+		end
+		mut immutable := logical_checked_source(prefix + "class Second\n@value: Integer := 2\nend\nalias Choice = First | Second\ndef main()\nitem: Choice := First.new()\nitem.value = 3\nend\n")
+		expect(check(immutable)).to_be_false()
+	end
+	test("retains managed values written through class union alternatives") do
+		mut state := object_execution_state("class First\n@value: String := \"first\"\nend\nclass Second\n@value: String := \"second\"\nend\nalias Choice = First | Second\ndef update(mut item: Choice, suffix: String)\nitem.value = \"held\" + suffix\nputs(item.value)\nend\ndef main()\nmut first: Choice := First.new()\nupdate(first, \" one\")\nmut second: Choice := Second.new()\nupdate(second, \" two\")\nputs(first.value)\nputs(second.value)\nend\n")
+		object_execution_run(state, "held one\nheld two\nheld one\nheld two\n")
+	end
+	test("prints scalar union alternatives through verified MIR") do
+		mut state := object_execution_state("alias Output = Integer | String\ndef show(value: Output)\nputs(value)\nend\ndef main()\nshow(42)\nshow(\"held\")\nend\n")
+		object_execution_run(state, "42\nheld\n")
+	end
+	test("prints Boolean Float and String union alternatives") do
+		mut state := object_execution_state("alias Output = Boolean | Float | String\ndef show(value: Output)\nputs(value)\nend\ndef main()\nshow(true)\nshow(1.5)\nshow(\"held\")\nend\n")
+		object_execution_run(state, "true\n1.5\nheld\n")
+	end
+	test("prints a newtype union representation without exposing its wrapper") do
+		mut state := object_execution_state("newtype Value = Integer | String do\nprivate new\ndef self.make(text: String): Value\nreturn self.new(text)\nend\nend\ndef main()\nputs(Value.make(\"held\").value())\nend\n")
+		object_execution_run(state, "held\n")
+	end
+	test("preserves literal keys ordered collections and mixed exhaustive cases after source erasure") do
+		managed_mir_test_fixture("literal-collections-mir", 2)
+	end
+	test("retains semantic identities with scalar storage and no extra allocation") do
+		state := literal_mir_state()
+		mut constraints := 0
+		state.scalar_mir.types.each.with_index do |row, index|
+			if row.kind == 12
+				constraints += 1
+				expect(mir_storage_type_name(state.scalar_mir, index + 9) == "String" || mir_storage_type_name(state.scalar_mir, index + 9) == "Integer").to_be_true()
+				expect(mir_managed_type(state.scalar_mir, index + 9)).to_equal(row.element == 8)
+			end
+		end
+		expect(constraints).to_equal(2)
+		mut operations := 0
+		state.scalar_mir.instructions.each do |instruction|
+			if instruction.kind == 57 || instruction.kind == 58
+				operations += 1
+				expect(mir_instruction_effects(state.scalar_mir, instruction)).to_equal(0)
+			end
+		end
+		expect(operations >= 4).to_be_true()
+	end
+	test("rejects forged constants widening operands tags and payload identities") do
+		mut state := literal_mir_state()
+		state.scalar_mir.instructions.each.with_index do |instruction, index|
+			if instruction.kind == 57 || instruction.kind == 58
+				[1, 2, 3, 4, 5].each do |cell|
+					state.scalar_mir.instructions[index] = compiler_test_instruction_with_cell(instruction, cell, 999999)
+					expect(verify_mir(state.scalar_mir, true).empty?()).to_be_false()
+				end
+				state.scalar_mir.instructions[index] = instruction
+			end
+		end
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	end
+	test("rejects malformed literal constraints and physical type tables") do
+		mut state := literal_mir_state()
+		state.scalar_mir.types.each.with_index do |row, index|
+			if row.kind == 12
+				state.scalar_mir.types[index] = MirType.new(kind: row.kind, name: row.name, element: 5, key: row.key, declaration: row.declaration)
+				expect(verify_mir(state.scalar_mir, true).empty?()).to_be_false()
+				state.scalar_mir.types[index] = MirType.new(kind: row.kind, name: "LiteralInteger#9007199254740992", element: row.element, key: row.key, declaration: row.declaration)
+				expect(verify_mir(state.scalar_mir, true).empty?()).to_be_false()
+				state.scalar_mir.types[index] = row
+			end
+		end
+	end
+	test("rejects a valid String payload that differs from its singleton identity") do
+		mut state := literal_mir_state()
+		mut tested := false
+		state.scalar_mir.instructions.each do |instruction|
+			if instruction.kind == 57 && instruction.first == 8
+				original := state.scalar_mir.literal_texts[instruction.payload]
+				state.scalar_mir.literal_texts[instruction.payload] = "different"
+				expect(verify_mir(state.scalar_mir, true).empty?()).to_be_false()
+				state.scalar_mir.literal_texts[instruction.payload] = original
+				tested = true
+			end
+		end
+		expect(tested).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	end
+	test("rejects a Hash key whose storage type erases its singleton constraint") do
+		mut state := logical_checked_source("def main()\nkey: \"held\" := \"held\"\nvalues := {key => 2}\nputs(values[key])\nend\n")
+		expect(check(state)).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		mut tested := false
+		state.scalar_mir.types.each.with_index do |row, index|
+			if row.kind == 3
+				expect(row.key >= 9).to_be_true()
+				state.scalar_mir.types[index] = MirType.new(kind: row.kind, name: row.name, element: row.element, key: 8, declaration: row.declaration)
+				expect(verify_mir(state.scalar_mir, true).empty?()).to_be_false()
+				state.scalar_mir.types[index] = row
+				tested = true
+			end
+		end
+		expect(tested).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	end
+end

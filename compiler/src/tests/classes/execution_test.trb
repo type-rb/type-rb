@@ -1,0 +1,138 @@
+import { check } from compiler
+import { compiler_test_instruction_with_cell } from testing/compiler
+import { instantiate_generic_function } from frontend/resolution/generic_functions
+import { logical_checked_source } from testing/pipeline
+import { mir_instruction_effects } from mir/analysis/call_effects
+import { verify_mir } from mir/verify/module
+import { object_syntax_state } from testing/syntax/objects
+import { store_string } from support/storage
+import { describe, expect, test } from trb/std/test
+import { object_execution_run, object_execution_state } from testing/objects
+
+describe("Object executable MIR") do
+	test("keeps nongeneric and generic interface signatures out of executable functions") do
+		mut state := object_syntax_state("interface Number\nget(): Integer\nend\ninterface Source<T>\nget(): T\nend\n")
+		expect(state.declarations.function_count[0]).to_equal(0)
+		expect(state.type_resolution.generic_functions.size()).to_equal(2)
+		expect(instantiate_generic_function(state, 0, [], 0)).to_equal(-1)
+		expect(state.declarations.function_count[0]).to_equal(0)
+		expect(state.type_resolution.generic_function_instances.size()).to_equal(0)
+	end
+
+	test("runs static calls without generating abstract interface bodies") do
+		mut state := object_execution_state("interface Number\nget(): Integer\nend\nclass Answer\ndef self.value(): Integer\nreturn 42\nend\nend\ndef main()\nputs(Answer.value())\nend\n")
+		expect(state.scalar_mir.functions.size()).to_equal(2)
+		object_execution_run(state, "42\n")
+	end
+
+	test("resolves lexical self for class methods and constructors") do
+		mut state := object_execution_state("class Answer\n@value: Integer\ndef initialize(value: Integer)\n@value = value\nend\ndef self.one(): Integer\nreturn 1\nend\ndef self.make()\nputs(self.new(3).value)\nputs(self.one())\nend\nend\ndef main()\nAnswer.make()\nend\n")
+		object_execution_run(state, "3\n1\n")
+	end
+
+	test("runs construction instance calls private self calls and default arguments") do
+		mut state := object_execution_state("class Answer\ndef initialize(*, value: Integer = 7)\nputs(value)\nend\ndef _base(): Integer\nreturn 40\nend\ndef value(*, extra: Integer = 2): Integer\nreturn _base() + extra\nend\nend\ndef main()\nvalue := Answer.new()\nputs(value.value())\nputs(Answer.new(value: 9).value(extra: 3))\nend\n")
+		object_execution_run(state, "7\n42\n9\n43\n")
+	end
+
+	test("specializes class receivers through concrete generic identities") do
+		mut state := object_execution_state("class Identity<T>\ndef value(input: T): T\nreturn input\nend\nend\ndef main()\nnumber := Identity<Integer>.new()\ntext := Identity<String>.new()\nputs(number.value(42))\nputs(text.value(\"held\"))\nend\n")
+		object_execution_run(state, "42\nheld\n")
+	end
+
+	test("specializes method arguments independently of class arguments") do
+		mut state := object_execution_state("class Identity<T>\ndef value<U>(input: U): U\nreturn input\nend\nend\ndef main()\nitem := Identity<Integer>.new()\nputs(item.value<Integer>(42))\nputs(item.value<String>(\"held\"))\nputs(Identity<Boolean>.new().value<String>(\"temporary\"))\nend\n")
+		object_execution_run(state, "42\nheld\ntemporary\n")
+	end
+
+	test("rejects private and wrong receiver calls without emitting unchecked MIR") do
+		["Answer._private()", "Answer.instance()", "Answer.new().static()", "Answer.new()._private()", "Answer.new().instance(1)"].each do |call|
+			mut state := logical_checked_source("class Answer\ndef _private(): Integer\nreturn 1\nend\ndef instance(): Integer\nreturn 2\nend\ndef self.static(): Integer\nreturn 3\nend\nend\ndef main()\n" + call + "\nend\n")
+			expect(check(state)).to_be_false()
+		end
+	end
+
+	test("preserves namespaced classes and alias annotations") do
+		mut state := object_execution_state("module Models\nclass Answer\ndef value(): Integer\nreturn 42\nend\nend\nend\nalias Selected = Models::Answer\ndef main()\nvalue: Selected := Models::Answer.new()\nputs(value.value())\nend\n")
+		object_execution_run(state, "42\n")
+	end
+
+	test("preserves receivers captured by closures and retained in records and hashes") do
+		mut state := object_execution_state("class Answer\ndef value(): Integer\nreturn 42\nend\nend\nrecord Holder\nvalue: Answer\nend\ndef main()\nitem := Answer.new()\nread := fn(): Integer\nreturn item.value()\nend\nmut values: Hash<String, Holder> := {}\nvalues[\"held\"] = Holder.new(value: item)\nputs(read())\nputs(values[\"held\"].value.value())\nend\n")
+		object_execution_run(state, "42\n42\n")
+	end
+
+	test("selects nominal methods even when their names match builtins") do
+		mut state := object_execution_state("class Answer\ndef puts(value: Integer): Integer\nreturn value + 2\nend\ndef self.size(): Integer\nreturn 7\nend\nend\ndef main()\nputs(Answer.new().puts(40))\nputs(Answer.size())\nend\n")
+		object_execution_run(state, "42\n7\n")
+	end
+
+	test("supports class factories returning nominal instances") do
+		mut state := object_execution_state("class Answer\ndef self.make(): Answer\nreturn Answer.new()\nend\ndef value(): Integer\nreturn 42\nend\nend\ndef main()\nputs(Answer.make().value())\nend\n")
+		object_execution_run(state, "42\n")
+	end
+
+	test("constructs and calls class members through a transparent alias") do
+		mut state := object_execution_state("class Answer\n@value: Integer\ndef initialize(value: Integer)\n@value = value\nend\ndef self.constant(): Integer\nreturn 5\nend\nend\nalias Selected = Answer\ndef main()\nputs(Selected.new(14).value)\nputs(Selected.constant())\nend\n")
+		object_execution_run(state, "14\n5\n")
+	end
+
+	test("specializes class construction through generic and namespaced aliases") do
+		mut state := object_execution_state("module Models\nclass Box<T>\n@value: T\ndef initialize(value: T)\n@value = value\nend\nend\nalias Wrapped<T> = Box<T>\nend\nalias NumberBox = Models::Wrapped<Integer>\ndef main()\nputs(Models::Wrapped<Integer>.new(7).value)\nputs(NumberBox.new(8).value)\nend\n")
+		object_execution_run(state, "7\n8\n")
+	end
+
+	test("checks class alias constructor arguments before MIR publication") do
+		["Selected.new(\"wrong\")", "Selected.new()", "Selected.new(1, 2)"].each do |call|
+			mut state := logical_checked_source("class Answer\ndef initialize(value: Integer)\nend\nend\nalias Selected = Answer\ndef main()\n" + call + "\nend\n")
+			expect(check(state)).to_be_false()
+		end
+	end
+
+	test("keeps named constructor defaults through a class alias") do
+		mut state := object_execution_state("class Answer\n@value: Integer\ndef initialize(*, value: Integer = 7)\n@value = value\nend\nend\nalias Selected = Answer\ndef main()\nputs(Selected.new().value)\nputs(Selected.new(value: 9).value)\nend\n")
+		object_execution_run(state, "7\n9\n")
+	end
+
+	test("does not construct an interface through an alias") do
+		mut state := logical_checked_source("interface Answer\nvalue(): Integer\nend\nalias Selected = Answer\ndef main()\nSelected.new()\nend\n")
+		expect(check(state)).to_be_false()
+	end
+
+	test("preserves class constants and self results") do
+		mut state := object_execution_state("class Answer\nVALUE := 42\ndef value(): Integer\nreturn VALUE\nend\ndef identity(): Answer\nreturn self\nend\nend\ndef main()\nputs(Answer.new().identity().value())\nend\n")
+		object_execution_run(state, "42\n")
+	end
+
+	test("retains objects through arrays nullable values and allocating calls") do
+		mut state := object_execution_state("class Answer\ndef value(): Integer\nreturn 42\nend\nend\ndef read(value: Answer?): Integer\nif value != nil\nreturn value.value()\nend\nreturn 0\nend\ndef main()\nmut values: Array<Answer> := []\nmut index := 0\nwhile index < 3000\nvalues.push(Answer.new())\nindex += 1\nend\nputs(read(values[0]))\nputs(values[-1].value())\nend\n")
+		object_execution_run(state, "42\n42\n")
+	end
+
+	test("owns allocation identity after source tokens are erased") do
+		mut state := object_execution_state("class Answer\ndef value(): Integer\nreturn 42\nend\nend\ndef main()\nputs(Answer.new().value())\nend\n")
+		mut origin := 0
+		while origin < state.source_tokens.token_count[0]
+			store_string(state.source_tokens.token_texts, origin, "erased")
+			origin += 1
+		end
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		object_execution_run(state, "42\n")
+	end
+
+	test("rejects corrupted allocation identities operands and result types") do
+		mut field := 0
+		while field < 5
+			mut state := object_execution_state("class Answer\nend\ndef main()\nAnswer.new()\nend\n")
+			mut index := 0
+			while state.scalar_mir.instructions[index].kind != 63
+				index += 1
+			end
+			instruction := state.scalar_mir.instructions[index]
+			expect(mir_instruction_effects(state.scalar_mir, instruction)).to_equal(9)
+			state.scalar_mir.instructions[index] = compiler_test_instruction_with_cell(instruction, field + 1, 99999)
+			expect(verify_mir(state.scalar_mir, true).empty?()).to_be_false()
+			field += 1
+		end
+	end
+end

@@ -1,0 +1,39 @@
+import { generic_program_fork } from frontend/checking/program/generic_fork
+import { compiler_source_tokens_new, store_fused_literal } from state/source_state
+import { compiler_new } from state/state
+import { sparse_integer_at } from support/storage
+import { describe, expect, test } from trb/std/test
+
+describe("Sparse source literal flags") do
+	test("preserves empty holes, repeated writes and clearing across distant token positions") do
+		mut tokens := compiler_source_tokens_new(4096)
+		store_fused_literal(tokens, 2048, 0)
+		store_fused_literal(tokens, 3072, 1)
+		store_fused_literal(tokens, 3072, 1)
+		store_fused_literal(tokens, 2, 1)
+		expect(sparse_integer_at(tokens.token_fused_literals, 0)).to_equal(0)
+		expect(sparse_integer_at(tokens.token_fused_literals, 2048)).to_equal(0)
+		expect(sparse_integer_at(tokens.token_fused_literals, 3071)).to_equal(0)
+		expect(sparse_integer_at(tokens.token_fused_literals, 3072)).to_equal(1)
+		store_fused_literal(tokens, 3072, 0)
+		store_fused_literal(tokens, 3072, 0)
+		expect(sparse_integer_at(tokens.token_fused_literals, 3072)).to_equal(0)
+		expect(sparse_integer_at(tokens.token_fused_literals, 2)).to_equal(1)
+		store_fused_literal(tokens, -1, 1)
+		store_fused_literal(tokens, 4096, 1)
+		expect(sparse_integer_at(tokens.token_fused_literals, -1)).to_equal(0)
+		expect(sparse_integer_at(tokens.token_fused_literals, 4096)).to_equal(0)
+	end
+	test("retains shared source flags in generic forks and isolates independent sources") do
+		mut parent := compiler_new(64)
+		mut fork := generic_program_fork(parent)
+		separate := compiler_new(64)
+		store_fused_literal(parent.source_tokens, 12, 1)
+		expect(sparse_integer_at(fork.source_tokens.token_fused_literals, 12)).to_equal(1)
+		store_fused_literal(fork.source_tokens, 12, 0)
+		expect(sparse_integer_at(parent.source_tokens.token_fused_literals, 12)).to_equal(0)
+		store_fused_literal(fork.source_tokens, 13, 1)
+		expect(sparse_integer_at(parent.source_tokens.token_fused_literals, 13)).to_equal(1)
+		expect(sparse_integer_at(separate.source_tokens.token_fused_literals, 13)).to_equal(0)
+	end
+end

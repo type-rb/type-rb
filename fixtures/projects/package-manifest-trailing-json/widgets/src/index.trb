@@ -1,0 +1,3 @@
+def label(): String
+	return "widget"
+end

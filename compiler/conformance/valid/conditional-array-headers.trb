@@ -1,0 +1,55 @@
+def update(mut input: Array<Integer>, mut output: Array<Integer>)
+	values := input
+	mut index := 0
+	while index < values.size()
+		if index == 0
+			if output.size() > 0
+				output[index] += values[index]
+			end
+		elsif index == 1
+			output[index] = values[index] + 3
+		else
+			output[index] = values[index] + 4
+		end
+		index += 1
+	end
+	return
+end
+
+def guarded(input: Array<Integer>, take: Boolean): Integer
+	if take
+		return input[-1]
+	end
+	return 7
+end
+
+def grow(mut input: Array<Integer>, mut other: Array<Integer>, take: Boolean): Integer
+	before := input[-1]
+	if take
+		other.push(9)
+	end
+	return before + input[-1]
+end
+
+def rebind(mut input: Array<Integer>, other: Array<Integer>, take: Boolean): Integer
+	if take
+		input = other
+	end
+	return input[-1]
+end
+
+def main()
+	mut values := [1, 2, 3]
+	update(values, values)
+	puts(values[0].to_s())
+	puts(values[1].to_s())
+	puts(values[2].to_s())
+	mut empty: Array<Integer> := []
+	update(empty, empty)
+	puts(guarded(empty, false).to_s())
+	puts(guarded(values, true).to_s())
+	puts(grow(values, values, true).to_s())
+	puts(rebind(values, [11], true).to_s())
+	puts(rebind(values, empty, false).to_s())
+	return
+end

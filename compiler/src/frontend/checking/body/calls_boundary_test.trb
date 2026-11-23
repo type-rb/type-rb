@@ -1,0 +1,123 @@
+import { check, emit_qbe } from compiler
+import { lex } from frontend/syntax/lexer
+import { verify_mir } from mir/verify/module
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { CompilerState, compiler_new, has_diagnostic } from state/state
+import { load_integer, load_string } from support/storage
+import { describe, expect, test } from trb/std/test
+import { output_source } from testing/compiler
+
+describe("Native TypeRB frontend") do
+	test("rejects supplied positional argv arguments") do
+		source := "import trb/std/process\ndef main()\nProcess.argv(1)\nend\n"
+		mut state := compiler_new(source.size() + 1)
+		expect(lex(state, source)).to_be_true()
+		expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_false()
+		expect(load_string(state.diagnostics.codes, 0)).to_equal("TRBN4004")
+		expect(load_integer(state.diagnostics.lines, 0)).to_equal(3)
+		expect(load_string(state.diagnostics.messages, 0).include?("call argument count does not match")).to_be_true()
+	end
+
+	test("preserves receiver diagnostics at the checked MIR boundary") do
+		sources := [
+			"def main()\nputs(\"text\".missing())\nend\n",
+			"def main()\nputs(true.at(0))\nend\n",
+			"def main()\nputs(\"ab\".to_bytes().at(\"bad\"))\nend\n",
+			"def main()\nputs(\"ab\".to_bytes(1))\nend\n",
+			"def main()\nvalue := [1]\nvalue.push(2)\nend\n",
+			"def main()\nvalue := {\"a\": 1}\nputs(value.missing())\nend\n",
+			"import trb/std/process\ndef main()\nProcess.missing()\nend\n",
+			"def invalid<T>(value: T): Integer\nreturn value.size()\nend\ndef main()\nputs(1)\nend\n",
+		]
+		messages := [
+			"unsupported method missing",
+			"unsupported method at",
+			"expected Integer, found String",
+			"String method argument count differs",
+			"push receiver is immutable",
+			"unsupported Hash method missing",
+			"unresolved value Process::missing",
+			"size is unavailable on T",
+		]
+		lines := [2, 2, 2, 2, 3, 3, 3, 2]
+		sources.each.with_index do |source, index|
+			mut state := compiler_new(source.size() + 1)
+			expect(lex(state, source)).to_be_true()
+			expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+			expect(resolve(state)).to_be_true()
+			expect(check(state)).to_be_false()
+			expect(load_string(state.diagnostics.codes, 0)).to_equal("TRBN4004")
+			expect(load_integer(state.diagnostics.lines, 0)).to_equal(lines[index])
+			expect(load_string(state.diagnostics.messages, 0)).to_equal(messages[index])
+		end
+	end
+
+	test("keeps checked receiver calls and argument transfers in verified MIR") do
+		sources := [
+			"record Packet\nvalue: Bytes\nend\ndef identity<T>(value: T): T\nreturn value\nend\ndef main()\npacket := Packet.new(value: identity<Bytes>(\"ab\".to_bytes()))\nmut values: Array<Integer> := []\nvalues.push(packet.value.at(0))\nputs(packet.value.concat(\"c\".to_bytes()).to_s())\nputs(values.size())\nputs(1.to_s())\nputs(2.5.to_i())\nend\n",
+			"def choose(): Integer\n\"abc\".to_bytes().at(if true\nreturn 7\nelse\n0\nend)\nreturn 9\nend\ndef main()\nputs(choose())\nend\n",
+		]
+		sources.each do |source|
+			mut state := compiler_new(source.size() + 1)
+			expect(lex(state, source)).to_be_true()
+			expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+			expect(resolve(state)).to_be_true()
+			expect(check(state)).to_be_true()
+			expect(verify_mir(state.scalar_mir, true)).to_equal("")
+			expect(output_source(emit_qbe(state)).include?("export function w $main")).to_be_true()
+			expect(has_diagnostic(state)).to_be_false()
+		end
+	end
+
+	test("rejects direct-call arity mismatches during checking") do
+		source := "def identity(value: Integer): Integer\n\treturn value\nend\n\ndef main()\n\tidentity()\n\treturn\nend\n"
+		mut state := compiler_new(source.size() + 1)
+		expect(lex(state, source)).to_be_true()
+		expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_false()
+		expect(load_string(state.diagnostics.codes, 0)).to_equal("TRBN4004")
+		expect(load_integer(state.diagnostics.lines, 0)).to_equal(6)
+		expect(load_string(state.diagnostics.messages, 0)).to_equal("call argument count does not match identity")
+	end
+
+	test("checks generic output before lowering concrete instantiations") do
+		sources := [
+			"def show<T>(value: T)\nputs(value)\nend\n\ndef main()\nputs(\"unused\")\nend\n",
+			"def show<T>(value: T)\nputs(value)\nend\n\ndef main()\nshow<Integer>(3)\nshow<String>(\"kept\")\nshow<Float>(2.5)\nshow<Boolean>(true)\nend\n",
+			"def show<T>(value: T?)\nputs(value)\nend\n\ndef main()\nshow<Integer>(9)\nshow<Integer>(nil)\nshow<String>(\"present\")\nshow<String>(nil)\nend\n",
+			"def show<T>(value: T | String)\nputs(value)\nend\n\ndef main()\nshow<Integer>(4)\nshow<Integer>(\"text\")\nend\n",
+			"def show<T>(value: T)\nputs(value)\nend\n\ndef main()\nshow<Bytes>(\"ab\".to_bytes())\nshow<Bytes?>(\"xy\".to_bytes())\nshow<Bytes?>(nil)\nend\n",
+			"def show<T>(value: T)\nputs(value)\nend\n\ndef main()\nshow<Any>(8)\nshow<Any>(\"dynamic\")\nshow<Any>(\"ab\".to_bytes())\nshow<Any?>(nil)\nend\n",
+			"def show<T>(value: T)\nputs(value)\nend\ndef forward<U>(value: U)\nshow<U>(value)\nend\n\ndef main()\nforward<String>(\"forward\")\nforward<Integer>(2)\nend\n",
+			"def printer<T>(value: T): () -> Void\nreturn fn()\nputs(value)\nend\nend\n\ndef main()\ncallback := printer<String>(\"retained\" + 1.to_s())\ncallback()\ncallback()\nend\n",
+			"def show<T>(values: Array<T>)\nvalues.each do |value|\nputs(value)\nend\nend\n\ndef main()\nshow<Integer>([1, 2])\nshow<String>([\"a\", \"b\"])\nend\n",
+			"record Box<T>\nvalue: T\nend\ndef show<T>(box: Box<T>)\nputs(box.value)\nend\n\ndef main()\nshow<String>(Box<String>.new(value: \"boxed\"))\nshow<Integer>(Box<Integer>.new(value: 6))\nend\n",
+			"class Printer<T>\ndef show(value: T)\nputs(value)\nend\nend\n\ndef main()\nPrinter<String>.new().show(\"method\")\nPrinter<Integer>.new().show(3)\nend\n",
+		]
+		sources.each do |source|
+			mut state := compiler_new(source.size() + 1)
+			expect(lex(state, source)).to_be_true()
+			expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+			expect(resolve(state)).to_be_true()
+			expect(check(state)).to_be_true()
+			expect(verify_mir(state.scalar_mir, true)).to_equal("")
+			expect(output_source(emit_qbe(state)).include?("TypeParameter#")).to_be_false()
+			expect(has_diagnostic(state)).to_be_false()
+		end
+	end
+
+	test("keeps unsupported concrete output explicit after specialization") do
+		source := "record Entry\nvalue: Integer\nend\ndef show<T>(value: T)\nputs(value)\nend\ndef main()\nshow<Entry>(Entry.new(value: 1))\nend\n"
+		mut state := compiler_new(source.size() + 1)
+		expect(lex(state, source)).to_be_true()
+		expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_false()
+		expect(load_integer(state.diagnostics.lines, 0)).to_equal(5)
+		expect(load_string(state.diagnostics.messages, 0)).to_equal("puts does not yet support Entry")
+	end
+end

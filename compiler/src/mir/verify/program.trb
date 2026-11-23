@@ -1,0 +1,93 @@
+import { mir_signature_host, mir_signature_ordinary, mir_signature_standard } from mir/model/call_kinds
+import { MirModule, mir_function_index } from mir/model/module
+
+def mir_program_binding_valid(native_module: MirModule, id: Integer, source: Integer, name: String, parameters: Array<String>, result: String): Boolean
+	if id < 0 || id >= native_module.signatures.size()
+		return false
+	end
+	signature := native_module.signatures[id]
+	if signature.kind != mir_signature_ordinary() || signature.source_id != source || signature.name != name || signature.result_type != result || signature.parameter_types.size() != parameters.size()
+		return false
+	end
+	mut index := 0
+	while index < parameters.size()
+		if signature.parameter_types[index] != parameters[index]
+			return false
+		end
+		index += 1
+	end
+	return true
+end
+
+def mir_program_error(native_module: MirModule): String
+	if native_module.program.size() == 0
+		# Independent MIR fixtures do not define an executable program profile.
+		return ""
+	end
+	if native_module.program.size() != 1
+		return "MIR program metadata count differs"
+	end
+	program := native_module.program[0]
+	if program.entry_source < 0 || program.entry_source >= native_module.source_count[0]
+		return "MIR program entry source is invalid"
+	end
+	if program.main_function < -1 || program.compiler_function < -1 || program.compiler_file_function < -1 || program.cli_function < -1 || program.runtime_function < -1
+		return "MIR program binding is invalid"
+	end
+	if program.main_function >= 0
+		if !mir_program_binding_valid(native_module, program.main_function, program.entry_source, "main", [], "Void")
+			return "MIR program main binding differs"
+		end
+	end
+	if program.compiler_function >= 0
+		if !mir_program_binding_valid(native_module, program.compiler_function, program.entry_source, "compiler_main", ["String", "String", "Boolean"], "Integer")
+			return "MIR program compiler binding differs"
+		end
+	else
+		if program.compiler_file_function != -1 || program.cli_function != -1 || program.runtime_function != -1 || program.runtime_literal != "" || program.runtime_error != 0
+			return "MIR ordinary program has compiler metadata"
+		end
+	end
+	if program.compiler_file_function >= 0
+		if !mir_program_binding_valid(native_module, program.compiler_file_function, program.entry_source, "compiler_file_main", ["String", "String", "String", "Boolean"], "Integer")
+			return "MIR program file compiler binding differs"
+		end
+	end
+	if program.cli_function >= 0
+		if !mir_program_binding_valid(native_module, program.cli_function, program.entry_source, "native_cli_main", [], "Integer")
+			return "MIR program CLI binding differs"
+		end
+		if program.runtime_error < 0 || program.runtime_error > 2
+			return "MIR program runtime error is invalid"
+		end
+		if program.runtime_function < 0
+			if program.runtime_error != 1 || program.runtime_literal != ""
+				return "MIR program missing runtime metadata differs"
+			end
+		else
+			if program.runtime_function >= native_module.signatures.size()
+				return "MIR program runtime binding is invalid"
+			end
+			signature := native_module.signatures[program.runtime_function]
+			if signature.name != "native_cli_runtime_qbe" || signature.result_type != "String" || signature.parameter_types.size() != 0 || signature.kind != mir_signature_host()
+				return "MIR program runtime binding differs"
+			end
+			if program.runtime_error == 1 || (program.runtime_error == 2 && program.runtime_literal != "")
+				return "MIR program runtime literal metadata differs"
+			end
+		end
+	else
+		if program.runtime_function != -1 || program.runtime_literal != "" || program.runtime_error != 0
+			return "MIR non-CLI program has runtime metadata"
+		end
+	end
+	mut index := 0
+	while index < native_module.signatures.size()
+		signature := native_module.signatures[index]
+		if signature.kind < mir_signature_standard() && mir_function_index(native_module, signature.id) < 0
+			return "MIR program declaration has no function body"
+		end
+		index += 1
+	end
+	return ""
+end

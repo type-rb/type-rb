@@ -1,0 +1,8 @@
+def select(text: String): String
+	puts("before index")
+	return text[-5]
+end
+
+def main()
+	puts(select("ab" + "cd"))
+end

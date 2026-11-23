@@ -1,0 +1,118 @@
+import { test_provider_kind } from frontend/providers/test_declarations
+import { resource_unchecked_dependency, verify_resource_calls } from frontend/checking/body/resource_calls
+import { web_context_kind } from frontend/providers/web_context
+import { web_binding_kind } from frontend/providers/web_declarations
+import { json_provider_kind } from frontend/providers/json_declarations
+import { declare_object_witnesses, prepare_object_dispatch } from frontend/resolution/object_dispatch
+import { object_abstract_function, object_abstract_method } from frontend/types/object_types
+import { alias_pattern_type } from frontend/resolution/alias_patterns
+import { generic_program_fork } from frontend/checking/program/generic_fork
+import { instantiate_generic_function } from frontend/resolution/generic_functions
+import { check_function_body, checked_function_locals } from frontend/checking/program/functions
+import { declare_default_functions } from frontend/resolution/default_arguments
+import { resolve_function_body } from frontend/checking/program/resolution
+import { abstract_generic_arguments, generic_record_defaults } from frontend/types/generic_bindings
+import { instantiate_generic_nominal, resolve_alias_type, type_display } from frontend/resolution/type_resolution
+import { CompilerState, diagnostic, has_diagnostic } from state/state
+import { resolution_locals_new } from state/resolution_locals
+import { load_integer, load_string, store_integer, store_string } from support/storage
+
+# Unused declarations receive exactly the same abstract validation as used ones.
+# Concrete arguments cannot make an invalid unconstrained template legal.
+def check_generic_templates(mut state: CompilerState): Boolean
+	mut needed := state.type_resolution.generic_functions.size() > 0
+	if state.type_resolution.type_aliases.size() > 0
+		needed = true
+	end
+	mut nominal := 0
+	while nominal < state.type_resolution.generic_definitions.size()
+		if generic_record_defaults(state, nominal)
+			needed = true
+		end
+		nominal += 1
+	end
+	if !needed
+		return true
+	end
+	mut program := generic_program_fork(state)
+	mut alias_index := 0
+	while alias_index < program.type_resolution.type_aliases.size() && !has_diagnostic(program)
+		row := program.type_resolution.type_aliases[alias_index]
+		arguments := abstract_generic_arguments("alias", alias_index, row.parameters)
+		target := resolve_alias_type(program, alias_index, arguments)
+		if target == ""
+			program.module_graph.active_module[0] = row.source_id
+			diagnostic(program, "TRBN4003", row.line, "invalid type alias target " + type_display(program, row.target))
+		else
+			store_string(program.type_resolution.alias_patterns, alias_index, alias_pattern_type(program, target))
+		end
+		alias_index += 1
+	end
+	mut function := state.declarations.function_count[0]
+	mut definition := 0
+	while definition < program.type_resolution.generic_functions.size()
+		if !object_abstract_method(program, definition) && web_context_kind(program, definition) == 0 && web_binding_kind(program, definition) == 0 && json_provider_kind(program, definition) == 0 && test_provider_kind(program, definition) == 0
+			arguments := abstract_generic_arguments("function", definition, program.type_resolution.generic_functions[definition].type_parameters)
+			instantiate_generic_function(program, definition, arguments, 0)
+		end
+		definition += 1
+	end
+	nominal = 0
+	while nominal < program.type_resolution.generic_definitions.size()
+		if generic_record_defaults(program, nominal)
+			arguments := abstract_generic_arguments("nominal", nominal, program.type_resolution.generic_definitions[nominal].parameters)
+			instantiate_generic_nominal(program, nominal, arguments)
+		end
+		nominal += 1
+	end
+	declare_default_functions(program)
+	mut objects := prepare_object_dispatch(program, 0)
+	while function < program.declarations.function_count[0] && !has_diagnostic(program)
+		if object_abstract_function(program, function)
+			function += 1
+			next
+		end
+		mut names := resolution_locals_new(program.source_tokens.token_count[0] + 1)
+		resolve_function_body(program, function, names)
+		declare_default_functions(program)
+		if !has_diagnostic(program)
+			mut locals := checked_function_locals(program, function)
+			check_function_body(program, function, locals)
+		end
+		objects = prepare_object_dispatch(program, objects)
+		function += 1
+	end
+	mut dependency := resource_unchecked_dependency(program)
+	while dependency >= 0 && !has_diagnostic(program)
+		mut names := resolution_locals_new(program.source_tokens.token_count[0] + 1)
+		resolve_function_body(program, dependency, names)
+		declare_default_functions(program)
+		if !has_diagnostic(program)
+			mut locals := checked_function_locals(program, dependency)
+			check_function_body(program, dependency, locals)
+		end
+		objects = prepare_object_dispatch(program, objects)
+		dependency = resource_unchecked_dependency(program)
+	end
+	verify_resource_calls(program)
+	if !has_diagnostic(program)
+		declare_object_witnesses(program)
+	end
+	alias_index = 0
+	while alias_index < state.type_resolution.type_aliases.size() && !has_diagnostic(program)
+		store_string(state.type_resolution.alias_patterns, alias_index, load_string(program.type_resolution.alias_patterns, alias_index))
+		alias_index += 1
+	end
+	mut binding := 0
+	while binding < state.module_graph.import_count[0]
+		if load_integer(program.module_graph.import_used, binding) > 0
+			store_integer(state.module_graph.import_used, binding, 1)
+		end
+		binding += 1
+	end
+	if has_diagnostic(program)
+		state.module_graph.active_module[0] = load_integer(program.diagnostics.modules, 0)
+		diagnostic(state, load_string(program.diagnostics.codes, 0), load_integer(program.diagnostics.lines, 0), load_string(program.diagnostics.messages, 0))
+	end
+	return !has_diagnostic(state)
+end

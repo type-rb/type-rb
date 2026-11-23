@@ -1,0 +1,61 @@
+def trace(label: String, value: String): String
+	puts(label)
+	return value + "!"
+end
+
+def collect(mut values: Array<String> = [], *, label: String = trace("default-label", "item")): String
+	values.push(label)
+	return values.size().to_s() + ":" + values[0]
+end
+
+def select(first: Integer, second: Integer = first + 1, *, third: Integer = second + 1): Integer
+	return first * 100 + second * 10 + third
+end
+
+def fresh_hash(mut values: Hash<String, Array<String>> = { "key" =>["kept"] }): Integer
+	mut items := values["key"]
+	items.push("grown")
+	return items.size()
+end
+
+record Entry
+	first: String
+	second: String = trace("default-second", first)
+	items: Array<String> = [second]
+	count: Float = items.size()
+end
+
+def identity(*, entry: Entry = Entry.new(first: trace("default-first", "record"))): Entry
+	return entry
+end
+
+def lazy(value: Boolean = false && (1 / 0 == 0)): Boolean
+	return value
+end
+
+def main()
+	puts(collect())
+	puts(collect())
+	mut values := ["explicit"]
+	puts(collect(values, label: trace("explicit-label", "later")))
+	puts(values.size())
+	puts(select(1))
+	puts(select(1, third: 8))
+	puts(select(1, 4))
+	puts(fresh_hash())
+	puts(fresh_hash())
+	first := Entry.new(second: trace("explicit-second", "second"), first: trace("explicit-first", "first"))
+	puts(first.first)
+	puts(first.second)
+	puts(first.items[0])
+	puts(first.count.to_i())
+	second := identity()
+	third := identity()
+	mut items := second.items
+	items.push("added")
+	puts(items.size())
+	puts(third.items.size())
+	puts(third.items[0])
+	puts(lazy())
+	puts(lazy(true))
+end

@@ -1,0 +1,127 @@
+import { standard_oidc_host } from frontend/resolution/oidc_intrinsics
+import { mir_state_function_slot } from state/local_slots
+import { concurrent_borrowed_type, concurrent_safe_type } from frontend/types/concurrent_types
+import { object_abstract_function } from frontend/types/object_types
+import { type_display } from frontend/resolution/type_resolution
+import { CheckedValue, checked_concurrent_borrow } from frontend/checking/body/values
+import { CheckedLocals, local_find, local_identity } from state/local_state
+import { CompilerState, diagnostic_at } from state/state
+import { load_integer, load_string, sparse_integer_at, store_integer } from support/storage
+
+def concurrent_active(locals: CheckedLocals): Boolean
+	if locals.concurrent_scope[0] >= 0
+		return true
+	end
+	return locals.concurrent_function[0] > 0
+end
+
+def concurrent_value(state: CompilerState, value: CheckedValue, borrowed: Boolean): CheckedValue
+	mut inherited := value.concurrent_borrowed
+	if borrowed
+		inherited = true
+	end
+	if inherited && !concurrent_borrowed_type(state, value.type_name)
+		inherited = false
+	end
+	return checked_concurrent_borrow(value, inherited)
+end
+
+def concurrent_values(state: CompilerState, value: CheckedValue, inputs: Array<CheckedValue>): CheckedValue
+	mut borrowed := value.concurrent_borrowed
+	inputs.each do |input|
+		if input.concurrent_borrowed
+			borrowed = true
+		end
+	end
+	return concurrent_value(state, value, borrowed)
+end
+
+def concurrent_arguments(state: CompilerState, value: CheckedValue, receiver: CheckedValue, inputs: Array<CheckedValue>): CheckedValue
+	return concurrent_value(state, concurrent_values(state, value, inputs), receiver.concurrent_borrowed)
+end
+
+def concurrent_capture(mut state: CompilerState, locals: CheckedLocals, name: String, type_name: String, origin: Integer)
+	if concurrent_active(locals) && !concurrent_safe_type(state, type_name, [])
+		diagnostic_at(state, "TRBN4004", origin, "concurrent_map cannot capture " + name + " because " + type_display(state, type_name) + " is not concurrency-safe")
+	end
+end
+
+def concurrent_read_binding(mut state: CompilerState, locals: CheckedLocals, slot: Integer, origin: Integer)
+	if locals.concurrent_scope[0] >= 0 && slot < locals.concurrent_scope[0]
+		concurrent_capture(state, locals, load_string(locals.names, slot), load_string(locals.types, slot), origin)
+	end
+end
+
+# Borrow state belongs to the declaration identity, not the currently narrowed
+# type or SSA value. Reassigning fresh storage cannot erase an earlier alias.
+def concurrent_bind(state: CompilerState, mut locals: CheckedLocals, slot: Integer, value: CheckedValue)
+	identity := local_identity(locals, slot)
+	if identity >= 0 && concurrent_active(locals) && value.concurrent_borrowed && concurrent_borrowed_type(state, load_string(locals.types, slot))
+		store_integer(locals.concurrent_borrowed, identity, 1)
+	end
+end
+
+def concurrent_mutation(mut state: CompilerState, locals: CheckedLocals, value: CheckedValue, origin: Integer)
+	if concurrent_active(locals) && value.concurrent_borrowed
+		diagnostic_at(state, "TRBN4004", origin, "concurrent_map cannot mutate a borrowed value because it is not uniquely owned")
+	end
+end
+
+def concurrent_assignment(mut state: CompilerState, locals: CheckedLocals, value: CheckedValue, origin: Integer)
+	if !concurrent_active(locals)
+		return
+	end
+	if value.origin >= 0 && value.origin < state.source_tokens.token_count[0]
+		name := load_string(state.source_tokens.token_texts, value.origin)
+		global := sparse_integer_at(state.callables.checked[0].global_references, value.origin)
+		slot := local_find(locals, name)
+		if global > 0 || (slot >= 0 && locals.concurrent_scope[0] >= 0 && slot < locals.concurrent_scope[0])
+			diagnostic_at(state, "TRBN4004", origin, "concurrent_map cannot assign to outer binding " + name)
+			return
+		end
+		# Replacing a local reference is permitted; mutating its storage is not.
+		if slot >= 0 && value.nullable_field == -1
+			return
+		end
+	end
+	concurrent_mutation(state, locals, value, origin)
+end
+
+# Record exact declaration IDs before MIR emission, so check-only, templates,
+# generated defaults and ordinary execution use the same transitive audit.
+def concurrent_source_call(mut state: CompilerState, locals: CheckedLocals, function: Integer, origin: Integer, constructor: Boolean)
+	if !concurrent_active(locals) || function < 0
+		return
+	end
+	if object_abstract_function(state, function)
+		diagnostic_at(state, "TRBN4004", origin, "concurrent_map cannot call an interface method without an explicit concurrency-safety contract")
+		return
+	end
+	if standard_oidc_host(state, function) >= 0
+		diagnostic_at(state, "TRBN4004", origin, "native function has no concurrency-safe execution-scope contract")
+		return
+	end
+	# The portable authored-call audit is module-local. Imported implementations
+	# retain their own contract; do not silently widen the reference audit.
+	caller := locals.mir_state[mir_state_function_slot()]
+	if caller >= 0 && load_integer(state.declarations.function_modules, caller) != load_integer(state.declarations.function_modules, function)
+		return
+	end
+	while state.callables.concurrent_functions.size() <= function
+		state.callables.concurrent_functions.push(0)
+		state.callables.concurrent_checked.push(0)
+	end
+	mut mode := 2
+	if constructor
+		mode = 1
+	end
+	if mode > state.callables.concurrent_functions[function]
+		state.callables.concurrent_functions[function] = mode
+	end
+end
+
+def concurrent_dynamic_call(mut state: CompilerState, locals: CheckedLocals, origin: Integer)
+	if concurrent_active(locals)
+		diagnostic_at(state, "TRBN4004", origin, "concurrent_map cannot call a function value without an explicit concurrency-safety contract")
+	end
+end

@@ -1,0 +1,136 @@
+import { mir_type_composite_start, mir_type_float_array, mir_type_integer_array } from mir/model/type_ids
+import { mir_type_kind_class, mir_type_kind_interface } from mir/model/type_kinds
+import { integer_string } from support/literals
+import { MirModule, mir_control_value_type, mir_origin_valid } from mir/model/module
+
+# Nominal identity is retained even though both object families occupy a word.
+def mir_object_id(native_module: MirModule, type_id: Integer): Integer
+	if type_id >= mir_type_composite_start() && type_id - mir_type_composite_start() < native_module.types.size()
+		row := native_module.types[type_id - mir_type_composite_start()]
+		if row.kind == mir_type_kind_class() || row.kind == mir_type_kind_interface()
+			return row.declaration
+		end
+	end
+	return -1
+end
+
+def mir_object_types_error(native_module: MirModule): String
+	mut owner := 0
+	while owner < native_module.objects.size()
+		row := native_module.objects[owner]
+		if row.declaration != owner || mir_object_id(native_module, row.type_id) != owner
+			return "MIR object declaration ownership differs"
+		end
+		type_row := native_module.types[row.type_id - mir_type_composite_start()]
+		mut expected := "Class#" + integer_string(owner)
+		mut kind := mir_type_kind_class()
+		if row.interface_type
+			expected = "Interface#" + integer_string(owner)
+			kind = mir_type_kind_interface()
+		end
+		if type_row.kind != kind || type_row.name != expected
+			return "MIR object nominal kind differs"
+		end
+		if row.name == "" || !mir_origin_valid(row.source_id, row.line, native_module.source_count[0])
+			return "MIR object declaration origin is invalid"
+		end
+		row.arguments.each do |argument|
+			mut valid := false
+			if mir_control_value_type(argument) || argument == mir_type_integer_array() || argument == mir_type_float_array()
+				valid = true
+			end
+			if argument >= mir_type_composite_start() && argument - mir_type_composite_start() < native_module.types.size()
+				valid = true
+			end
+			if !valid
+				return "MIR object generic argument is invalid"
+			end
+		end
+		if row.resource_kind < 0 || row.resource_kind > 2
+			return "MIR scoped resource kind is invalid"
+		end
+		if row.resource_kind > 0
+			if row.interface_type || row.superclass != -1 || row.interfaces.size() != 0 || row.fields.size() != 0
+				return "MIR scoped resource has ordinary object storage or inheritance"
+			end
+			if (row.resource_kind == 1 && row.name != "File") || (row.resource_kind == 2 && row.name != "Dir")
+				return "MIR scoped resource declaration identity differs"
+			end
+		end
+		if row.interface_type && (row.superclass != -1 || row.interfaces.size() != 0 || row.fields.size() != 0)
+			return "MIR interface carries class storage or inheritance"
+		end
+		if row.superclass != -1
+			parent := mir_object_id(native_module, row.superclass)
+			if parent < 0 || parent >= native_module.objects.size()
+				return "MIR superclass identity is invalid"
+			end
+			if native_module.objects[parent].interface_type
+				return "MIR superclass is not a class"
+			end
+		end
+		mut contracts: Hash<String, Integer> := {}
+		row.interfaces.each do |type_id|
+			contract := mir_object_id(native_module, type_id)
+			if contract < 0 || contract >= native_module.objects.size()
+				return "MIR implemented interface identity is invalid"
+			end
+			if !native_module.objects[contract].interface_type || contracts.key?(integer_string(type_id))
+				return "MIR implemented interface kind or uniqueness differs"
+			end
+			contracts[integer_string(type_id)] = 1
+		end
+		mut fields: Hash<String, Integer> := {}
+		row.fields.each do |field|
+			if field.name.size() < 2 || field.name[0] != "@" || fields.key?(field.name)
+				return "MIR object field identity differs"
+			end
+			fields[field.name] = 1
+			if !mir_origin_valid(row.source_id, field.line, native_module.source_count[0])
+				return "MIR object field origin is invalid"
+			end
+			mut valid := false
+			if mir_control_value_type(field.type_id) || field.type_id == mir_type_integer_array() || field.type_id == mir_type_float_array()
+				valid = true
+			end
+			if field.type_id >= mir_type_composite_start() && field.type_id - mir_type_composite_start() < native_module.types.size()
+				valid = true
+			end
+			if !valid
+				return "MIR object field type is invalid"
+			end
+		end
+		mut previous := 0
+		while previous < owner
+			other := native_module.objects[previous]
+			if other.source_id == row.source_id && other.name == row.name
+				mut same := other.arguments.size() == row.arguments.size()
+				mut argument := 0
+				while same && argument < row.arguments.size()
+					same = row.arguments[argument] == other.arguments[argument]
+					argument += 1
+				end
+				if same
+					return "MIR object declaration is duplicated"
+				end
+			end
+			previous += 1
+		end
+		owner += 1
+	end
+	# Edges are now in range. Cycles are distinct from valid recursive fields.
+	owner = 0
+	while owner < native_module.objects.size()
+		mut seen: Hash<String, Integer> := {}
+		mut current := owner
+		while current >= 0
+			if seen.key?(integer_string(current))
+				return "MIR class inheritance is cyclic"
+			end
+			seen[integer_string(current)] = 1
+			current = mir_object_id(native_module, native_module.objects[current].superclass)
+		end
+		owner += 1
+	end
+	return ""
+end

@@ -1,0 +1,38 @@
+# The private network adapter ABI is independent of authored source names.
+def network_adapter_start(): Integer
+	return 19
+end
+
+def network_names(): Array<String>
+	return ["start", "next_request", "read", "status", "write", "stop"]
+end
+
+def network_parameters(kind: Integer): Array<String>
+	if kind == 0
+		return ["String", "Integer", "Integer", "Integer"]
+	elsif kind == 2
+		return ["Integer", "Integer"]
+	elsif kind == 3
+		return ["Integer"]
+	elsif kind == 4
+		return ["Integer", "Bytes", "Boolean"]
+	end
+	return []
+end
+
+def network_parameter_names(kind: Integer): Array<String>
+	if kind == 0
+		return ["host", "port", "body_limit", "shutdown_timeout"]
+	elsif kind == 2
+		return ["connection", "field"]
+	elsif kind == 3
+		return ["connection"]
+	elsif kind == 4
+		return ["connection", "response", "close"]
+	end
+	return []
+end
+
+def network_result(kind: Integer): String
+	return ["String", "Integer", "Bytes", "Integer", "Boolean", "Void"][kind]
+end

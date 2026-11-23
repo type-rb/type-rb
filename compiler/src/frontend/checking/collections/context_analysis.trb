@@ -1,0 +1,200 @@
+import { CheckedValue } from frontend/checking/body/values
+import { check_function_body, checked_function_locals } from frontend/checking/program/functions
+import { checking_program_fork } from frontend/checking/program/generic_fork
+import { resolve_function_body } from frontend/checking/program/resolution
+import { declare_default_functions } from frontend/resolution/default_arguments
+import { skip_newlines, token_is } from frontend/syntax/syntax_tokens
+import { array_element_type, array_type, common_array_element_type } from frontend/resolution/type_resolution
+import { hash_key_type, hash_type, hash_value_type } from frontend/types/hash_types
+import { CheckedLocals } from state/local_state
+import { resolution_locals_new } from state/resolution_locals
+import { CompilerState, diagnostic, has_diagnostic } from state/state
+import { load_integer, load_string, sparse_integer_at, sparse_string_at, store_integer, store_string } from support/storage
+
+# Constraints determine the declaration itself, including captures and reads
+# that precede them. Discover them without MIR in an isolated program; ordinary
+# checking then starts with the resolved collection and capture storage types.
+def prepare_collection_contexts(mut state: CompilerState, function: Integer)
+	if state.callables.collection_inference_only[0] || state.callables.checked[0].collection_contexts_checked[0]
+		return
+	end
+	state.callables.checked[0].collection_contexts_checked[0] = true
+	mut origin := load_integer(state.declarations.function_body_starts, function)
+	finish := load_integer(state.declarations.function_body_ends, function)
+	mut pending := false
+	while origin + 3 < finish
+		if token_is(state, origin, "mut") && token_is(state, origin + 2, ":=")
+			mut literal := [origin + 3]
+			skip_newlines(state, literal)
+			while token_is(state, literal[0], "(")
+				literal[0] += 1
+				skip_newlines(state, literal)
+			end
+			mut close := [literal[0] + 1]
+			skip_newlines(state, close)
+			if (token_is(state, literal[0], "[") && token_is(state, close[0], "]")) || (token_is(state, literal[0], "{") && token_is(state, close[0], "}"))
+				pending = true
+				break
+			end
+		end
+		origin += 1
+	end
+	if !pending
+		return
+	end
+	mut inference := checking_program_fork(state, state.interactive)
+	inference.callables.collection_inference_only[0] = true
+	inference.type_resolution.generic_template_mode[0] = state.type_resolution.generic_template_mode[0]
+	mut names := resolution_locals_new(state.source_tokens.token_count[0] + 1)
+	resolve_function_body(inference, function, names)
+	declare_default_functions(inference)
+	if !has_diagnostic(inference)
+		mut locals := checked_function_locals(inference, function)
+		check_function_body(inference, function, locals)
+		state.callables.checked[0].collection_contexts[0] = inference.callables.checked[0].collection_contexts[0]
+		state.callables.checked[0].collection_witnesses[0] = inference.callables.checked[0].collection_witnesses[0]
+	end
+end
+
+# Keep a pending identity through its first constraining statement. An exact
+# context wins over write witnesses, but an untyped escape blocks inference.
+def collection_inference_region(state: CompilerState, locals: CheckedLocals, binding: Integer): Integer
+	if !state.callables.collection_inference_only[0]
+		return locals.inference_active_region[0]
+	end
+	owner := load_integer(locals.collection_scopes, binding)
+	mut index := locals.collection_region_count[0] - 2
+	while index >= 0
+		if locals.collection_statement_regions[index] == owner
+			return locals.collection_statement_regions[index + 1]
+		end
+		index -= 2
+	end
+	return 0
+end
+
+def pending_collection_declaration(state: CompilerState, locals: CheckedLocals, value: CheckedValue): Integer
+	if !state.callables.collection_inference_only[0] || value.mutable == 0 || !value.binding || value.nullable_field != -1
+		return -1
+	end
+	return pending_collection_binding(state, locals, value.nullable_binding)
+end
+
+def pending_collection_binding(state: CompilerState, locals: CheckedLocals, binding: Integer): Integer
+	if !state.callables.collection_inference_only[0] || binding < 0 || binding >= locals.count[0] || load_integer(locals.mutable, binding) == 0
+		return -1
+	end
+	mut declaration := load_integer(locals.array_declaration_origins, binding) - 1
+	mut region := load_integer(locals.array_inference_regions, binding)
+	if declaration < 0
+		declaration = load_integer(locals.hash_declaration_origins, binding) - 1
+		region = load_integer(locals.hash_inference_regions, binding)
+	end
+	if declaration < 0
+		return -1
+	end
+	outcome := sparse_string_at(state.callables.checked[0].collection_contexts[0], declaration)
+	if outcome == "Invalid"
+		return -1
+	end
+	if outcome != "" || sparse_string_at(state.callables.checked[0].collection_witnesses[0], declaration) != ""
+		region = sparse_integer_at(state.callables.checked[0].collection_context_regions[0], declaration)
+	elsif load_string(locals.types, binding) == "Array" || load_string(locals.types, binding) == "Hash"
+		return declaration
+	end
+	if region != 0 && region == collection_inference_region(state, locals, binding)
+		return declaration
+	end
+	return -1
+end
+
+# Writes in sibling or nested closures belong to the binding's owning statement.
+# Keep them separate so a later exact context in that statement takes precedence.
+def record_collection_witness(mut state: CompilerState, locals: CheckedLocals, binding: Integer, type_name: String): String
+	declaration := pending_collection_binding(state, locals, binding)
+	if declaration < 0
+		return type_name
+	end
+	previous := sparse_string_at(state.callables.checked[0].collection_witnesses[0], declaration)
+	mut inferred := type_name
+	if array_element_type(previous) != "" && array_element_type(type_name) != ""
+		inferred = array_type(common_array_element_type(array_element_type(previous), array_element_type(type_name)))
+	elsif hash_key_type(previous) != "" && hash_key_type(type_name) != ""
+		# The first key fixes the homogeneous key type. The ordinary pass
+		# checks all later keys against it, including this statement's writes.
+		inferred = hash_type(hash_key_type(previous), common_array_element_type(hash_value_type(previous), hash_value_type(type_name)))
+	end
+	if inferred != "" && inferred != "Invalid"
+		store_string(state.callables.checked[0].collection_witnesses[0], declaration, inferred)
+		store_integer(state.callables.checked[0].collection_context_regions[0], declaration, collection_inference_region(state, locals, binding))
+	end
+	return inferred
+end
+
+def record_collection_context(mut state: CompilerState, locals: CheckedLocals, value: CheckedValue, expected: String)
+	declaration := pending_collection_declaration(state, locals, value)
+	if declaration >= 0
+		previous := sparse_string_at(state.callables.checked[0].collection_contexts[0], declaration)
+		if previous == "" || previous == "Captured"
+			store_string(state.callables.checked[0].collection_contexts[0], declaration, expected)
+			store_integer(state.callables.checked[0].collection_context_regions[0], declaration, collection_inference_region(state, locals, value.nullable_binding))
+		end
+	end
+end
+
+def record_collection_capture(mut state: CompilerState, locals: CheckedLocals, binding: Integer)
+	declaration := pending_collection_binding(state, locals, binding)
+	if declaration >= 0 && sparse_string_at(state.callables.checked[0].collection_contexts[0], declaration) == ""
+		store_string(state.callables.checked[0].collection_contexts[0], declaration, "Captured")
+		store_integer(state.callables.checked[0].collection_context_regions[0], declaration, collection_inference_region(state, locals, binding))
+	end
+end
+
+def block_collection_escape(mut state: CompilerState, locals: CheckedLocals, value: CheckedValue)
+	declaration := pending_collection_declaration(state, locals, value)
+	if declaration >= 0
+		store_string(state.callables.checked[0].collection_contexts[0], declaration, "Invalid")
+	end
+end
+
+def provisional_collection_nil_test(state: CompilerState, locals: CheckedLocals, value: CheckedValue): Boolean
+	if !state.callables.collection_inference_only[0] || value.nullable_binding < 0 || value.nullable_field != -1
+		return false
+	end
+	binding := value.nullable_binding
+	if load_integer(locals.array_declaration_origins, binding) > 0 || load_integer(locals.hash_declaration_origins, binding) > 0
+		return true
+	end
+	return false
+end
+
+def fresh_pending_collection_literal(state: CompilerState, value: CheckedValue): Boolean
+	if value.binding || (value.type_name != "Array" && value.type_name != "Hash")
+		return false
+	end
+	mut close := [value.origin + 1]
+	skip_newlines(state, close)
+	if token_is(state, value.origin, "[") && token_is(state, close[0], "]")
+		return true
+	end
+	if token_is(state, value.origin, "{") && token_is(state, close[0], "}")
+		return true
+	end
+	return false
+end
+
+def inferred_collection_context(mut state: CompilerState, origin: Integer): String
+	if state.callables.collection_inference_only[0]
+		return ""
+	end
+	outcome := sparse_string_at(state.callables.checked[0].collection_contexts[0], origin)
+	witness := sparse_string_at(state.callables.checked[0].collection_witnesses[0], origin)
+	if outcome == "Invalid" || (outcome == "Captured" && witness == "")
+		diagnostic(state, "TRBN4004", load_integer(state.source_tokens.token_lines, origin), "cannot infer an empty collection before its value escapes; add an explicit collection type annotation")
+		return ""
+	end
+	if outcome != "" && outcome != "Captured"
+		return outcome
+	end
+	return witness
+end

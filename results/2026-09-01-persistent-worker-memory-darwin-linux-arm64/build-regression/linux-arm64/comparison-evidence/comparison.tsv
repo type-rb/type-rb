@@ -1,0 +1,4 @@
+metric	stage	baseline	candidate	candidate_baseline_ratio	maximum	status
+compiler_bytes	fixed-point	252224	253632	1.005582	1.05	pass
+build_elapsed	fixed-point-build	0.900000	0.900000	1.000000	1.05	pass
+build_peak_rss	fixed-point-build	64397312.000000	64389120.000000	0.999873	1.05	pass

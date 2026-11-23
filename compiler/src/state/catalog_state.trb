@@ -1,0 +1,179 @@
+import { ProjectWebEndpoint, ProjectWebRoute } from state/web_routes
+import { TypeAlias, TypeAliasInstance } from frontend/types/alias_model
+import { GenericBinding, GenericDefinition, GenericFunction, GenericFunctionInstance, GenericInstance } from frontend/types/generic_model
+import { IntegerStorage, StringStorage, integer_storage, integer_storage_copy, string_storage } from support/storage
+
+# One independent diagnostic result per compiler state. Generic specialization
+# starts with a fresh result while sharing its immutable source tokens.
+# The code storage's used boundary also owns presence of the first result.
+record CompilerDiagnostics
+	codes: StringStorage
+	lines: IntegerStorage
+	columns: IntegerStorage
+	messages: StringStorage
+	modules: IntegerStorage
+end
+
+def compiler_diagnostics_new(): CompilerDiagnostics
+	return CompilerDiagnostics.new(
+		codes: string_storage(1), lines: integer_storage(1), columns: integer_storage(1),
+		messages: string_storage(1), modules: integer_storage(1),
+	)
+end
+
+# Parsed module and import catalogs. Generic specialization shares source facts
+# but owns its active-module cursor and import-use facts.
+record CompilerModuleGraph
+	orm_model_modules: Array<Integer>
+	web_routes: Array<ProjectWebRoute>
+	web_middlewares: Array<ProjectWebRoute>
+	web_endpoints: Array<ProjectWebEndpoint>
+	module_names: StringStorage
+	module_files: StringStorage
+	module_count: Array<Integer>
+	module_import_starts: IntegerStorage
+	module_import_counts: IntegerStorage
+	module_generated_dependencies: IntegerStorage
+	module_lookup: Hash<String, Integer>
+	entry_module: Array<Integer>
+	active_module: Array<Integer>
+	import_modules: IntegerStorage
+	import_paths: StringStorage
+	import_symbols: StringStorage
+	import_declarations: StringStorage
+	import_kinds: IntegerStorage
+	import_lines: IntegerStorage
+	import_targets: IntegerStorage
+	import_used: IntegerStorage
+	import_count: Array<Integer>
+end
+
+# Type aliases and generic specializations share one resolution catalog. A
+# template-checking fork retains declarations but owns mutable lookup/progress.
+record CompilerTypeResolution
+	type_aliases: Array<TypeAlias>
+	alias_instances: Array<TypeAliasInstance>
+	alias_instance_lookup: Hash<String, Integer>
+	alias_patterns: StringStorage
+	alias_expansion_path: IntegerStorage
+	alias_expansion_depth: Array<Integer>
+	generic_definitions: Array<GenericDefinition>
+	generic_instances: Array<GenericInstance>
+	generic_instance_lookup: Hash<String, Integer>
+	generic_depth: Array<Integer>
+	generic_functions: Array<GenericFunction>
+	generic_function_instances: Array<GenericFunctionInstance>
+	generic_function_lookup: Hash<String, Integer>
+	generic_bindings: Array<GenericBinding>
+	record_generic_bindings: IntegerStorage
+	function_generic_bindings: IntegerStorage
+	generic_template_mode: Array<Boolean>
+end
+
+# Parsed record, function and parameter declarations form one catalog. A
+# template-checking fork copies its mutable storage and lookup independently.
+record CompilerDeclarationCatalog
+	record_names: StringStorage
+	record_modules: IntegerStorage
+	record_field_starts: IntegerStorage
+	record_field_counts: IntegerStorage
+	record_lines: IntegerStorage
+	record_count: Array<Integer>
+	field_names: StringStorage
+	field_types: StringStorage
+	field_lines: IntegerStorage
+	field_count: Array<Integer>
+	function_names: StringStorage
+	function_modules: IntegerStorage
+	function_parameter_starts: IntegerStorage
+	function_parameter_counts: IntegerStorage
+	function_result_types: StringStorage
+	function_body_starts: IntegerStorage
+	function_body_ends: IntegerStorage
+	function_lines: IntegerStorage
+	function_count: Array<Integer>
+	function_lookup: Hash<String, Integer>
+	parameter_names: StringStorage
+	parameter_types: StringStorage
+	parameter_mutable: IntegerStorage
+	parameter_named_only: IntegerStorage
+	parameter_lines: IntegerStorage
+	parameter_count: Array<Integer>
+end
+
+def compiler_type_resolution_new(capacity: Integer): CompilerTypeResolution
+	return CompilerTypeResolution.new(
+		type_aliases: [], alias_instances: [], alias_instance_lookup: {},
+		alias_patterns: string_storage(capacity), alias_expansion_path: integer_storage(capacity), alias_expansion_depth: [0],
+		generic_definitions: [], generic_instances: [], generic_instance_lookup: {}, generic_depth: [0],
+		generic_functions: [], generic_function_instances: [], generic_function_lookup: {},
+		generic_bindings: [], record_generic_bindings: integer_storage(capacity), function_generic_bindings: integer_storage(capacity),
+		generic_template_mode: [false],
+	)
+end
+
+def compiler_module_graph_new(capacity: Integer): CompilerModuleGraph
+	return CompilerModuleGraph.new(
+		orm_model_modules: [], web_routes: [], web_middlewares: [], web_endpoints: [],
+		module_names: string_storage(capacity),
+		module_files: string_storage(capacity),
+		module_count: [0],
+		module_import_starts: integer_storage(capacity),
+		module_import_counts: integer_storage(capacity),
+		module_generated_dependencies: integer_storage(capacity),
+		module_lookup: {},
+		entry_module: [0],
+		active_module: [0],
+		import_modules: integer_storage(capacity),
+		import_paths: string_storage(capacity),
+		import_symbols: string_storage(capacity),
+		import_declarations: string_storage(capacity),
+		import_kinds: integer_storage(capacity),
+		import_lines: integer_storage(capacity),
+		import_targets: integer_storage(capacity),
+		import_used: integer_storage(capacity),
+		import_count: [0],
+	)
+end
+
+def compiler_module_graph_fork(graph: CompilerModuleGraph, active_module: Array<Integer>): CompilerModuleGraph
+	return CompilerModuleGraph.new(
+		orm_model_modules: graph.orm_model_modules, web_routes: graph.web_routes, web_middlewares: graph.web_middlewares, web_endpoints: graph.web_endpoints,
+		module_names: graph.module_names,
+		module_files: graph.module_files,
+		module_count: graph.module_count,
+		module_import_starts: graph.module_import_starts,
+		module_import_counts: graph.module_import_counts,
+		module_generated_dependencies: graph.module_generated_dependencies,
+		module_lookup: graph.module_lookup,
+		entry_module: graph.entry_module,
+		active_module: active_module,
+		import_modules: graph.import_modules,
+		import_paths: graph.import_paths,
+		import_symbols: graph.import_symbols,
+		import_declarations: graph.import_declarations,
+		import_kinds: graph.import_kinds,
+		import_lines: graph.import_lines,
+		import_targets: graph.import_targets,
+		import_used: integer_storage_copy(graph.import_used),
+		import_count: graph.import_count,
+	)
+end
+
+def compiler_declaration_catalog_new(capacity: Integer): CompilerDeclarationCatalog
+	return CompilerDeclarationCatalog.new(
+		record_names: string_storage(capacity), record_modules: integer_storage(capacity),
+		record_field_starts: integer_storage(capacity), record_field_counts: integer_storage(capacity),
+		record_lines: integer_storage(capacity), record_count: [0],
+		field_names: string_storage(capacity), field_types: string_storage(capacity),
+		field_lines: integer_storage(capacity), field_count: [0],
+		function_names: string_storage(capacity), function_modules: integer_storage(capacity),
+		function_parameter_starts: integer_storage(capacity), function_parameter_counts: integer_storage(capacity),
+		function_result_types: string_storage(capacity), function_body_starts: integer_storage(capacity),
+		function_body_ends: integer_storage(capacity), function_lines: integer_storage(capacity),
+		function_count: [0], function_lookup: {},
+		parameter_names: string_storage(capacity), parameter_types: string_storage(capacity),
+		parameter_mutable: integer_storage(capacity), parameter_named_only: integer_storage(capacity),
+		parameter_lines: integer_storage(capacity), parameter_count: [0],
+	)
+end

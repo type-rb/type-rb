@@ -1,0 +1,13 @@
+def main()
+	values := [1]
+	mut index := 0
+	while index < values.size()
+		if false
+			return
+		elsif true
+			index = -2
+		end
+		puts(values[index])
+		index += 1
+	end
+end

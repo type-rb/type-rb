@@ -1,0 +1,1060 @@
+import { Diagnostic, boundary_diagnostic } from support/diagnostic
+import { ComparisonOperator, FloatBinaryOperator, IntegerBinaryOperator, RecoveryScalarInstruction, ScalarType } from scalar/mir
+import { RecoveryManagedBlock, RecoveryManagedFunction, RecoveryManagedInstruction, RecoveryManagedModule, RecoveryManagedParameter, RecoveryManagedResultType, RecoveryManagedTerminator, verify_recovery_managed_mir } from managed/mir
+import { RecoveryManagedField, RecoveryManagedTypeDefinition, RecoveryManagedValueType, RecoveryManagedVariant } from managed/layout
+import { NativeSource } from snapshot/mir
+import { object, required_array, required_field, required_integer, required_string, strict_object } from snapshot/json_boundary
+import { decode_origin } from snapshot/schema
+import trb/std/json
+import trb/std/result
+
+MANAGED_RECOVERY_MAX_INPUT_BYTES := 4194304
+COMPILER_RECOVERY_MAX_INPUT_BYTES := 226492416
+MANAGED_RECOVERY_MAX_SOURCES := 256
+COMPILER_RECOVERY_MAX_SOURCES := 512
+MANAGED_RECOVERY_MAX_FUNCTIONS := 512
+COMPILER_RECOVERY_MAX_FUNCTIONS := 2560
+MANAGED_RECOVERY_SNAPSHOT_MAX_TYPES := 1024
+MANAGED_RECOVERY_SNAPSHOT_MAX_FIELDS := 256
+MANAGED_RECOVERY_SNAPSHOT_MAX_VARIANTS := 1024
+MANAGED_RECOVERY_MAX_PARAMETERS := 256
+MANAGED_RECOVERY_MAX_BLOCKS := 1024
+MANAGED_RECOVERY_MAX_INSTRUCTIONS := 16384
+MANAGED_RECOVERY_MAX_ARGUMENTS := 256
+COMPILER_RECOVERY_MAX_ARRAY_ARGUMENTS := 1024
+MANAGED_RECOVERY_MAX_STATIC_BYTES := 1048576
+MANAGED_RECOVERY_MAX_IDENTIFIER_SIZE := 256
+MANAGED_RECOVERY_MAX_SOURCE_PATH_SIZE := 4096
+
+def decode_recovery_managed_snapshot(source: String): Result<RecoveryManagedModule, Diagnostic>
+	return _decode_recovery_managed_snapshot(
+		source,
+		MANAGED_RECOVERY_MAX_INPUT_BYTES,
+		"Managed recovery 4 MiB",
+		MANAGED_RECOVERY_MAX_ARGUMENTS,
+		MANAGED_RECOVERY_MAX_SOURCES,
+		MANAGED_RECOVERY_MAX_FUNCTIONS,
+	)
+end
+
+def decode_bootstrap_snapshot(source: String): Result<RecoveryManagedModule, Diagnostic>
+	return _decode_recovery_managed_snapshot(
+		source,
+		COMPILER_RECOVERY_MAX_INPUT_BYTES,
+		"Native bootstrap 216 MiB",
+		COMPILER_RECOVERY_MAX_ARRAY_ARGUMENTS,
+		COMPILER_RECOVERY_MAX_SOURCES,
+		COMPILER_RECOVERY_MAX_FUNCTIONS,
+	)
+end
+
+def _decode_recovery_managed_snapshot(
+		source: String,
+		max_input_bytes: Integer,
+		limit_name: String,
+		max_array_arguments: Integer,
+		max_sources: Integer,
+		max_functions: Integer,
+	): Result<RecoveryManagedModule, Diagnostic>
+	if source.to_bytes().size() > max_input_bytes
+		return Result<RecoveryManagedModule, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0005", "", "snapshot exceeds the " + limit_name + " input limit")
+		)
+	end
+	root := case JSON.parse(source)
+	when Result::Ok(value)
+		value
+	when Result::Err(error)
+		return Result<RecoveryManagedModule, Diagnostic>::Err(
+			Diagnostic.new(
+				code: "TRBN0001",
+				path: error.path,
+				message: error.message,
+				start_line: error.line,
+				start_column: error.column,
+			)
+		)
+	end
+	fields := try strict_object(
+		root,
+		"",
+		["format", "version", "module", "entryFunction", "sources", "types", "functions"],
+	)
+	format := try required_string(fields, "format", "", false)
+	if format != "type-rb-bootstrap-snapshot"
+		return Result<RecoveryManagedModule, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0003", "/format", "unsupported snapshot format")
+		)
+	end
+	version := try required_integer(fields, "version", "")
+	if version != 4
+		return Result<RecoveryManagedModule, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0003", "/version", "unsupported Managed recovery snapshot version")
+		)
+	end
+	source_values := try required_array(fields, "sources", "")
+	if source_values.size() > max_sources
+		return Result<RecoveryManagedModule, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0005", "/sources", "source count exceeds the Managed recovery limit")
+		)
+	end
+	mut sources: Array<NativeSource> := []
+	mut source_index := 0
+	while source_index < source_values.size()
+		sources.push(try _recovery_managed_decode_source(source_values[source_index], "/sources/" + source_index.to_s()))
+		source_index += 1
+	end
+	type_values := try required_array(fields, "types", "")
+	if type_values.size() > MANAGED_RECOVERY_SNAPSHOT_MAX_TYPES
+		return Result<RecoveryManagedModule, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0005", "/types", "type definition count exceeds the Managed recovery limit")
+		)
+	end
+	mut types: Array<RecoveryManagedTypeDefinition> := []
+	mut type_index := 0
+	while type_index < type_values.size()
+		types.push(try _recovery_managed_decode_type_definition(type_values[type_index], "/types/" + type_index.to_s()))
+		type_index += 1
+	end
+	function_values := try required_array(fields, "functions", "")
+	if function_values.size() > max_functions
+		return Result<RecoveryManagedModule, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0005", "/functions", "function count exceeds the Managed recovery limit")
+		)
+	end
+	mut functions: Array<RecoveryManagedFunction> := []
+	mut function_index := 0
+	while function_index < function_values.size()
+		functions.push(
+			try _recovery_managed_decode_function(
+				function_values[function_index],
+				"/functions/" + function_index.to_s(),
+				max_array_arguments,
+			)
+		)
+		function_index += 1
+	end
+	native_module := RecoveryManagedModule.new(
+		id: try required_string(fields, "module", "", true),
+		entry_function: try required_string(fields, "entryFunction", "", true),
+		sources: sources,
+		types: types,
+		functions: functions,
+	)
+	try verify_recovery_managed_mir(native_module)
+	return Result<RecoveryManagedModule, Diagnostic>::Ok(native_module)
+end
+
+def _recovery_managed_decode_type_definition(value: JSON::Value, path: String): Result<RecoveryManagedTypeDefinition, Diagnostic>
+	base_fields := try object(value, path)
+	kind := try required_string(base_fields, "kind", path, false)
+	if kind == "string"
+		fields := try strict_object(value, path, ["kind", "id"])
+		type_id := try required_string(fields, "id", path, true)
+		if type_id != "String"
+			return Result<RecoveryManagedTypeDefinition, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0004", path + "/id", "String type must use the canonical String identifier")
+			)
+		end
+		return Result<RecoveryManagedTypeDefinition, Diagnostic>::Ok(RecoveryManagedTypeDefinition::String(type_id))
+	end
+	if kind == "hash"
+		fields := try strict_object(value, path, ["kind", "id", "key", "element"])
+		type_id := try required_string(fields, "id", path, true)
+		key := try required_string(fields, "key", path, true)
+		element := try required_string(fields, "element", path, true)
+		if type_id != "Hash<String, Integer>" || key != "String" || element != "Integer"
+			return Result<RecoveryManagedTypeDefinition, Diagnostic>::Err(boundary_diagnostic("TRBN0004", path, "unsupported Hash type"))
+		end
+		return Result<RecoveryManagedTypeDefinition, Diagnostic>::Ok(RecoveryManagedTypeDefinition::Hash(type_id))
+	end
+	if kind == "array"
+		fields := try strict_object(value, path, ["kind", "id", "element"])
+		return Result<RecoveryManagedTypeDefinition, Diagnostic>::Ok(
+			RecoveryManagedTypeDefinition::Array(
+				try required_string(fields, "id", path, true),
+				try _recovery_managed_decode_value_type(
+					try required_string(fields, "element", path, false),
+					path + "/element",
+				),
+			)
+		)
+	end
+	if kind == "function"
+		fields := try strict_object(value, path, ["kind", "id", "parameters", "result"])
+		parameter_names := try _recovery_managed_required_string_array(fields, "parameters", path)
+		mut parameter_types: Array<RecoveryManagedValueType> := []
+		mut parameter_index := 0
+		while parameter_index < parameter_names.size()
+			parameter_types.push(
+				try _recovery_managed_decode_value_type(
+					parameter_names[parameter_index],
+					path + "/parameters/" + parameter_index.to_s(),
+				)
+			)
+			parameter_index += 1
+		end
+		result_name := try required_string(fields, "result", path, false)
+		mut result_type: RecoveryManagedValueType? := nil
+		if result_name != "Void"
+			result_type = try _recovery_managed_decode_value_type(result_name, path + "/result")
+		end
+		return Result<RecoveryManagedTypeDefinition, Diagnostic>::Ok(
+			RecoveryManagedTypeDefinition::Function(
+				try required_string(fields, "id", path, true),
+				parameter_types,
+				result_type,
+			)
+		)
+	end
+	if kind == "record"
+		fields := try strict_object(value, path, ["kind", "id", "fields"])
+		return Result<RecoveryManagedTypeDefinition, Diagnostic>::Ok(
+			RecoveryManagedTypeDefinition::Record(
+				try required_string(fields, "id", path, true),
+				try _recovery_managed_decode_fields(try required_array(fields, "fields", path), path + "/fields"),
+			)
+		)
+	end
+	if kind == "tagged"
+		fields := try strict_object(value, path, ["kind", "id", "variants"])
+		variant_values := try required_array(fields, "variants", path)
+		if variant_values.size() > MANAGED_RECOVERY_SNAPSHOT_MAX_VARIANTS
+			return Result<RecoveryManagedTypeDefinition, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0005", path + "/variants", "variant count exceeds the Managed recovery limit")
+			)
+		end
+		mut variants: Array<RecoveryManagedVariant> := []
+		mut index := 0
+		while index < variant_values.size()
+			variant_path := path + "/variants/" + index.to_s()
+			variant_fields := try strict_object(variant_values[index], variant_path, ["name", "fields"])
+			variants.push(
+				RecoveryManagedVariant.new(
+					name: try required_string(variant_fields, "name", variant_path, true),
+					fields: try _recovery_managed_decode_fields(
+						try required_array(variant_fields, "fields", variant_path),
+						variant_path + "/fields",
+					),
+				)
+			)
+			index += 1
+		end
+		return Result<RecoveryManagedTypeDefinition, Diagnostic>::Ok(
+			RecoveryManagedTypeDefinition::Tagged(
+				try required_string(fields, "id", path, true),
+				variants,
+			)
+		)
+	end
+	return Result<RecoveryManagedTypeDefinition, Diagnostic>::Err(
+		boundary_diagnostic("TRBN0003", path + "/kind", "unsupported Managed recovery type definition")
+	)
+end
+
+def _recovery_managed_decode_fields(values: Array<JSON::Value>, path: String): Result<Array<RecoveryManagedField>, Diagnostic>
+	if values.size() > MANAGED_RECOVERY_SNAPSHOT_MAX_FIELDS
+		return Result<Array<RecoveryManagedField>, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0005", path, "field count exceeds the Managed recovery limit")
+		)
+	end
+	mut fields: Array<RecoveryManagedField> := []
+	mut index := 0
+	while index < values.size()
+		field_path := path + "/" + index.to_s()
+		item := try strict_object(values[index], field_path, ["name", "type"])
+		fields.push(
+			RecoveryManagedField.new(
+				name: try required_string(item, "name", field_path, true),
+				value_type: try _recovery_managed_decode_value_type(
+					try required_string(item, "type", field_path, false),
+					field_path + "/type",
+				),
+			)
+		)
+		index += 1
+	end
+	return Result<Array<RecoveryManagedField>, Diagnostic>::Ok(fields)
+end
+
+def _recovery_managed_decode_source(value: JSON::Value, path: String): Result<NativeSource, Diagnostic>
+	fields := try strict_object(value, path, ["id", "path"])
+	source_path := try required_string(fields, "path", path, false)
+	if source_path.empty?()
+		return Result<NativeSource, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0004", path + "/path", "source path must not be empty")
+		)
+	end
+	if source_path.size() > MANAGED_RECOVERY_MAX_SOURCE_PATH_SIZE
+		return Result<NativeSource, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0005", path + "/path", "source path exceeds the Managed recovery limit")
+		)
+	end
+	return Result<NativeSource, Diagnostic>::Ok(
+		NativeSource.new(
+			id: try required_string(fields, "id", path, true),
+			path: source_path,
+		)
+	)
+end
+
+def _recovery_managed_decode_function(
+		value: JSON::Value,
+		path: String,
+		max_array_arguments: Integer,
+	): Result<RecoveryManagedFunction, Diagnostic>
+	fields := try strict_object(
+		value,
+		path,
+		["id", "name", "captures", "parameters", "result", "entry", "origin", "blocks"],
+	)
+	capture_values := try required_array(fields, "captures", path)
+	if capture_values.size() > MANAGED_RECOVERY_MAX_PARAMETERS
+		return Result<RecoveryManagedFunction, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0005", path + "/captures", "capture count exceeds the Managed recovery limit")
+		)
+	end
+	mut captures: Array<RecoveryManagedParameter> := []
+	mut capture_index := 0
+	while capture_index < capture_values.size()
+		captures.push(
+			try _recovery_managed_decode_parameter(capture_values[capture_index], path + "/captures/" + capture_index.to_s())
+		)
+		capture_index += 1
+	end
+	parameter_values := try required_array(fields, "parameters", path)
+	if parameter_values.size() > MANAGED_RECOVERY_MAX_PARAMETERS
+		return Result<RecoveryManagedFunction, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0005", path + "/parameters", "parameter count exceeds the Managed recovery limit")
+		)
+	end
+	mut parameters: Array<RecoveryManagedParameter> := []
+	mut parameter_index := 0
+	while parameter_index < parameter_values.size()
+		parameters.push(
+			try _recovery_managed_decode_parameter(parameter_values[parameter_index], path + "/parameters/" + parameter_index.to_s())
+		)
+		parameter_index += 1
+	end
+	block_values := try required_array(fields, "blocks", path)
+	if block_values.size() > MANAGED_RECOVERY_MAX_BLOCKS
+		return Result<RecoveryManagedFunction, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0005", path + "/blocks", "block count exceeds the Managed recovery limit")
+		)
+	end
+	mut blocks: Array<RecoveryManagedBlock> := []
+	mut block_index := 0
+	while block_index < block_values.size()
+		blocks.push(
+			try _recovery_managed_decode_block(
+				block_values[block_index],
+				path + "/blocks/" + block_index.to_s(),
+				max_array_arguments,
+			)
+		)
+		block_index += 1
+	end
+	return Result<RecoveryManagedFunction, Diagnostic>::Ok(
+		RecoveryManagedFunction.new(
+			id: try required_string(fields, "id", path, true),
+			name: try required_string(fields, "name", path, true),
+			parameters: parameters,
+			result_type: try _recovery_managed_decode_result_type(
+				try required_string(fields, "result", path, false),
+				path + "/result",
+			),
+			entry: try required_string(fields, "entry", path, true),
+			origin: try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+			blocks: blocks,
+			captures: captures,
+		)
+	)
+end
+
+def _recovery_managed_decode_parameter(value: JSON::Value, path: String): Result<RecoveryManagedParameter, Diagnostic>
+	fields := try strict_object(value, path, ["id", "type", "origin"])
+	return Result<RecoveryManagedParameter, Diagnostic>::Ok(
+		RecoveryManagedParameter.new(
+			id: try required_string(fields, "id", path, true),
+			value_type: try _recovery_managed_decode_value_type(
+				try required_string(fields, "type", path, false),
+				path + "/type",
+			),
+			origin: try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+		)
+	)
+end
+
+def _recovery_managed_decode_value_type(name: String, path: String): Result<RecoveryManagedValueType, Diagnostic>
+	if name == "Boolean"
+		return Result<RecoveryManagedValueType, Diagnostic>::Ok(RecoveryManagedValueType::Scalar(ScalarType::Boolean))
+	end
+	if name == "Integer"
+		return Result<RecoveryManagedValueType, Diagnostic>::Ok(RecoveryManagedValueType::Scalar(ScalarType::Integer))
+	end
+	if name == "Float"
+		return Result<RecoveryManagedValueType, Diagnostic>::Ok(RecoveryManagedValueType::Scalar(ScalarType::Float))
+	end
+	if name.empty?() || name == "Void"
+		return Result<RecoveryManagedValueType, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0003", path, "unsupported Managed recovery value type")
+		)
+	end
+	return Result<RecoveryManagedValueType, Diagnostic>::Ok(RecoveryManagedValueType::Aggregate(name))
+end
+
+def _recovery_managed_decode_result_type(name: String, path: String): Result<RecoveryManagedResultType, Diagnostic>
+	if name == "Void"
+		return Result<RecoveryManagedResultType, Diagnostic>::Ok(RecoveryManagedResultType::Void)
+	end
+	return Result<RecoveryManagedResultType, Diagnostic>::Ok(
+		RecoveryManagedResultType::Value(try _recovery_managed_decode_value_type(name, path))
+	)
+end
+
+def _recovery_managed_decode_block(
+		value: JSON::Value,
+		path: String,
+		max_array_arguments: Integer,
+	): Result<RecoveryManagedBlock, Diagnostic>
+	fields := try strict_object(value, path, ["id", "parameters", "origin", "instructions", "terminator"])
+	parameter_values := try required_array(fields, "parameters", path)
+	if parameter_values.size() > MANAGED_RECOVERY_MAX_PARAMETERS
+		return Result<RecoveryManagedBlock, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0005", path + "/parameters", "block parameter count exceeds the Managed recovery limit")
+		)
+	end
+	mut parameters: Array<RecoveryManagedParameter> := []
+	mut parameter_index := 0
+	while parameter_index < parameter_values.size()
+		parameters.push(
+			try _recovery_managed_decode_parameter(parameter_values[parameter_index], path + "/parameters/" + parameter_index.to_s())
+		)
+		parameter_index += 1
+	end
+	instruction_values := try required_array(fields, "instructions", path)
+	if instruction_values.size() > MANAGED_RECOVERY_MAX_INSTRUCTIONS
+		return Result<RecoveryManagedBlock, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0005", path + "/instructions", "instruction count exceeds the Managed recovery limit")
+		)
+	end
+	mut instructions: Array<RecoveryManagedInstruction> := []
+	mut instruction_index := 0
+	while instruction_index < instruction_values.size()
+		instructions.push(
+			try _recovery_managed_decode_instruction(
+				instruction_values[instruction_index],
+				path + "/instructions/" + instruction_index.to_s(),
+				max_array_arguments,
+			)
+		)
+		instruction_index += 1
+	end
+	return Result<RecoveryManagedBlock, Diagnostic>::Ok(
+		RecoveryManagedBlock.new(
+			id: try required_string(fields, "id", path, true),
+			parameters: parameters,
+			origin: try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+			instructions: instructions,
+			terminator: try _recovery_managed_decode_terminator(try required_field(fields, "terminator", path), path + "/terminator"),
+		)
+	)
+end
+
+def _recovery_managed_decode_instruction(
+		value: JSON::Value,
+		path: String,
+		max_array_arguments: Integer,
+	): Result<RecoveryManagedInstruction, Diagnostic>
+	base_fields := try object(value, path)
+	op := try required_string(base_fields, "op", path, false)
+	if op == "boolean_literal"
+		fields := try strict_object(value, path, ["op", "result", "value", "origin"])
+		return Result<RecoveryManagedInstruction, Diagnostic>::Ok(
+			RecoveryManagedInstruction::Scalar(
+				RecoveryScalarInstruction::BooleanLiteral(
+					try required_string(fields, "result", path, true),
+					try _recovery_managed_required_boolean(fields, "value", path),
+					try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+				)
+			)
+		)
+	end
+	if op == "integer_literal"
+		fields := try strict_object(value, path, ["op", "result", "value", "origin"])
+		return Result<RecoveryManagedInstruction, Diagnostic>::Ok(
+			RecoveryManagedInstruction::Scalar(
+				RecoveryScalarInstruction::IntegerLiteral(
+					try required_string(fields, "result", path, true),
+					try required_integer(fields, "value", path),
+					try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+				)
+			)
+		)
+	end
+	if op == "float_literal"
+		fields := try strict_object(value, path, ["op", "result", "value", "origin"])
+		return Result<RecoveryManagedInstruction, Diagnostic>::Ok(
+			RecoveryManagedInstruction::Scalar(
+				RecoveryScalarInstruction::FloatLiteral(
+					try required_string(fields, "result", path, true),
+					try _recovery_managed_required_float(fields, "value", path),
+					try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+				)
+			)
+		)
+	end
+	if op == "integer_binary"
+		fields := try strict_object(value, path, ["op", "result", "operator", "left", "right", "origin"])
+		return Result<RecoveryManagedInstruction, Diagnostic>::Ok(
+			RecoveryManagedInstruction::Scalar(
+				RecoveryScalarInstruction::IntegerBinary(
+					try required_string(fields, "result", path, true),
+					try _recovery_managed_integer_operator(try required_string(fields, "operator", path, false), path + "/operator"),
+					try required_string(fields, "left", path, true),
+					try required_string(fields, "right", path, true),
+					try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+				)
+			)
+		)
+	end
+	if op == "float_binary"
+		fields := try strict_object(value, path, ["op", "result", "operator", "left", "right", "origin"])
+		return Result<RecoveryManagedInstruction, Diagnostic>::Ok(
+			RecoveryManagedInstruction::Scalar(
+				RecoveryScalarInstruction::FloatBinary(
+					try required_string(fields, "result", path, true),
+					try _recovery_managed_float_operator(try required_string(fields, "operator", path, false), path + "/operator"),
+					try required_string(fields, "left", path, true),
+					try required_string(fields, "right", path, true),
+					try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+				)
+			)
+		)
+	end
+	if op == "integer_compare" || op == "float_compare"
+		fields := try strict_object(value, path, ["op", "result", "operator", "left", "right", "origin"])
+		result := try required_string(fields, "result", path, true)
+		operator := try _recovery_managed_comparison_operator(try required_string(fields, "operator", path, false), path + "/operator")
+		left := try required_string(fields, "left", path, true)
+		right := try required_string(fields, "right", path, true)
+		origin := try decode_origin(try required_field(fields, "origin", path), path + "/origin")
+		if op == "integer_compare"
+			return Result<RecoveryManagedInstruction, Diagnostic>::Ok(
+				RecoveryManagedInstruction::Scalar(RecoveryScalarInstruction::IntegerCompare(result, operator, left, right, origin))
+			)
+		end
+		return Result<RecoveryManagedInstruction, Diagnostic>::Ok(
+			RecoveryManagedInstruction::Scalar(RecoveryScalarInstruction::FloatCompare(result, operator, left, right, origin))
+		)
+	end
+	if op == "boolean_not"
+		fields := try strict_object(value, path, ["op", "result", "value", "origin"])
+		return Result<RecoveryManagedInstruction, Diagnostic>::Ok(
+			RecoveryManagedInstruction::Scalar(
+				RecoveryScalarInstruction::BooleanNot(
+					try required_string(fields, "result", path, true),
+					try required_string(fields, "value", path, true),
+					try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+				)
+			)
+		)
+	end
+	if op == "string_literal"
+		fields := try strict_object(value, path, ["op", "result", "value", "origin"])
+		literal := try required_string(fields, "value", path, false)
+		if literal.to_bytes().size() > MANAGED_RECOVERY_MAX_STATIC_BYTES
+			return Result<RecoveryManagedInstruction, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0005", path + "/value", "String literal exceeds the Managed recovery limit")
+			)
+		end
+		return Result<RecoveryManagedInstruction, Diagnostic>::Ok(
+			RecoveryManagedInstruction::StringLiteral(
+				try required_string(fields, "result", path, true),
+				literal,
+				try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+			)
+		)
+	end
+	if op == "string_concat" || op == "string_equal"
+		fields := try strict_object(value, path, ["op", "result", "left", "right", "origin"])
+		result := try required_string(fields, "result", path, true)
+		left := try required_string(fields, "left", path, true)
+		right := try required_string(fields, "right", path, true)
+		origin := try decode_origin(try required_field(fields, "origin", path), path + "/origin")
+		if op == "string_concat"
+			return Result<RecoveryManagedInstruction, Diagnostic>::Ok(RecoveryManagedInstruction::StringConcat(result, left, right, origin))
+		end
+		return Result<RecoveryManagedInstruction, Diagnostic>::Ok(RecoveryManagedInstruction::StringEqual(result, left, right, origin))
+	end
+	if op == "string_size"
+		fields := try strict_object(value, path, ["op", "result", "value", "origin"])
+		return Result<RecoveryManagedInstruction, Diagnostic>::Ok(
+			RecoveryManagedInstruction::StringSize(
+				try required_string(fields, "result", path, true),
+				try required_string(fields, "value", path, true),
+				try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+			)
+		)
+	end
+	if op == "string_index"
+		fields := try strict_object(value, path, ["op", "result", "value", "index", "origin"])
+		return Result<RecoveryManagedInstruction, Diagnostic>::Ok(
+			RecoveryManagedInstruction::StringIndex(
+				try required_string(fields, "result", path, true),
+				try required_string(fields, "value", path, true),
+				try required_string(fields, "index", path, true),
+				try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+			)
+		)
+	end
+	if op == "write_string"
+		fields := try strict_object(value, path, ["op", "value", "newline", "origin"])
+		return Result<RecoveryManagedInstruction, Diagnostic>::Ok(
+			RecoveryManagedInstruction::WriteString(
+				try required_string(fields, "value", path, true),
+				try _recovery_managed_required_boolean(fields, "newline", path),
+				try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+			)
+		)
+	end
+	if op == "hash_construct"
+		fields := try strict_object(value, path, ["op", "result", "type", "keys", "values", "origin"])
+		return Result<RecoveryManagedInstruction, Diagnostic>::Ok(RecoveryManagedInstruction::HashConstruct(
+				try required_string(fields, "result", path, true),
+				try required_string(fields, "type", path, true),
+				try _recovery_managed_required_string_array_with_limit(fields, "keys", path, max_array_arguments),
+				try _recovery_managed_required_string_array_with_limit(fields, "values", path, max_array_arguments),
+				try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+			))
+	end
+	if op == "hash_get"
+		fields := try strict_object(value, path, ["op", "result", "type", "hash", "key", "origin"])
+		return Result<RecoveryManagedInstruction, Diagnostic>::Ok(RecoveryManagedInstruction::HashGet(
+				try required_string(fields, "result", path, true),
+				try required_string(fields, "type", path, true),
+				try required_string(fields, "hash", path, true),
+				try required_string(fields, "key", path, true),
+				try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+			))
+	end
+	if op == "hash_contains"
+		fields := try strict_object(value, path, ["op", "result", "type", "hash", "key", "origin"])
+		return Result<RecoveryManagedInstruction, Diagnostic>::Ok(RecoveryManagedInstruction::HashContains(
+				try required_string(fields, "result", path, true),
+				try required_string(fields, "type", path, true),
+				try required_string(fields, "hash", path, true),
+				try required_string(fields, "key", path, true),
+				try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+			))
+	end
+	if op == "hash_set"
+		fields := try strict_object(value, path, ["op", "type", "hash", "key", "value", "origin"])
+		return Result<RecoveryManagedInstruction, Diagnostic>::Ok(RecoveryManagedInstruction::HashSet(
+				try required_string(fields, "type", path, true),
+				try required_string(fields, "hash", path, true),
+				try required_string(fields, "key", path, true),
+				try required_string(fields, "value", path, true),
+				try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+			))
+	end
+	if op == "array_construct"
+		fields := try strict_object(value, path, ["op", "result", "type", "arguments", "origin"])
+		return Result<RecoveryManagedInstruction, Diagnostic>::Ok(
+			RecoveryManagedInstruction::ArrayConstruct(
+				try required_string(fields, "result", path, true),
+				try required_string(fields, "type", path, true),
+				try _recovery_managed_required_string_array_with_limit(
+					fields,
+					"arguments",
+					path,
+					max_array_arguments,
+				),
+				try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+			)
+		)
+	end
+	if op == "array_size"
+		fields := try strict_object(value, path, ["op", "result", "type", "array", "origin"])
+		return Result<RecoveryManagedInstruction, Diagnostic>::Ok(
+			RecoveryManagedInstruction::ArraySize(
+				try required_string(fields, "result", path, true),
+				try required_string(fields, "type", path, true),
+				try required_string(fields, "array", path, true),
+				try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+			)
+		)
+	end
+	if op == "array_get"
+		fields := try strict_object(value, path, ["op", "result", "type", "array", "index", "origin"])
+		return Result<RecoveryManagedInstruction, Diagnostic>::Ok(
+			RecoveryManagedInstruction::ArrayGet(
+				try required_string(fields, "result", path, true),
+				try required_string(fields, "type", path, true),
+				try required_string(fields, "array", path, true),
+				try required_string(fields, "index", path, true),
+				try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+			)
+		)
+	end
+	if op == "array_set"
+		fields := try strict_object(value, path, ["op", "type", "array", "index", "value", "origin"])
+		return Result<RecoveryManagedInstruction, Diagnostic>::Ok(
+			RecoveryManagedInstruction::ArraySet(
+				try required_string(fields, "type", path, true),
+				try required_string(fields, "array", path, true),
+				try required_string(fields, "index", path, true),
+				try required_string(fields, "value", path, true),
+				try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+			)
+		)
+	end
+	if op == "array_push"
+		fields := try strict_object(value, path, ["op", "type", "array", "value", "origin"])
+		return Result<RecoveryManagedInstruction, Diagnostic>::Ok(
+			RecoveryManagedInstruction::ArrayPush(
+				try required_string(fields, "type", path, true),
+				try required_string(fields, "array", path, true),
+				try required_string(fields, "value", path, true),
+				try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+			)
+		)
+	end
+	if op == "closure_construct"
+		fields := try strict_object(value, path, ["op", "result", "type", "function", "captures", "origin"])
+		return Result<RecoveryManagedInstruction, Diagnostic>::Ok(
+			RecoveryManagedInstruction::ClosureConstruct(
+				try required_string(fields, "result", path, true),
+				try required_string(fields, "type", path, true),
+				try required_string(fields, "function", path, true),
+				try _recovery_managed_required_string_array(fields, "captures", path),
+				try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+			)
+		)
+	end
+	if op == "closure_call"
+		fields := try strict_object(value, path, ["op", "result", "type", "closure", "arguments", "origin"])
+		return Result<RecoveryManagedInstruction, Diagnostic>::Ok(
+			RecoveryManagedInstruction::ClosureCall(
+				try _recovery_managed_required_nullable_string(fields, "result", path),
+				try required_string(fields, "type", path, true),
+				try required_string(fields, "closure", path, true),
+				try _recovery_managed_required_string_array(fields, "arguments", path),
+				try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+			)
+		)
+	end
+	if op == "record_construct"
+		fields := try strict_object(value, path, ["op", "result", "type", "arguments", "origin"])
+		return Result<RecoveryManagedInstruction, Diagnostic>::Ok(
+			RecoveryManagedInstruction::RecordConstruct(
+				try required_string(fields, "result", path, true),
+				try required_string(fields, "type", path, true),
+				try _recovery_managed_required_string_array(fields, "arguments", path),
+				try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+			)
+		)
+	end
+	if op == "record_project"
+		fields := try strict_object(value, path, ["op", "result", "type", "record", "field", "origin"])
+		return Result<RecoveryManagedInstruction, Diagnostic>::Ok(
+			RecoveryManagedInstruction::RecordProject(
+				try required_string(fields, "result", path, true),
+				try required_string(fields, "type", path, true),
+				try required_string(fields, "record", path, true),
+				try required_string(fields, "field", path, true),
+				try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+			)
+		)
+	end
+	if op == "variant_construct"
+		fields := try strict_object(value, path, ["op", "result", "type", "variant", "arguments", "origin"])
+		return Result<RecoveryManagedInstruction, Diagnostic>::Ok(
+			RecoveryManagedInstruction::VariantConstruct(
+				try required_string(fields, "result", path, true),
+				try required_string(fields, "type", path, true),
+				try required_string(fields, "variant", path, true),
+				try _recovery_managed_required_string_array(fields, "arguments", path),
+				try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+			)
+		)
+	end
+	if op == "variant_test"
+		fields := try strict_object(value, path, ["op", "result", "type", "value", "variant", "origin"])
+		return Result<RecoveryManagedInstruction, Diagnostic>::Ok(
+			RecoveryManagedInstruction::VariantTest(
+				try required_string(fields, "result", path, true),
+				try required_string(fields, "type", path, true),
+				try required_string(fields, "value", path, true),
+				try required_string(fields, "variant", path, true),
+				try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+			)
+		)
+	end
+	if op == "variant_project"
+		fields := try strict_object(value, path, ["op", "result", "type", "value", "variant", "field", "origin"])
+		return Result<RecoveryManagedInstruction, Diagnostic>::Ok(
+			RecoveryManagedInstruction::VariantProject(
+				try required_string(fields, "result", path, true),
+				try required_string(fields, "type", path, true),
+				try required_string(fields, "value", path, true),
+				try required_string(fields, "variant", path, true),
+				try required_string(fields, "field", path, true),
+				try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+			)
+		)
+	end
+	if op == "call"
+		fields := try strict_object(value, path, ["op", "result", "function", "arguments", "origin"])
+		return Result<RecoveryManagedInstruction, Diagnostic>::Ok(
+			RecoveryManagedInstruction::Call(
+				try _recovery_managed_required_nullable_string(fields, "result", path),
+				try required_string(fields, "function", path, true),
+				try _recovery_managed_required_string_array(fields, "arguments", path),
+				try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+			)
+		)
+	end
+	if op == "write_static"
+		fields := try strict_object(value, path, ["op", "value", "origin"])
+		static_value := try required_string(fields, "value", path, false)
+		if static_value.to_bytes().size() > MANAGED_RECOVERY_MAX_STATIC_BYTES
+			return Result<RecoveryManagedInstruction, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0005", path + "/value", "static output exceeds the Managed recovery limit")
+			)
+		end
+		return Result<RecoveryManagedInstruction, Diagnostic>::Ok(
+			RecoveryManagedInstruction::Scalar(
+				RecoveryScalarInstruction::WriteStatic(
+					static_value,
+					try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+				)
+			)
+		)
+	end
+	return Result<RecoveryManagedInstruction, Diagnostic>::Err(
+		boundary_diagnostic("TRBN0003", path + "/op", "unsupported Managed recovery instruction")
+	)
+end
+
+def _recovery_managed_decode_terminator(value: JSON::Value, path: String): Result<RecoveryManagedTerminator, Diagnostic>
+	base_fields := try object(value, path)
+	op := try required_string(base_fields, "op", path, false)
+	if op == "jump"
+		fields := try strict_object(value, path, ["op", "target", "arguments", "origin"])
+		return Result<RecoveryManagedTerminator, Diagnostic>::Ok(
+			RecoveryManagedTerminator::Jump(
+				try required_string(fields, "target", path, true),
+				try _recovery_managed_required_string_array(fields, "arguments", path),
+				try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+			)
+		)
+	end
+	if op == "branch"
+		fields := try strict_object(
+			value,
+			path,
+			["op", "condition", "whenTrue", "trueArguments", "whenFalse", "falseArguments", "origin"],
+		)
+		return Result<RecoveryManagedTerminator, Diagnostic>::Ok(
+			RecoveryManagedTerminator::Branch(
+				try required_string(fields, "condition", path, true),
+				try required_string(fields, "whenTrue", path, true),
+				try _recovery_managed_required_string_array(fields, "trueArguments", path),
+				try required_string(fields, "whenFalse", path, true),
+				try _recovery_managed_required_string_array(fields, "falseArguments", path),
+				try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+			)
+		)
+	end
+	if op == "return"
+		fields := try strict_object(value, path, ["op", "value", "origin"])
+		return Result<RecoveryManagedTerminator, Diagnostic>::Ok(
+			RecoveryManagedTerminator::Return(
+				try _recovery_managed_required_nullable_string(fields, "value", path),
+				try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+			)
+		)
+	end
+	return Result<RecoveryManagedTerminator, Diagnostic>::Err(
+		boundary_diagnostic("TRBN0003", path + "/op", "unsupported Managed recovery terminator")
+	)
+end
+
+def _recovery_managed_integer_operator(name: String, path: String): Result<IntegerBinaryOperator, Diagnostic>
+	if name == "add"
+		return Result<IntegerBinaryOperator, Diagnostic>::Ok(IntegerBinaryOperator::Add)
+	end
+	if name == "subtract"
+		return Result<IntegerBinaryOperator, Diagnostic>::Ok(IntegerBinaryOperator::Subtract)
+	end
+	if name == "multiply"
+		return Result<IntegerBinaryOperator, Diagnostic>::Ok(IntegerBinaryOperator::Multiply)
+	end
+	if name == "divide"
+		return Result<IntegerBinaryOperator, Diagnostic>::Ok(IntegerBinaryOperator::Divide)
+	end
+	if name == "remainder"
+		return Result<IntegerBinaryOperator, Diagnostic>::Ok(IntegerBinaryOperator::Remainder)
+	end
+	if name == "power"
+		return Result<IntegerBinaryOperator, Diagnostic>::Ok(IntegerBinaryOperator::Power)
+	end
+	return Result<IntegerBinaryOperator, Diagnostic>::Err(
+		boundary_diagnostic("TRBN0003", path, "unsupported Managed recovery Integer operator")
+	)
+end
+
+def _recovery_managed_float_operator(name: String, path: String): Result<FloatBinaryOperator, Diagnostic>
+	if name == "add"
+		return Result<FloatBinaryOperator, Diagnostic>::Ok(FloatBinaryOperator::Add)
+	end
+	if name == "subtract"
+		return Result<FloatBinaryOperator, Diagnostic>::Ok(FloatBinaryOperator::Subtract)
+	end
+	if name == "multiply"
+		return Result<FloatBinaryOperator, Diagnostic>::Ok(FloatBinaryOperator::Multiply)
+	end
+	if name == "divide"
+		return Result<FloatBinaryOperator, Diagnostic>::Ok(FloatBinaryOperator::Divide)
+	end
+	return Result<FloatBinaryOperator, Diagnostic>::Err(
+		boundary_diagnostic("TRBN0003", path, "unsupported Managed recovery Float operator")
+	)
+end
+
+def _recovery_managed_comparison_operator(name: String, path: String): Result<ComparisonOperator, Diagnostic>
+	if name == "equal"
+		return Result<ComparisonOperator, Diagnostic>::Ok(ComparisonOperator::Equal)
+	end
+	if name == "not_equal"
+		return Result<ComparisonOperator, Diagnostic>::Ok(ComparisonOperator::NotEqual)
+	end
+	if name == "less_than"
+		return Result<ComparisonOperator, Diagnostic>::Ok(ComparisonOperator::LessThan)
+	end
+	if name == "less_than_or_equal"
+		return Result<ComparisonOperator, Diagnostic>::Ok(ComparisonOperator::LessThanOrEqual)
+	end
+	if name == "greater_than"
+		return Result<ComparisonOperator, Diagnostic>::Ok(ComparisonOperator::GreaterThan)
+	end
+	if name == "greater_than_or_equal"
+		return Result<ComparisonOperator, Diagnostic>::Ok(ComparisonOperator::GreaterThanOrEqual)
+	end
+	return Result<ComparisonOperator, Diagnostic>::Err(
+		boundary_diagnostic("TRBN0003", path, "unsupported Managed recovery comparison operator")
+	)
+end
+
+def _recovery_managed_required_boolean(
+		fields: Hash<String, JSON::Value>,
+		name: String,
+		path: String,
+	): Result<Boolean, Diagnostic>
+	value := try required_field(fields, name, path)
+	case value
+	when JSON::Value::Boolean(result)
+		return Result<Boolean, Diagnostic>::Ok(result)
+	else
+		return Result<Boolean, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0002", path + "/" + name, "expected a boolean")
+		)
+	end
+end
+
+def _recovery_managed_required_float(
+		fields: Hash<String, JSON::Value>,
+		name: String,
+		path: String,
+	): Result<Float, Diagnostic>
+	value := try required_field(fields, name, path)
+	case value
+	when JSON::Value::Float(result)
+		return Result<Float, Diagnostic>::Ok(result)
+	when JSON::Value::Integer(result)
+		return Result<Float, Diagnostic>::Ok(result.to_f())
+	else
+		return Result<Float, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0002", path + "/" + name, "expected a number")
+		)
+	end
+end
+
+def _recovery_managed_required_nullable_string(
+		fields: Hash<String, JSON::Value>,
+		name: String,
+		path: String,
+	): Result<String?, Diagnostic>
+	value := try required_field(fields, name, path)
+	case value
+	when JSON::Value::Null
+		return Result<String?, Diagnostic>::Ok(nil)
+	when JSON::Value::String(result)
+		if result.empty?()
+			return Result<String?, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0004", path + "/" + name, "identifier must not be empty")
+			)
+		end
+		if result.size() > MANAGED_RECOVERY_MAX_IDENTIFIER_SIZE
+			return Result<String?, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0005", path + "/" + name, "identifier exceeds the Managed recovery limit")
+			)
+		end
+		return Result<String?, Diagnostic>::Ok(result)
+	else
+		return Result<String?, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0002", path + "/" + name, "expected a string or null")
+		)
+	end
+end
+
+def _recovery_managed_required_string_array(
+		fields: Hash<String, JSON::Value>,
+		name: String,
+		path: String,
+	): Result<Array<String>, Diagnostic>
+	return _recovery_managed_required_string_array_with_limit(fields, name, path, MANAGED_RECOVERY_MAX_ARGUMENTS)
+end
+
+def _recovery_managed_required_string_array_with_limit(
+		fields: Hash<String, JSON::Value>,
+		name: String,
+		path: String,
+		max_arguments: Integer,
+	): Result<Array<String>, Diagnostic>
+	values := try required_array(fields, name, path)
+	if values.size() > max_arguments
+		return Result<Array<String>, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0005", path + "/" + name, "argument count exceeds the Managed recovery limit")
+		)
+	end
+	mut result: Array<String> := []
+	mut index := 0
+	while index < values.size()
+		case values[index]
+		when JSON::Value::String(item)
+			if item.empty?()
+				return Result<Array<String>, Diagnostic>::Err(
+					boundary_diagnostic("TRBN0004", path + "/" + name + "/" + index.to_s(), "identifier must not be empty")
+				)
+			end
+			if item.size() > MANAGED_RECOVERY_MAX_IDENTIFIER_SIZE
+				return Result<Array<String>, Diagnostic>::Err(
+					boundary_diagnostic(
+						"TRBN0005",
+						path + "/" + name + "/" + index.to_s(),
+						"identifier exceeds the Managed recovery limit",
+					)
+				)
+			end
+			result.push(item)
+		else
+			return Result<Array<String>, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0002", path + "/" + name + "/" + index.to_s(), "expected a string")
+			)
+		end
+		index += 1
+	end
+	return Result<Array<String>, Diagnostic>::Ok(result)
+end

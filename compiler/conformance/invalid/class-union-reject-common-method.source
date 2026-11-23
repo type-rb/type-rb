@@ -1,0 +1,18 @@
+class First
+def read(): String
+return "first"
+end
+end
+class Second
+def read(): String
+return "second"
+end
+end
+alias Choice = First | Second
+def read(value: Choice): String
+return value.read()
+end
+
+def main()
+puts(read(First.new()))
+end

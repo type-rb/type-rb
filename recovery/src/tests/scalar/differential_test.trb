@@ -1,0 +1,190 @@
+import { decode_recovery_scalar_snapshot } from scalar/snapshot
+import { build_recovery_scalar_executable } from scalar/toolchain
+import { native_create_directory } from support/file_system
+import trb/std/process
+import trb/std/result
+import { describe, expect, test } from trb/std/test
+
+record RecoveryScalarObservation
+	status: Integer
+	stdout: String
+	stderr: String
+end
+
+record RecoveryScalarDifferentialPair
+	reference: RecoveryScalarObservation
+	native: RecoveryScalarObservation
+end
+
+record RecoveryScalarDifferentialExpectation
+	name: String
+	stdout: String
+	stderr: String
+	status: Integer
+end
+
+def _recovery_scalar_observe(command: String): Result<RecoveryScalarObservation, String>
+	case Process.run("/usr/bin/env", ["GOTRACEBACK=none", command])
+	when Result::Ok(process)
+		return Result<RecoveryScalarObservation, String>::Ok(
+			RecoveryScalarObservation.new(
+				status: process.status,
+				stdout: process.stdout,
+				stderr: process.stderr,
+			)
+		)
+	when Result::Err(error)
+		return Result<RecoveryScalarObservation, String>::Err(error.operation + ": " + error.message)
+	end
+end
+
+def _recovery_scalar_differential_case(name: String): Result<RecoveryScalarDifferentialPair, String>
+	root := Process.environment("TYPE_RB_NATIVE_ROOT")
+	reference_trb := Process.environment("TYPE_RB_NATIVE_REFERENCE_TRB")
+	qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+	if root == nil
+		return Result<RecoveryScalarDifferentialPair, String>::Err("TYPE_RB_NATIVE_ROOT is unavailable")
+	end
+	if reference_trb == nil
+		return Result<RecoveryScalarDifferentialPair, String>::Err("TYPE_RB_NATIVE_REFERENCE_TRB is unavailable")
+	end
+	if qbe == nil
+		return Result<RecoveryScalarDifferentialPair, String>::Err("Scalar recovery differential environment is incomplete")
+	end
+	config := root + "/corpus/recovery-scalar/" + name + "/trbconfig.jsonc"
+	workspace := "/tmp/type-rb-native-recovery-scalar-differential-" + name
+	case native_create_directory(workspace)
+	when Result::Ok(_unit)
+	when Result::Err(_error)
+	end
+	snapshot_process := case Process.run(reference_trb, ["compiler", "bootstrap-snapshot", "--config", config])
+	when Result::Ok(process)
+		process
+	when Result::Err(error)
+		return Result<RecoveryScalarDifferentialPair, String>::Err("snapshot: " + error.operation + ": " + error.message)
+	end
+	if !snapshot_process.success
+		return Result<RecoveryScalarDifferentialPair, String>::Err("snapshot: " + snapshot_process.stderr)
+	end
+	native_module := case decode_recovery_scalar_snapshot(snapshot_process.stdout)
+	when Result::Ok(value)
+		value
+	when Result::Err(diagnostic)
+		return Result<RecoveryScalarDifferentialPair, String>::Err(
+			"decode: " + diagnostic.code + " " + diagnostic.path + ": " + diagnostic.message
+		)
+	end
+	native_output := workspace + "/native"
+	case build_recovery_scalar_executable(native_module, qbe, "/usr/bin/cc", workspace, native_output)
+	when Result::Ok(_report)
+	when Result::Err(error)
+		return Result<RecoveryScalarDifferentialPair, String>::Err("native-build: " + error.phase + ": " + error.message)
+	end
+	reference_output := workspace + "/reference"
+	reference_build := case Process.run(
+			reference_trb,
+			["build", "--compile", "--config", config, "--outfile", reference_output],
+		)
+	when Result::Ok(process)
+		process
+	when Result::Err(error)
+		return Result<RecoveryScalarDifferentialPair, String>::Err("reference-build: " + error.operation + ": " + error.message)
+	end
+	if !reference_build.success
+		return Result<RecoveryScalarDifferentialPair, String>::Err("reference-build: " + reference_build.stderr)
+	end
+	reference_observation := try _recovery_scalar_observe(reference_output)
+	native_observation := try _recovery_scalar_observe(native_output)
+	return Result<RecoveryScalarDifferentialPair, String>::Ok(
+		RecoveryScalarDifferentialPair.new(reference: reference_observation, native: native_observation)
+	)
+end
+
+describe("Scalar recovery source-connected differential corpus") do
+	test("matches optimized Go output and process failure behavior") do
+		if Process.environment("TYPE_RB_NATIVE_REFERENCE_TRB") == nil || Process.environment("TYPE_RB_NATIVE_QBE") == nil
+			expect(true).to_be_true()
+		else
+			expectations: Array<RecoveryScalarDifferentialExpectation> := [
+				RecoveryScalarDifferentialExpectation.new(
+					name: "static-output",
+					stdout: "recovery-scalar-static-output\n",
+					stderr: "",
+					status: 0,
+				),
+				RecoveryScalarDifferentialExpectation.new(
+					name: "scalar-control-flow",
+					stdout: "recovery-scalar-scalar-control-flow\n",
+					stderr: "",
+					status: 0,
+				),
+				RecoveryScalarDifferentialExpectation.new(
+					name: "integer-kernel",
+					stdout: "recovery-scalar-integer-kernel\n",
+					stderr: "",
+					status: 0,
+				),
+				RecoveryScalarDifferentialExpectation.new(
+					name: "integer-overflow",
+					stdout: "",
+					stderr: "panic: Integer is outside the portable range\n",
+					status: 2,
+				),
+				RecoveryScalarDifferentialExpectation.new(
+					name: "integer-power-overflow",
+					stdout: "",
+					stderr: "panic: Integer is outside the portable range\n",
+					status: 2,
+				),
+				RecoveryScalarDifferentialExpectation.new(
+					name: "negative-integer-exponent",
+					stdout: "",
+					stderr: "panic: negative Integer exponent\n",
+					status: 2,
+				),
+				RecoveryScalarDifferentialExpectation.new(
+					name: "division-by-zero",
+					stdout: "",
+					stderr: "panic: division by zero\n",
+					status: 2,
+				),
+			]
+			mut index := 0
+			while index < expectations.size()
+				expected := expectations[index]
+				case _recovery_scalar_differential_case(expected.name)
+				when Result::Ok(pair)
+					expect(pair.reference).to_equal(pair.native)
+					expect(pair.native.status).to_equal(expected.status)
+					expect(pair.native.stdout).to_equal(expected.stdout)
+					expect(pair.native.stderr).to_equal(expected.stderr)
+				when Result::Err(error)
+					puts(error)
+					expect(false).to_be_true()
+				end
+				index += 1
+			end
+		end
+	end
+
+	test("rejects unsupported source explicitly at the producer boundary") do
+		root := Process.environment("TYPE_RB_NATIVE_ROOT")
+		reference_trb := Process.environment("TYPE_RB_NATIVE_REFERENCE_TRB")
+		if root == nil
+			expect(true).to_be_true()
+		else
+			if reference_trb == nil
+				expect(true).to_be_true()
+			else
+				config := root + "/corpus/recovery-scalar/unsupported-dynamic-output/trbconfig.jsonc"
+				case Process.run(reference_trb, ["compiler", "bootstrap-snapshot", "--config", config])
+				when Result::Ok(process)
+					expect(process.success).to_be_false()
+					expect(process.stderr.include?("bootstrap snapshot v2 does not support dynamic puts() output")).to_be_true()
+				when Result::Err(_error)
+					expect(false).to_be_true()
+				end
+			end
+		end
+	end
+end

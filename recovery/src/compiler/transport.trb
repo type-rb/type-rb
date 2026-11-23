@@ -1,0 +1,156 @@
+import { decode_bootstrap_snapshot } from managed/snapshot
+import { build_compiler_recovery_executable } from managed/toolchain
+import { native_write_text } from support/file_system
+import trb/std/process
+import trb/std/result
+import trb/std/string_builder
+
+def _transport_run(executable: String, arguments: Array<String>): Result<Process::Output, String>
+	case Process.run(executable, arguments)
+	when Result::Ok(output)
+		return Result<Process::Output, String>::Ok(output)
+	when Result::Err(error)
+		return Result<Process::Output, String>::Err(error.operation + ": " + error.message)
+	end
+end
+
+def _transport_write(path: String, source: String): Result<Boolean, String>
+	case native_write_text(path, source)
+	when Result::Ok(_unit)
+		return Result<Boolean, String>::Ok(true)
+	when Result::Err(error)
+		return Result<Boolean, String>::Err(error.operation + ": " + error.message)
+	end
+end
+
+# This hidden adapter transports flattened source; it must not load imports
+# relative to the source path or change the existing content adapter's results.
+def verify_recovery_source_transport(executables: Array<String>, workspace: String): Result<Boolean, String>
+	path := workspace + "/literal source with spaces.trb"
+	program := "def main()\n\tputs(\"transport\")\n\treturn\nend\n\n"
+	mut large := StringBuilder.new()
+	large.append("#")
+	mut index := 0
+	while index < 32768
+		large.append("source transport")
+		index += 1
+	end
+	large.append("\n" + program)
+	large_path := workspace + "/large literal source.trb"
+	try _transport_write(large_path, large.to_s())
+	missing := workspace + "/missing source.trb"
+	mut executable_index := 0
+	while executable_index < executables.size()
+		executable := executables[executable_index]
+		sources := [program, "", "def main(\n", "import { absent } from missing\n\n" + program]
+		mut source_index := 0
+		while source_index < sources.size()
+			source := sources[source_index]
+			try _transport_write(path, source)
+			modes := ["check", "emit-qbe"]
+			mut mode_index := 0
+			while mode_index < modes.size()
+				mode := modes[mode_index]
+				content := try _transport_run(executable, ["--source-content", mode, source])
+				file := try _transport_run(executable, ["--source-file", mode, path])
+				if content.status != file.status || content.stdout != file.stdout || content.stderr != file.stderr
+					return Result<Boolean, String>::Err("source-file differs from literal content: " + executable + " " + mode)
+				end
+				if source == program && mode == "check"
+					if file.status != 0 || file.stdout != "ok\n" || !file.stderr.empty?()
+						return Result<Boolean, String>::Err("valid source-file check differs: " + executable)
+					end
+				end
+				mode_index += 1
+			end
+			source_index += 1
+		end
+		large_output := try _transport_run(executable, ["--source-file", "check", large_path])
+		if large_output.status != 0 || large_output.stdout != "ok\n" || !large_output.stderr.empty?()
+			return Result<Boolean, String>::Err("source-file beyond argv limits differs: " + executable + large_output.stdout + large_output.stderr)
+		end
+		unreadable := try _transport_run(executable, ["--source-file", "check", missing])
+		if unreadable.status != 66 || !unreadable.stdout.empty?() || unreadable.stderr != "compiler: cannot read source file: " + missing + "\n"
+			return Result<Boolean, String>::Err("missing source-file failure differs: " + executable)
+		end
+		invalid_arguments := [["--source-file"], ["--unknown-source", "check", path]]
+		mut argument_index := 0
+		while argument_index < invalid_arguments.size()
+			arguments := invalid_arguments[argument_index]
+			usage := try _transport_run(executable, arguments)
+			if usage.status != 64 || !usage.stdout.empty?() || !usage.stderr.start_with?("usage: compiler ")
+				return Result<Boolean, String>::Err("source-file usage failure differs: " + executable)
+			end
+			argument_index += 1
+		end
+		executable_index += 1
+	end
+	return Result<Boolean, String>::Ok(true)
+end
+
+# Use the real recovery entry adapter with a small compiler-shaped fixture so
+# byte preservation and failure boundaries are tested before full generations.
+def verify_recovery_transport_runtime(reference: String, qbe: String, workspace: String): Result<Boolean, String>
+	fixture := workspace + "/transport fixture.trb"
+	try _transport_write(fixture, "def compiler_main(source: String, mode: String, _file_mode: Boolean): Integer\n\tputs(source)\n\tputs(mode)\n\tif source.size() > 0\n\t\tputs(source[0])\n\t\tputs(source[-1])\n\t\tputs(source[source.size() / 2])\n\tend\n\treturn 0\nend\ndef main()\n\treturn\nend\n")
+	snapshot := try _transport_run(reference, ["compiler", "bootstrap-snapshot", "--snapshot-version", "4", fixture])
+	if snapshot.status != 0 || !snapshot.stderr.empty?()
+		return Result<Boolean, String>::Err("transport fixture snapshot failed: " + snapshot.stderr)
+	end
+	native_module := case decode_bootstrap_snapshot(snapshot.stdout)
+	when Result::Ok(value)
+		value
+	when Result::Err(error)
+		return Result<Boolean, String>::Err(error.code + ": " + error.message)
+	end
+	executable := workspace + "/transport-adapter"
+	case build_compiler_recovery_executable(native_module, qbe, "/usr/bin/cc", workspace, executable)
+	when Result::Ok(_report)
+	when Result::Err(error)
+		return Result<Boolean, String>::Err(error.phase + ": " + error.message + " " + error.stderr)
+	end
+	path := workspace + "/transport bytes.trb"
+	mut large := StringBuilder.new()
+	mut index := 0
+	while index < 32768
+		large.append("source transport")
+		index += 1
+	end
+	values := ["", "a\n\n", "a\x00b", "é日本𐐨", "a日b𐐨c", large.to_s()]
+	index = 0
+	while index < values.size()
+		value := values[index]
+		try _transport_write(path, value)
+		mut expected := value + "\ncheck\n"
+		if !value.empty?()
+			expected += value[0] + "\n" + value[-1] + "\n" + value[value.size() / 2] + "\n"
+		end
+		output := try _transport_run(executable, ["--source-file", "check", path])
+		if index == 3 || index == 4
+			content := try _transport_run(executable, ["--source-content", "check", value])
+			if content.status != 0 || content.stdout != expected || !content.stderr.empty?()
+				return Result<Boolean, String>::Err("argv String code-point count or index differs")
+			end
+		end
+		if output.status != 0 || output.stdout != expected || !output.stderr.empty?()
+			return Result<Boolean, String>::Err("literal file bytes changed at transport case " + index.to_s())
+		end
+		index += 1
+	end
+	# Process.run normalizes invalid UTF-8 in captured text. A binary subprocess
+	# observer checks exact external bytes independently, including truncated,
+	# surrogate and out-of-range sequences mixed with valid UTF-8.
+	byte_probe := try _transport_run("python3", ["-c", "import pathlib, subprocess, sys\nexe, name = sys.argv[1:]\npath = pathlib.Path(name)\ncases = [(b'\\xff\\x80', b'\\xff', b'\\x80', b'\\x80'), (b'a\\xe2', b'a', b'\\xe2', b'\\xe2'), (b'a\\xe6\\x97\\xa5\\xffb', b'a', b'b', b'\\xff'), (b'\\xed\\xa0\\x80', b'\\xed', b'\\x80', b'\\xa0'), (b'\\xf4\\x90\\x80\\x80', b'\\xf4', b'\\x80', b'\\x80')]\nfor value, first, last, middle in cases:\n    path.write_bytes(value)\n    result = subprocess.run([exe, '--source-file', 'check', name], capture_output=True, timeout=30)\n    expected = value + b'\\ncheck\\n' + first + b'\\n' + last + b'\\n' + middle + b'\\n'\n    assert (result.returncode, result.stdout, result.stderr) == (0, expected, b''), (value, result)\n", executable, path])
+	if byte_probe.status != 0 || !byte_probe.stdout.empty?() || !byte_probe.stderr.empty?()
+		return Result<Boolean, String>::Err("invalid external-byte indexing differs: " + byte_probe.stderr)
+	end
+	sparse := try _transport_run("python3", ["-c", "import sys; f=open(sys.argv[1], 'wb'); f.truncate(67108865); f.close()", path])
+	if sparse.status != 0
+		return Result<Boolean, String>::Err("cannot create oversized source fixture: " + sparse.stderr)
+	end
+	oversized := try _transport_run(executable, ["--source-file", "check", path])
+	if oversized.status != 66 || !oversized.stdout.empty?() || oversized.stderr != "compiler: cannot read source file: " + path + "\n"
+		return Result<Boolean, String>::Err("oversized recovery source was not rejected before allocation")
+	end
+	return Result<Boolean, String>::Ok(true)
+end

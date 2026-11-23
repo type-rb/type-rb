@@ -1,0 +1,109 @@
+import { emit_qbe } from compiler
+import { mir_effect_allocation_failure, mir_effect_none } from mir/model/effects
+import { mir_op_callable_new } from mir/model/instructions
+import { MirCallablePlan } from mir/model/module
+import { mir_callable_plan_at, mir_planned_instruction_effects } from mir/analysis/callables
+import { mir_unused_callable_allocations } from mir/analysis/callable_allocations
+import { optimize_verified_mir } from mir/passes/optimize
+import { verify_mir } from mir/verify/module
+import { CompilerState } from state/state
+import { array_loop_mir_check } from testing/mir/array_loops
+import { control_test_output } from testing/mir/control
+import { logical_run_qbe } from testing/qbe_runner
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+def callable_allocation_count(state: CompilerState, omitted: Boolean): Integer
+	mut count := 0
+	state.scalar_mir.instructions.each.with_index do |instruction, position|
+		if instruction.kind == mir_op_callable_new()
+			effects := mir_planned_instruction_effects(state.scalar_mir, instruction, position)
+			if omitted == (effects == mir_effect_none())
+				count += 1
+			end
+			if effects != mir_effect_none()
+				expect(effects).to_equal(mir_effect_allocation_failure())
+			else
+				state.scalar_mir.root_plans.each do |roots|
+					roots.instructions.each do |point|
+						expect(point == position).to_be_false()
+					end
+				end
+			end
+		end
+	end
+	return count
+end
+
+def callable_allocation_run(state: CompilerState, expected: String)
+	qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+	if qbe != nil
+		case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+		when Result::Ok(actual)
+			expect(actual).to_equal(expected)
+		when Result::Err(error)
+			puts(error)
+			expect(false).to_be_true()
+		end
+	end
+end
+
+describe("MIR unused callable allocations") do
+	test("omits forwarded local environments without omitting capture evaluation") do
+		state := array_loop_mir_check("def capture(): Array<Integer>\nputs(7)\nreturn [4]\nend\ndef main()\nvalues := capture()\nread := fn(): Integer\nreturn values[0]\nend\nputs(read())\n_unused := fn(): Integer\nreturn values[0] + 2\nend\nputs(9)\nend\n")
+		expect(callable_allocation_count(state, true)).to_equal(2)
+		expect(callable_allocation_count(state, false)).to_equal(0)
+		output := control_test_output(emit_qbe(state))
+		expect(output.include?("data $trbn_closure_")).to_be_false()
+		callable_allocation_run(state, "7\n4\n9\n")
+	end
+
+	test("does not retain environments through undemanded joins and loop cycles") do
+		state := array_loop_mir_check("def run(count: Integer)\nmut callback := fn(): Integer\nreturn 1\nend\nmut index := 0\nwhile index < count\nif index % 2 == 0\ncallback = fn(): Integer\nreturn 2\nend\nend\nindex += 1\nend\nputs(index)\nend\ndef main()\nrun(0)\nrun(4)\nend\n")
+		expect(callable_allocation_count(state, true)).to_equal(2)
+		expect(callable_allocation_count(state, false)).to_equal(0)
+		callable_allocation_run(state, "0\n4\n")
+	end
+
+	test("retains both callable identities when a merged value is demanded") do
+		state := array_loop_mir_check("def run(flag: Boolean)\nmut callback := fn(): Integer\nreturn 1\nend\nif flag\ncallback = fn(): Integer\nreturn 2\nend\nend\nputs(callback())\nend\ndef main()\nrun(false)\nrun(true)\nend\n")
+		expect(callable_allocation_count(state, true)).to_equal(0)
+		expect(callable_allocation_count(state, false)).to_equal(2)
+		callable_allocation_run(state, "1\n2\n")
+	end
+
+	test("retains environments returned or captured by escaping callables") do
+		state := array_loop_mir_check("def build(value: Integer): () -> Integer\ninner := fn(): Integer\nreturn value\nend\nouter := fn(): Integer\nreturn inner() + 1\nend\nreturn outer\nend\ndef main()\nread := build(5)\nputs(read())\nend\n")
+		expect(callable_allocation_count(state, true)).to_equal(0)
+		expect(callable_allocation_count(state, false)).to_equal(2)
+		callable_allocation_run(state, "6\n")
+	end
+
+	test("retains ordinary call arguments even when the callee ignores them") do
+		state := array_loop_mir_check("def ignore(callback: () -> Integer, value: Integer): Integer\nreturn value\nend\ndef main()\ncallback := fn(): Integer\nreturn 1\nend\nputs(ignore(callback, 3))\nend\n")
+		expect(callable_allocation_count(state, true)).to_equal(0)
+		expect(callable_allocation_count(state, false)).to_equal(1)
+		callable_allocation_run(state, "3\n")
+	end
+
+	test("rejects forged omissions and independently reconstructs missing plans") do
+		mut live := array_loop_mir_check("def apply(callback: () -> Integer): Integer\nreturn callback()\nend\ndef main()\ncallback := fn(): Integer\nreturn 1\nend\nputs(apply(callback))\nend\n")
+		expect(callable_allocation_count(live, false)).to_equal(1)
+		live.scalar_mir.instructions.each.with_index do |instruction, position|
+			if instruction.kind == mir_op_callable_new()
+				live.scalar_mir.callable_plans[0].push(MirCallablePlan.new(instruction: position, callee: instruction.payload, captures: instruction.second, effects: mir_effect_none()))
+			end
+		end
+		expect(verify_mir(live.scalar_mir, true)).to_equal("MIR callable plan differs")
+		expect(mir_unused_callable_allocations(live.scalar_mir).size()).to_equal(0)
+		mut dead := array_loop_mir_check("def main()\n_unused := fn(): Integer\nreturn 1\nend\nputs(2)\nend\n")
+		expect(callable_allocation_count(dead, true)).to_equal(1)
+		dead.scalar_mir.callable_plans[0] = []
+		expect(verify_mir(dead.scalar_mir, true)).to_equal("MIR callable plan differs")
+		optimize_verified_mir(dead.scalar_mir)
+		expect(verify_mir(dead.scalar_mir, true)).to_equal("")
+		plan := mir_unused_callable_allocations(dead.scalar_mir)[0]
+		expect(mir_callable_plan_at(dead.scalar_mir.callable_plans[0], plan.instruction).effects).to_equal(mir_effect_none())
+	end
+end

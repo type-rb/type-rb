@@ -1,0 +1,164 @@
+import { check, emit_qbe } from compiler
+import { lex } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { CompilerState, compiler_new } from state/state
+import { describe, expect, test } from trb/std/test
+import { large_scalar_inline_test_source, occurrence_count, output_source } from testing/compiler
+import { MirInstruction } from mir/model/module
+import { optimize_verified_mir } from mir/passes/optimize
+import { verify_mir } from mir/verify/module
+import { mir_test_module } from testing/mir/model
+import { logical_run_qbe } from testing/qbe_runner
+import trb/std/process
+import trb/std/result
+
+describe("Native TypeRB frontend") do
+	test("inlines bounded scalar helpers outside lexical loops") do
+		# Exercise the ordinary MIR path.
+		source := "def scalar(value: Integer): Integer\n\tsum := value + 1\n\tproduct := sum * 2\n\treturn product / 2\nend\n\ndef main()\n\t_retained := {1 => 1}\n\tmut values: Array<Integer> := [0]\n\tmut index := 0\n\twhile index < 1\n\t\tvalues[0] = scalar(index)\n\t\tindex += 1\n\tend\n\treturn\nend\n"
+		mut state := compiler_new(source.size() + 1)
+		expect(lex(state, source)).to_be_true()
+		expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_true()
+		qbe := output_source(emit_qbe(state))
+		expect(qbe.include?("call $trbn_integer_add")).to_be_false()
+		expect(qbe.include?("call $trbn_integer_mul")).to_be_false()
+		expect(qbe.include?("call $trbn_integer_divide")).to_be_false()
+		# The pure scalar call preserves one earlier bound proof; the remaining
+		# independent accesses still retain their checks in typed MIR.
+		expect(occurrence_count(qbe, "call $trbn_fail(l $trbn_bounds_error, l 30)") >= 2).to_be_true()
+	end
+
+	test("keeps the loop reserve independent when the non-loop reserve is exhausted") do
+		# Exercise the ordinary MIR path.
+		source := "def scalar(value: Integer, label: String): Integer\n\tmut result := value\n\tresult += 1\n\tresult += 1\n\tresult += 1\n\tresult += 1\n\tresult += 1\n\tresult += 1\n\tresult += 1\n\tresult += 1\n\tresult += 1\n\tresult += 1\n\tresult += 1\n\tresult += 1\n\tresult += 1\n\tresult += 1\n\tresult += 1\n\tresult += 1\n\tresult += 1\n\treturn result\nend\n\ndef main()\n\t_retained := {1 => 1}\n\tmut values: Array<Integer> := [0]\n\tmut index := 0\n\twhile index < 1\n\t\tvalues[0] = scalar(index, \"managed caller\")\n\t\tindex += 1\n\tend\n\treturn\nend\n"
+		mut state := compiler_new(source.size() + 1)
+		expect(lex(state, source)).to_be_true()
+		expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_true()
+		qbe := output_source(emit_qbe(state))
+		expect(qbe.include?("call $trbn_integer_add")).to_be_false()
+		expect(qbe.include?("@integer_range_failure")).to_be_true()
+		# A verified failure-only call keeps the captured position valid.
+		expect(occurrence_count(qbe, "call $trbn_fail(l $trbn_bounds_error, l 30)") >= 2).to_be_true()
+	end
+
+	test("inlines eligible scalar and branching helpers in managed caller loops") do
+		eligible_source := "def scalar(left: Integer, right: Integer): Integer\n\tsum := left + right\n\treturn sum * 2\nend\n\ndef main()\n\t_marker := {1 => 1}\n\tmut index := 0\n\twhile index < 1\n\t\tvalue := scalar(index, 1)\n\t\tindex += value\n\tend\n\treturn\nend\n"
+		mut eligible := compiler_new(eligible_source.size() + 1)
+		expect(lex(eligible, eligible_source)).to_be_true()
+		expect(parse_module(eligible, 0, eligible.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(eligible)).to_be_true()
+		expect(check(eligible)).to_be_true()
+		eligible_qbe := output_source(emit_qbe(eligible))
+		expect(eligible_qbe.include?("call $trbnf0")).to_be_false()
+		expect(eligible_qbe.include?("function l $trbnf0(")).to_be_true()
+		expect(eligible_qbe.include?("# native retained scalar call ")).to_be_false()
+		expect(eligible_qbe.include?("@integer_range_failure")).to_be_true()
+		expect(
+			occurrence_count(eligible_qbe, "@integer_range_failure\n"),
+		).to_equal(2)
+
+		non_loop_source := "def scalar(value: Integer): Integer\n\treturn value + 1\nend\n\ndef main()\n\t_value := scalar(1)\n\treturn\nend\n"
+		mut non_loop := compiler_new(non_loop_source.size() + 1)
+		expect(lex(non_loop, non_loop_source)).to_be_true()
+		expect(parse_module(non_loop, 0, non_loop.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(non_loop)).to_be_true()
+		expect(check(non_loop)).to_be_true()
+		non_loop_qbe := output_source(emit_qbe(non_loop))
+		expect(non_loop_qbe.include?("call $trbnf0")).to_be_true()
+		expect(non_loop_qbe.include?("function l $trbnf0(")).to_be_true()
+		expect(non_loop_qbe.include?("# native retained scalar call ")).to_be_false()
+		expect(non_loop_qbe.include?("@integer_range_failure")).to_be_true()
+
+		# The bounded read-only helper pass can also expand control flow.
+		# Exercise both arms instead of retaining the older leaf-only limit.
+		branch_source := "def choose(value: Integer): Integer\n\tif value > 0\n\t\treturn value\n\telse\n\t\treturn 0\n\tend\nend\n\ndef main()\n\t_marker := {1 => 1}\n\tmut index := -1\n\tmut total := 0\n\twhile index < 2\n\t\ttotal += choose(index)\n\t\tindex += 1\n\tend\n\tputs(total)\nend\n"
+		mut branch := compiler_new(branch_source.size() + 1)
+		expect(lex(branch, branch_source)).to_be_true()
+		expect(parse_module(branch, 0, branch.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(branch)).to_be_true()
+		expect(check(branch)).to_be_true()
+		branch_qbe := output_source(emit_qbe(branch))
+		expect(branch_qbe.include?("call $trbnf0")).to_be_false()
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, branch_qbe)
+			when Result::Ok(actual)
+				expect(actual).to_equal("1\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+
+		delegating_source := "def increment(value: Integer): Integer\n\treturn value + 1\nend\n\ndef delegating(value: Integer): Integer\n\treturn increment(value)\nend\n\ndef main()\n\t_marker := {1 => 1}\n\tmut index := 0\n\twhile index < 1\n\t\tindex = delegating(index)\n\tend\n\treturn\nend\n"
+		mut delegating := compiler_new(delegating_source.size() + 1)
+		expect(lex(delegating, delegating_source)).to_be_true()
+		expect(parse_module(delegating, 0, delegating.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(delegating)).to_be_true()
+		expect(check(delegating)).to_be_true()
+		expect(output_source(emit_qbe(delegating)).include?("call $trbnf1")).to_be_true()
+	end
+
+	test("retains caller range checks after the general scalar inline budget") do
+		# A parameter excludes exact literal-call folding. This still exercises
+		# the independent scalar inlining budget and caller range checks.
+		source := "def one(_value: Integer): Integer\n\treturn 1\nend\n\ndef main()\n\t_retained := {1 => 1}\n\t_owner := [1]\n\tmut value := 7\n\tmut index := 0\n\twhile index < 1\n\t\tvalue += one(index)\n\t\tvalue += one(index)\n\t\tvalue += one(index)\n\t\tindex += 1\n\tend\n\tputs(value.to_s())\n\treturn\nend\n"
+		mut state := compiler_new(source.size() + 1)
+		expect(lex(state, source)).to_be_true()
+		expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_true()
+		qbe := output_source(emit_qbe(state))
+		expect(occurrence_count(qbe, "call $trbnf0(")).to_equal(1)
+		# Inlining does not invent caller range facts from the emitted operand.
+		# All three call results retain range checks until MIR proves them.
+		expect(occurrence_count(qbe, " =w cugtl %t")).to_equal(3)
+
+	end
+
+	test("limits managed caller scalar inlining to two call sites per small program") do
+		source := "def scalar(value: Integer): Integer\n\treturn value + 1\nend\n\ndef main()\n\t_marker := {1 => 1}\n\tmut index := 0\n\twhile index < 1\n\t\tfirst := scalar(index)\n\t\tsecond := scalar(index)\n\t\tthird := scalar(index)\n\t\tindex += first + second + third\n\tend\n\treturn\nend\n"
+		mut state := compiler_new(source.size() + 1)
+		expect(lex(state, source)).to_be_true()
+		expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_true()
+		qbe := output_source(emit_qbe(state))
+		expect(occurrence_count(qbe, "call $trbnf0")).to_equal(1)
+		expect(qbe.include?("function l $trbnf0(")).to_be_true()
+		expect(qbe.include?("# native retained scalar call ")).to_be_false()
+
+		large_source := large_scalar_inline_test_source()
+		mut large := compiler_new(large_source.size() + 1)
+		expect(lex(large, large_source)).to_be_true()
+		expect(parse_module(large, 0, large.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(large)).to_be_true()
+		expect(check(large)).to_be_true()
+		large_qbe := output_source(emit_qbe(large))
+		expect(large_qbe.include?("call $trbnf0")).to_be_true()
+		expect(large_qbe.include?("function l $trbnf0(")).to_be_true()
+		expect(large_qbe.include?("# native retained scalar call ")).to_be_false()
+	end
+end
+
+describe("Native MIR instruction replacement") do
+	test("retains instruction snapshots across repeated verified rewrites") do
+		mut native_module := mir_test_module(false, false)
+		native_module.instructions[5] = MirInstruction.new(kind: 7, result: 8, first: 5, second: 7, payload: 1, failure: 13, source_id: 0, line: 4)
+		original := native_module.instructions[5]
+		expect(verify_mir(native_module, false)).to_equal("")
+		optimize_verified_mir(native_module)
+		expect(original.payload).to_equal(1)
+		expect(native_module.instructions[5]).to_equal(MirInstruction.new(kind: 7, result: 8, first: 5, second: 7, payload: 13, failure: 13, source_id: 0, line: 4))
+		expect(verify_mir(native_module, true)).to_equal("")
+		rewritten := native_module.instructions[5]
+		optimize_verified_mir(native_module)
+		expect(native_module.instructions[5]).to_equal(rewritten)
+		expect(verify_mir(native_module, true)).to_equal("")
+	end
+end

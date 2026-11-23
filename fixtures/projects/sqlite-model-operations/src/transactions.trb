@@ -1,0 +1,63 @@
+import { Report } from models
+import { Database, DbResult } from trb/orm
+
+def committed(label: String): DbResult<Integer>
+	return Database.transaction() do |tx|
+		reports := Report.using(tx)
+		first := try reports.create(title: label)
+		puts(try Report.count())
+		puts(try reports.count())
+		inner_value := tx.transaction() do |inner|
+			nested := Report.using(inner)
+			_created := try nested.create(title: "discard")
+			_duplicate := try nested.create(title: "discard")
+			1
+		end catch |error|
+			puts(error.message)
+			0
+		end
+		puts(inner_value)
+		puts(try reports.count())
+		nested_count := try tx.transaction() do |inner|
+			row := try Report.using(inner).create(title: "kept")
+			temporary := try Report.using(inner).create(title: "temporary")
+			puts(try temporary.delete())
+			row.id
+		end
+		puts(nested_count)
+		_changed := try first.update(note: "saved")
+		try reports.count()
+	end
+end
+
+def rolled_back(): DbResult<Integer>
+	return Database.transaction() do |tx|
+		scoped := Report.using(tx)
+		_discard := try scoped.create(title: "outer discard")
+		inner := try tx.transaction() do |nested|
+			_created := try Report.using(nested).create(title: "kept")
+			7
+		end
+		inner
+	end
+end
+
+def exercise_transactions()
+	count := committed("root") catch |error|
+		puts(error.message)
+		return
+	end
+	puts(count)
+	observed := rolled_back() catch |error|
+		puts(error.message)
+		0
+	end
+	puts(observed)
+end
+
+def commit_under_reader(): DbResult<Integer>
+	return Database.transaction() do |tx|
+		row := try Report.using(tx).create(title: "blocked")
+		row.id
+	end
+end

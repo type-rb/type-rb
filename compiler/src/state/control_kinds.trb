@@ -1,0 +1,31 @@
+# Parsed conditional regions are independent of MIR block terminators.
+
+def control_syntax_if(): Integer
+	return 1
+end
+
+def control_syntax_case(): Integer
+	return 2
+end
+
+def control_syntax_ternary(): Integer
+	return 3
+end
+
+def control_syntax_guarded_transfer(): Integer
+	return 4
+end
+
+# Source break/next and verified loop transfers share one identity domain.
+
+def loop_transfer_none(): Integer
+	return 0
+end
+
+def loop_transfer_break(): Integer
+	return 1
+end
+
+def loop_transfer_continue(): Integer
+	return 2
+end

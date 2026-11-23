@@ -1,0 +1,161 @@
+import { official_source_kind } from project/official_catalog
+import { standard_source_file, standard_source_filesystem_host } from state/standard_source_kinds
+import { build_module_components, module_is_cyclic, validate_compilation_units } from frontend/resolution/module_components
+import { CompilerState, compiler_new } from state/state
+import { load_string, store_integer } from support/storage
+import { describe, expect, test } from trb/std/test
+
+def component_graph(edges: Array<Array<Integer>>, entry: Integer): CompilerState
+	mut capacity := edges.size()
+	mut source := 0
+	while source < edges.size()
+		capacity += edges[source].size()
+		source += 1
+	end
+	mut state := compiler_new(capacity)
+	state.module_graph.module_count[0] = edges.size()
+	state.module_graph.entry_module[0] = entry
+	source = 0
+	mut binding := 0
+	while source < edges.size()
+		expect(store_integer(state.module_graph.module_import_starts, source, binding)).to_be_true()
+		expect(store_integer(state.module_graph.module_import_counts, source, edges[source].size())).to_be_true()
+		mut index := 0
+		while index < edges[source].size()
+			expect(store_integer(state.module_graph.import_targets, binding, edges[source][index])).to_be_true()
+			expect(store_integer(state.module_graph.import_lines, binding, source + 1)).to_be_true()
+			binding += 1
+			index += 1
+		end
+		source += 1
+	end
+	state.module_graph.import_count[0] = binding
+	return state
+end
+
+def expect_component(state: CompilerState, component: Integer, members: Array<Integer>, cyclic: Boolean)
+	actual := state.global_bindings.component_modules[component]
+	expect(actual.size()).to_equal(members.size())
+	mut index := 0
+	while index < members.size() && index < actual.size()
+		expect(actual[index]).to_equal(members[index])
+		expect(state.global_bindings.module_components[members[index]]).to_equal(component)
+		expect(module_is_cyclic(state, members[index])).to_equal(cyclic)
+		index += 1
+	end
+end
+
+describe("Module component ownership") do
+	test("groups only the owned File service and its typed host adapter") do
+		mut state := component_graph([[1], [0]], 0)
+		store_integer(state.standard_modules, 0, standard_source_file())
+		store_integer(state.standard_modules, 1, standard_source_filesystem_host())
+		expect(validate_compilation_units(state, [])).to_be_true()
+		expect(state.module_graph.module_count[0]).to_equal(2)
+		mut mixed := component_graph([[1], [0]], 0)
+		store_integer(mixed.standard_modules, 0, standard_source_file())
+		expect(validate_compilation_units(mixed, [0, 99])).to_be_false()
+	end
+
+	test("binds only the owned generated dispatcher to the application unit") do
+		mut state := component_graph([[1], [0]], 0)
+		store_integer(state.standard_modules, 1, official_source_kind("trb/web/testing"))
+		expect(validate_compilation_units(state, [-1])).to_be_true()
+		mut package := component_graph([[1], [0]], 0)
+		store_integer(package.standard_modules, 1, official_source_kind("trb/web/testing"))
+		expect(validate_compilation_units(package, [0])).to_be_false()
+	end
+
+	test("groups the owned URL source and adapter without merging module identities") do
+		mut state := component_graph([[1], [0]], 0)
+		store_integer(state.standard_modules, 0, 4)
+		store_integer(state.standard_modules, 1, 5)
+		expect(validate_compilation_units(state, [])).to_be_true()
+		expect(state.module_graph.module_count[0]).to_equal(2)
+	end
+
+	test("groups only the six loader-owned time source identities") do
+		mut state := component_graph([[1], [0, 2, 3, 4, 5], [3], [2], [2, 3, 5], []], 0)
+		mut index := 0
+		while index < 6
+			store_integer(state.standard_modules, index, 10 + index)
+			index += 1
+		end
+		expect(validate_compilation_units(state, [])).to_be_true()
+		mut mixed := component_graph([[1], [0]], 0)
+		store_integer(mixed.standard_modules, 0, 10)
+		expect(validate_compilation_units(mixed, [0, 99])).to_be_false()
+	end
+
+	test("keeps authored cross-unit dependency cycles rejected") do
+		mut state := component_graph([[1], [0]], 0)
+		expect(validate_compilation_units(state, [0, 1])).to_be_false()
+		expect(load_string(state.diagnostics.messages, 0)).to_equal("compilation unit dependency cycle")
+	end
+
+	test("does not group an authored dependency with an owned URL source") do
+		mut state := component_graph([[1], [0]], 0)
+		store_integer(state.standard_modules, 0, 4)
+		expect(validate_compilation_units(state, [0, 1])).to_be_false()
+		expect(load_string(state.diagnostics.messages, 0)).to_equal("compilation unit dependency cycle")
+	end
+
+	test("keeps owned URL identity distinct from negative and sparse authored unit IDs") do
+		mut negative := component_graph([[1], [0]], 0)
+		store_integer(negative.standard_modules, 0, 4)
+		expect(validate_compilation_units(negative, [-1, -2])).to_be_false()
+		mut sparse := component_graph([[1], [0]], 0)
+		store_integer(sparse.standard_modules, 0, 4)
+		expect(validate_compilation_units(sparse, [0, 5])).to_be_false()
+	end
+
+	test("retains entry-first and disconnected singleton components") do
+		edges: Array<Array<Integer>> := [[], [], []]
+		mut state := component_graph(edges, 1)
+		build_module_components(state)
+		expect(state.global_bindings.component_modules.size()).to_equal(3)
+		expect_component(state, 0, [1], false)
+		expect_component(state, 1, [0], false)
+		expect_component(state, 2, [2], false)
+	end
+
+	test("keeps a singleton self-edge cyclic") do
+		mut state := component_graph([[0]], 0)
+		build_module_components(state)
+		expect(state.global_bindings.component_modules.size()).to_equal(1)
+		expect_component(state, 0, [0], true)
+	end
+
+	test("orders an authored class after its generated implementation dependencies") do
+		edges: Array<Array<Integer>> := [[1], [], [3], []]
+		mut state := component_graph(edges, 0)
+		store_integer(state.module_graph.module_generated_dependencies, 1, 3)
+		build_module_components(state)
+		expect(state.global_bindings.component_modules.size()).to_equal(4)
+		expect_component(state, 0, [3], false)
+		expect_component(state, 1, [2], false)
+		expect_component(state, 2, [1], false)
+		expect_component(state, 3, [0], false)
+	end
+
+	test("preserves authored discovery order within a multi-node cycle") do
+		mut state := component_graph([[2, 1], [0], [1]], 0)
+		build_module_components(state)
+		expect(state.global_bindings.component_modules.size()).to_equal(1)
+		expect_component(state, 0, [0, 2, 1], true)
+	end
+
+	test("keeps completed members independent across nested stack reuse") do
+		mut state := component_graph([[1, 2], [1], [3], [2]], 0)
+		build_module_components(state)
+		expect(state.global_bindings.component_modules.size()).to_equal(3)
+		expect_component(state, 0, [1], true)
+		expect_component(state, 1, [2, 3], true)
+		expect_component(state, 2, [0], false)
+		build_module_components(state)
+		expect(state.global_bindings.component_modules.size()).to_equal(3)
+		expect_component(state, 0, [1], true)
+		expect_component(state, 1, [2, 3], true)
+		expect_component(state, 2, [0], false)
+	end
+end

@@ -1,0 +1,169 @@
+record IntegerStorage
+	origin: Integer
+	chunks: Array<Array<Integer>>
+	limit: Array<Integer>
+	used: Array<Integer>
+end
+
+record StringStorage
+	origin: Integer
+	chunks: Array<Array<String>>
+	limit: Array<Integer>
+	used: Array<Integer>
+end
+
+def storage_chunk_size(): Integer
+	return 256
+end
+
+def integer_chunk(): Array<Integer>
+	mut values: Array<Integer> := []
+	mut index := 0
+	while index < storage_chunk_size()
+		values.push(0)
+		index += 1
+	end
+	return values
+end
+
+def string_chunk(): Array<String>
+	mut values: Array<String> := []
+	mut index := 0
+	while index < storage_chunk_size()
+		values.push("")
+		index += 1
+	end
+	return values
+end
+
+def integer_storage(capacity: Integer): IntegerStorage
+	return integer_storage_span(0, capacity)
+end
+
+def string_storage(capacity: Integer): StringStorage
+	return string_storage_span(0, capacity)
+end
+
+def store_integer(mut storage: IntegerStorage, index: Integer, value: Integer): Boolean
+	if index < storage.origin
+		return false
+	end
+	if index >= storage.limit[0]
+		return false
+	end
+	chunk_size := storage_chunk_size()
+	relative := index - storage.origin
+	chunk_index := relative / chunk_size
+	mut chunks := storage.chunks
+	while chunks.size() <= chunk_index
+		chunks.push([])
+	end
+	if storage.chunks[chunk_index].size() == 0
+		storage.chunks[chunk_index] = integer_chunk()
+	end
+	storage.chunks[chunk_index][relative % chunk_size] = value
+	if index >= storage.used[0]
+		storage.used[0] = index + 1
+	end
+	return true
+end
+
+def store_string(mut storage: StringStorage, index: Integer, value: String): Boolean
+	if index < storage.origin
+		return false
+	end
+	if index >= storage.limit[0]
+		return false
+	end
+	chunk_size := storage_chunk_size()
+	relative := index - storage.origin
+	chunk_index := relative / chunk_size
+	mut chunks := storage.chunks
+	while chunks.size() <= chunk_index
+		chunks.push([])
+	end
+	if storage.chunks[chunk_index].size() == 0
+		storage.chunks[chunk_index] = string_chunk()
+	end
+	storage.chunks[chunk_index][relative % chunk_size] = value
+	if index >= storage.used[0]
+		storage.used[0] = index + 1
+	end
+	return true
+end
+
+def load_integer(storage: IntegerStorage, index: Integer): Integer
+	chunk_size := storage_chunk_size()
+	relative := index - storage.origin
+	return storage.chunks[relative / chunk_size][relative % chunk_size]
+end
+
+def load_string(storage: StringStorage, index: Integer): String
+	chunk_size := storage_chunk_size()
+	relative := index - storage.origin
+	return storage.chunks[relative / chunk_size][relative % chunk_size]
+end
+
+# Sparse origin maps leave untouched chunks unallocated. Missing entries are zero.
+def sparse_integer_at(storage: IntegerStorage, index: Integer): Integer
+	if index < storage.origin || index >= storage.used[0]
+		return 0
+	end
+	chunk_size := storage_chunk_size()
+	relative := index - storage.origin
+	chunk := storage.chunks[relative / chunk_size]
+	if chunk.size() == 0
+		return 0
+	end
+	return chunk[relative % chunk_size]
+end
+
+# Sparse semantic views need the same absent-entry behavior as origin maps.
+def sparse_string_at(storage: StringStorage, index: Integer): String
+	if index < storage.origin || index >= storage.used[0]
+		return ""
+	end
+	chunk_size := storage_chunk_size()
+	relative := index - storage.origin
+	chunk := storage.chunks[relative / chunk_size]
+	if chunk.size() == 0
+		return ""
+	end
+	return chunk[relative % chunk_size]
+end
+
+# Keep authored absolute coordinates without allocating chunks before a body.
+# Limits and high-water marks remain absolute; only physical indexes are local.
+def integer_storage_span(origin: Integer, finish: Integer): IntegerStorage
+	return IntegerStorage.new(origin: origin, chunks: [], limit: [finish], used: [origin])
+end
+
+def string_storage_span(origin: Integer, finish: Integer): StringStorage
+	return StringStorage.new(origin: origin, chunks: [], limit: [finish], used: [origin])
+end
+
+def integer_storage_copy(source: IntegerStorage): IntegerStorage
+	mut target := integer_storage_span(source.origin, source.limit[0])
+	source.chunks.each do |chunk|
+		mut copied: Array<Integer> := []
+		chunk.each do |value|
+			copied.push(value)
+		end
+		target.chunks.push(copied)
+	end
+	target.used[0] = source.used[0]
+	return target
+end
+
+def string_storage_copy(source: StringStorage): StringStorage
+	mut target := string_storage_span(source.origin, source.limit[0])
+	source.chunks.each do |chunk|
+		mut copied: Array<String> := []
+		chunk.each do |value|
+			copied.push(value)
+		end
+		target.chunks.push(copied)
+	end
+	target.used[0] = source.used[0]
+	return target
+end

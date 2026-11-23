@@ -1,0 +1,32 @@
+def add_right(value: Integer): Integer
+	return value + 1
+end
+
+def add_left(value: Integer): Integer
+	return 1 + value
+end
+
+def add_limit(value: Integer): Integer
+	return value + 1024
+end
+
+def add_outside_limit(value: Integer): Integer
+	return value + 1025
+end
+
+def add_dynamic(left: Integer, right: Integer): Integer
+	return left + right
+end
+
+def main()
+	maximum := 9007199254740991
+	minimum := -maximum
+	puts(add_right(minimum).to_s())
+	puts(add_left(minimum).to_s())
+	puts(add_limit(minimum).to_s())
+	puts(add_right(maximum - 1).to_s())
+	puts(add_left(0).to_s())
+	puts(add_outside_limit(0).to_s())
+	puts(add_dynamic(-1, 1).to_s())
+	return
+end

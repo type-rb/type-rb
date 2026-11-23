@@ -1,0 +1,145 @@
+import { standard_entropy } from frontend/resolution/secure_random_intrinsics
+import { standard_source_secure_random } from state/standard_source_kinds
+import { expect_compiler_phase, logical_checked_source } from testing/pipeline
+import { check, emit_qbe } from compiler
+import { CompilerState, compiler_new } from state/state
+import { load_integer, load_string, store_integer, store_string } from support/storage
+import { lex } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { MirCall, MirSignature, mir_function_index } from mir/model/module
+import { verify_mir } from mir/verify/module
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { control_test_output } from testing/mir/control
+import { describe, expect, test } from trb/std/test
+
+# Isolate the mechanical adapters from the ordinary library's full parser and
+# encoding bodies, which the Native CLI differential suite executes separately.
+def entropy_test_state(): CompilerState
+	source := "import trb/internal/entropy as Entropy\ndef main()\nputs(Entropy.read(257).to_bytes().size())\nend\n"
+	mut state := compiler_new(1048576)
+	expect_compiler_phase(state, "lex", lex(state, source))
+	store_integer(state.standard_modules, 0, standard_source_secure_random())
+	expect_compiler_phase(state, "parse", parse_module(state, 0, 0))
+	expect_compiler_phase(state, "resolve", resolve(state))
+	expect_compiler_phase(state, "check", check(state))
+	return state
+end
+
+def expect_codec_recovery_boundary(source: String, expected_owner: String)
+	mut state := compiler_new(1048576)
+	expect_compiler_phase(state, "lex", lex(state, source))
+	expect_compiler_phase(state, "parse", parse_module(state, 0, 0))
+	# Reference-hosted units retain the published recovery byte constructor.
+	# Complete library execution uses the ordinary Native CLI byte adapter.
+	expect(resolve(state)).to_be_false()
+	expect(load_string(state.diagnostics.messages, 0)).to_equal("bootstrap String byte construction does not support this escape")
+	owner := load_integer(state.diagnostics.modules, 0)
+	expect(load_string(state.module_graph.module_names, owner)).to_equal(expected_owner)
+	expect(load_integer(state.diagnostics.lines, 0) > 0).to_be_true()
+	expect(state.module_graph.active_module[0]).to_equal(0)
+end
+
+describe("Trusted entropy adapter") do
+	test("reports recovery byte construction limits at each codec table") do
+		hex_source := "import trb/std/encoding/hex\nimport trb/std/encoding/base64\ndef main()\nputs(Hex.encode(\"raw\".to_bytes()))\nputs(Base64.encode(\"raw\".to_bytes()))\nend\n"
+		expect_codec_recovery_boundary(hex_source, "trb/internal/encoding/hex/index")
+		base64_source := "import trb/std/encoding/base64\ndef main()\nputs(Base64.encode(\"raw\".to_bytes()))\nend\n"
+		expect_codec_recovery_boundary(base64_source, "trb/internal/encoding/base64/index")
+	end
+
+	test("preserves typed allocation and I/O through source-erased MIR") do
+		mut state := entropy_test_state()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		mut count := 0
+		state.scalar_mir.signatures.each do |signature|
+			kind := standard_entropy(state, signature.id)
+			if kind
+				count += 1
+				expect(signature.kind).to_equal(3)
+				expect(signature.adapter).to_equal(16)
+				expect(mir_function_index(state.scalar_mir, signature.id)).to_equal(-1)
+				expect(signature.parameter_types).to_equal(["Integer"])
+				expect(signature.parameter_mutable).to_equal([0])
+				expect(signature.result_type).to_equal("String")
+			end
+		end
+		expect(count).to_equal(1)
+		before := control_test_output(emit_qbe(state))
+		intrinsic_mir_erase(state)
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+	end
+
+	test("does not grant adapter access to authored names") do
+		mut state := logical_checked_source("def read(length: Integer): String\nreturn length.to_s()\nend\ndef main()\nputs(read(7))\nend\n")
+		expect_compiler_phase(state, "check", check(state))
+		state.scalar_mir.signatures.each do |signature|
+			expect(standard_entropy(state, signature.id)).to_equal(false)
+		end
+	end
+
+	test("requires complete owned declarations rather than trusted spelling") do
+		["owner", "name", "mutable", "parameter", "result", "body", "default"].each do |damage|
+			mut state := entropy_test_state()
+			state.scalar_mir.signatures.each do |signature|
+				if standard_entropy(state, signature.id)
+					parameter := load_integer(state.declarations.function_parameter_starts, signature.id)
+					if damage == "owner"
+						store_integer(state.standard_modules, signature.source_id, 0)
+					elsif damage == "name"
+						store_string(state.declarations.function_names, signature.id, "authored_read")
+					elsif damage == "mutable"
+						store_integer(state.declarations.parameter_mutable, parameter, 1)
+					elsif damage == "parameter"
+						store_string(state.declarations.parameter_types, parameter, "Boolean")
+					elsif damage == "result"
+						store_string(state.declarations.function_result_types, signature.id, "Integer")
+					elsif damage == "body"
+						store_integer(state.declarations.function_body_ends, signature.id, 99999)
+					else
+						store_integer(state.parsed.parameter_defaults, parameter, 1)
+					end
+					expect(standard_entropy(state, signature.id)).to_equal(false)
+				end
+			end
+		end
+	end
+
+	test("independently rejects tampered MIR signatures and effects") do
+		["name", "parameter", "mutable", "result", "effects"].each do |damage|
+			mut state := entropy_test_state()
+			mut index := 0
+			while index < state.scalar_mir.signatures.size()
+				row := state.scalar_mir.signatures[index]
+				if row.adapter == 16 && damage != "effects"
+					mut name := row.name
+					mut parameters := row.parameter_types
+					mut mutable := row.parameter_mutable
+					mut result := row.result_type
+					if damage == "name"
+						name = "authored.read"
+					elsif damage == "parameter"
+						parameters = ["Boolean"]
+					elsif damage == "mutable"
+						mutable = [1]
+					elsif damage == "result"
+						result = "Integer"
+					end
+					state.scalar_mir.signatures[index] = MirSignature.new(id: row.id, kind: row.kind, name: name, adapter: row.adapter, source_id: row.source_id, line: row.line, parameter_types: parameters, parameter_mutable: mutable, result_type: result)
+				end
+				index += 1
+			end
+			if damage == "effects"
+				index = 0
+				while index < state.scalar_mir.calls.size()
+					row := state.scalar_mir.calls[index]
+					if state.scalar_mir.signatures[row.callee].adapter == 16
+						state.scalar_mir.calls[index] = MirCall.new(callee: row.callee, argument_start: row.argument_start, argument_count: row.argument_count, effects: 0)
+					end
+					index += 1
+				end
+			end
+			expect(verify_mir(state.scalar_mir, true) != "").to_be_true()
+		end
+	end
+end

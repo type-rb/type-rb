@@ -1,0 +1,224 @@
+import { CompilerProjectSources, check, emit_qbe, load_project_sources } from compiler
+import { control_test_output } from testing/mir/control
+import { logical_checked_source } from testing/pipeline
+import { logical_run_qbe, logical_run_qbe_arguments } from testing/qbe_runner
+import { compiler_host_intrinsic, compiler_runtime_intrinsic } from frontend/resolution/entry_resolution
+import { find_module, has_diagnostic } from state/state
+import { resolve } from frontend/checking/program/resolution
+import { find_function_in_module } from frontend/resolution/declaration_lookup
+import { load_string } from support/storage
+import { describe, expect, test } from trb/std/test
+import { QbeOutput } from backend/qbe/output
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import trb/std/process
+import trb/std/result
+
+def has_function_definition(output: QbeOutput, index: Integer): Boolean
+	mut line := 0
+	while line < output.lines.used[0]
+		text := load_string(output.lines, line)
+		if text.start_with?("function ") && text.include?("$trbnf" + index.to_s() + "(")
+			return true
+		end
+		line += 1
+	end
+	return false
+end
+
+describe("Compiler runtime declaration identity") do
+	test("preserves preceding functions and omits intrinsics independently of declaration order") do
+		mut state := load_project_sources(
+			"/project/trbconfig.jsonc",
+			"/project/src",
+			CompilerProjectSources.new(
+				paths: ["/project/src/main.trb", "/project/src/support.trb"],
+				sources: [
+					"import { result } from support\n\ndef preceding(source: String): Boolean\n\treturn source.size() > 0\nend\n\ndef compiler_main(source: String, mode: String, file_mode: Boolean): Integer\n\tif preceding(source) && compiler_file_exists(source)\n\t\treturn result()\n\tend\n\treturn 0\nend\n\ndef compiler_file_exists(_path: String): Boolean\n\treturn false\nend\n\ndef main()\n\treturn\nend\n",
+					"def result(): Integer\n\treturn 1\nend\n",
+				],
+				error: "",
+			),
+		)
+		expect(has_diagnostic(state)).to_be_false()
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_true()
+		preceding := find_function_in_module(state, state.module_graph.entry_module[0], "preceding")
+		intrinsic := find_function_in_module(state, state.module_graph.entry_module[0], "compiler_file_exists")
+		expect(preceding).to_equal(0)
+		expect(intrinsic > preceding).to_be_true()
+		output := emit_qbe(state)
+		expect(has_diagnostic(state)).to_be_false()
+		expect(has_function_definition(output, preceding)).to_be_true()
+		expect(has_function_definition(output, intrinsic)).to_be_false()
+	end
+
+	test("keeps intrinsic names ordinary outside the compiler on MIR and direct paths") do
+		declarations := "def compiler_set_compression_link(_needed: Boolean)\nend\ndef compiler_set_network_link(_needed: Boolean)\nend\ndef compiler_file_exists(_path: String): Boolean\n\treturn true\nend\ndef compiler_read_source(path: String): String\n\treturn path + \"!\"\nend\ndef compiler_source_slice(source: String, _start: Integer, _finish: Integer): String\n\treturn source\nend\ndef compiler_collect_project_sources(_root: String, _out: String): Integer\n\treturn 7\nend\ndef compiler_collect_package_files(_root: String): Integer\nreturn 9\nend\ndef compiler_collect_test_paths(_root: String, _out: String): Integer\nreturn 11\nend\ndef compiler_eputs(value: String)\n\tputs(value)\nend\ndef compiler_reset_temporary_storage()\n\tputs(\"reset\")\nend\ndef compiler_string_bytes(_text: String): Array<Integer>\nreturn [7]\nend\ndef compiler_source_is_utf8(_text: String): Boolean\nreturn false\nend\n"
+		["", "\t_marker := {\"direct\" => 1}\n"].each do |marker|
+			source := declarations + "def main()\ncompiler_set_network_link(true)\ncompiler_set_compression_link(false)\n" + marker + "\tputs(compiler_file_exists(\"missing\"))\n\tputs(compiler_read_source(\"source\"))\n\tputs(compiler_source_slice(\"whole\", 1, 2))\n\tputs(compiler_collect_project_sources(\"root\", \"out\"))\n\tputs(compiler_collect_package_files(\"root\"))\nputs(compiler_collect_test_paths(\"root\", \"out\"))\n\tcompiler_eputs(\"stdout\")\n\tcompiler_reset_temporary_storage()\n\tputs(compiler_string_bytes(\"x\")[0])\n\tputs(compiler_source_is_utf8(\"x\"))\nend\n"
+			mut state := logical_checked_source(source)
+			expect(check(state)).to_be_true()
+			state.scalar_mir.signatures.each do |signature|
+				expect(signature.kind).to_equal(0)
+				expect(compiler_runtime_intrinsic(state, signature.id)).to_be_false()
+			end
+			output := control_test_output(emit_qbe(state))
+			expect(has_diagnostic(state)).to_be_false()
+			qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+			if qbe != nil
+				case logical_run_qbe(qbe, output)
+				when Result::Ok(actual)
+					expect(actual).to_equal("true\nsource!\nwhole\n7\n9\n11\nstdout\nreset\n7\nfalse\n")
+				when Result::Err(error)
+					puts(error)
+					expect(false).to_be_true()
+				end
+			end
+		end
+	end
+
+	test("follows extracted declarations and aliases without intercepting sibling names") do
+		mut state := load_project_sources(
+			"/project/trbconfig.jsonc", "/project/src",
+			CompilerProjectSources.new(
+				paths: ["/project/src/main.trb", "/project/src/lexer.trb", "/project/src/sibling.trb", "/project/src/consumer.trb"],
+				sources: [
+					"import { compiler_source_slice } from lexer\nimport { sibling_value } from sibling\nimport { consumer_value } from consumer\ndef compiler_main(source: String, _mode: String, _file_mode: Boolean): Integer\n\tputs(compiler_source_slice(source, 0, 1))\n\tputs(sibling_value())\n\tputs(consumer_value())\n\treturn 0\nend\ndef main()\nend\n",
+					"def compiler_source_slice(source: String, _start: Integer, _finish: Integer): String\n\treturn source\nend\n",
+					"def compiler_source_slice(_source: String, _start: Integer, _finish: Integer): String\n\treturn \"sibling\"\nend\ndef sibling_value(): String\n\treturn compiler_source_slice(\"value\", 0, 1)\nend\n",
+					"import { compiler_source_slice as segment } from lexer\ndef consumer_value(): String\n\treturn segment(\"value\", 0, 1)\nend\n",
+				], error: "",
+			),
+		)
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_true()
+		intrinsic := find_function_in_module(state, find_module(state, "lexer"), "compiler_source_slice")
+		sibling := find_function_in_module(state, find_module(state, "sibling"), "compiler_source_slice")
+		expect(compiler_runtime_intrinsic(state, intrinsic)).to_be_true()
+		expect(compiler_runtime_intrinsic(state, sibling)).to_be_false()
+		expect(state.scalar_mir.signatures[intrinsic].kind).to_equal(1)
+		expect(state.scalar_mir.signatures[sibling].kind).to_equal(0)
+		output := emit_qbe(state)
+		expect(has_diagnostic(state)).to_be_false()
+		expect(has_function_definition(output, intrinsic)).to_be_false()
+		expect(has_function_definition(output, sibling)).to_be_true()
+		text := control_test_output(output)
+		expect(text.split("call $trbn_source_slice(").size()).to_equal(3)
+		expect(text.include?("call $trbnf" + intrinsic.to_s() + "(")).to_be_false()
+		expect(text.include?("call $trbnf" + sibling.to_s() + "(")).to_be_true()
+	end
+
+	test("follows the CLI core adapter while leaving a plain host module ordinary") do
+		mut state := load_project_sources(
+			"/project/trbconfig.jsonc", "/project/src",
+			CompilerProjectSources.new(
+				paths: ["/project/src/main.trb", "/project/src/core.trb", "/project/src/host.trb"],
+				sources: [
+					"import { compiler_main as core_main } from core\nimport { output } from host\ndef compiler_main(source: String, mode: String, file_mode: Boolean): Integer\n\treturn core_main(source, mode, file_mode)\nend\ndef native_cli_main(): Integer\n\toutput()\n\treturn 0\nend\ndef main()\nend\n",
+					"def compiler_main(_source: String, _mode: String, _file_mode: Boolean): Integer\n\tcompiler_reset_temporary_storage()\n\treturn 0\nend\ndef compiler_reset_temporary_storage()\nend\n",
+					"def output()\nend\n",
+				], error: "",
+			),
+		)
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_true()
+		intrinsic := find_function_in_module(state, find_module(state, "core"), "compiler_reset_temporary_storage")
+		host := find_function_in_module(state, find_module(state, "host"), "output")
+		expect(compiler_runtime_intrinsic(state, intrinsic)).to_be_true()
+		expect(compiler_host_intrinsic(state, host)).to_be_true()
+		expect(state.scalar_mir.signatures[intrinsic].kind).to_equal(1)
+		expect(state.scalar_mir.signatures[host].kind).to_equal(2)
+		mut ordinary := load_project_sources(
+			"/project/trbconfig.jsonc", "/project/src",
+			CompilerProjectSources.new(paths: ["/project/src/main.trb", "/project/src/host.trb"], sources: ["import { output } from host\ndef main()\n\toutput()\nend\n", "def output()\nend\n"], error: ""),
+		)
+		expect(resolve(ordinary)).to_be_true()
+		expect(check(ordinary)).to_be_true()
+		ordinary_host := find_function_in_module(ordinary, find_module(ordinary, "host"), "output")
+		expect(compiler_host_intrinsic(ordinary, ordinary_host)).to_be_false()
+		expect(ordinary.scalar_mir.signatures[ordinary_host].kind).to_equal(0)
+	end
+
+	test("follows the portable literal-data byte owner instead of an unrelated emitter import") do
+		mut state := load_project_sources("/project/trbconfig.jsonc", "/project/src", CompilerProjectSources.new(
+				paths: ["/project/src/main.trb", "/project/src/data.trb", "/project/src/literal_factory.trb", "/project/src/codec.trb", "/project/src/sibling.trb"],
+				sources: [
+					"import { emit_static_strings } from data\nimport { ordinary } from sibling\ndef compiler_main(source: String, _mode: String, _file: Boolean): Integer\nemit_static_strings(source)\nputs(ordinary())\nreturn 0\nend\ndef compiler_file_main(source: String, _path: String, mode: String, file: Boolean): Integer\nreturn compiler_main(source, mode, file)\nend\ndef main()\nend\n",
+					"import { mir_string_literal_data } from literal_factory\nimport { compiler_string_bytes } from sibling\ndef emit_static_strings(text: String)\nputs(mir_string_literal_data(text).bytes[0])\nputs(compiler_string_bytes(text)[0])\nend\n",
+					"import { compiler_string_bytes } from codec\nrecord TextData\nbytes: Array<Integer>\npoints: Integer\nend\ndef mir_string_literal_data(value: String): TextData\nreturn TextData.new(bytes: compiler_string_bytes(value), points: value.size())\nend\n",
+					"def compiler_string_bytes(_text: String): Array<Integer>\nreturn [7]\nend\n",
+					"def compiler_string_bytes(_text: String): Array<Integer>\nreturn [19]\nend\ndef ordinary(): Integer\nreturn compiler_string_bytes(\"ordinary\")[0]\nend\n",
+				], error: ""))
+		expect(resolve(state)).to_be_true()
+		checked := check(state)
+		if !checked
+			puts(load_string(state.diagnostics.messages, 0))
+		end
+		expect(checked).to_be_true()
+		canonical := find_function_in_module(state, find_module(state, "codec"), "compiler_string_bytes")
+		sibling := find_function_in_module(state, find_module(state, "sibling"), "compiler_string_bytes")
+		expect(compiler_runtime_intrinsic(state, canonical)).to_be_true()
+		expect(compiler_runtime_intrinsic(state, sibling)).to_be_false()
+		expect(state.scalar_mir.signatures[canonical].adapter).to_equal(4)
+		expect(state.scalar_mir.signatures[sibling].kind).to_equal(0)
+		before := control_test_output(emit_qbe(state))
+		intrinsic_mir_erase(state)
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe_arguments(qbe, before, ["--source-content", "probe", "abc"])
+			when Result::Ok(output)
+				expect(output).to_equal("97\n19\n19\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("resolves byte and source-validation adapters through their canonical consumers") do
+		mut state := load_project_sources("/project/trbconfig.jsonc", "/project/src",
+			CompilerProjectSources.new(paths: ["/project/src/main.trb", "/project/src/data.trb", "/project/src/lexer.trb"],
+				sources: ["import { emit_static_strings } from data\nimport { compiler_source_slice, compiler_source_is_utf8 } from lexer\ndef compiler_main(source: String, _mode: String, _file_mode: Boolean): Integer\nemit_static_strings(source)\nputs(compiler_source_is_utf8(source))\nputs(compiler_source_slice(source, 0, 1))\nreturn 0\nend\ndef main()\nend\n", "def compiler_string_bytes(_text: String): Array<Integer>\nreturn [7]\nend\ndef emit_static_strings(text: String)\nputs(compiler_string_bytes(text)[0])\nend\n", "def compiler_source_is_utf8(_text: String): Boolean\nreturn true\nend\ndef compiler_source_slice(text: String, _start: Integer, _finish: Integer): String\nif compiler_source_is_utf8(text)\nreturn text\nend\nreturn \"\"\nend\n"], error: ""))
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_true()
+		bytes := find_function_in_module(state, find_module(state, "data"), "compiler_string_bytes")
+		valid := find_function_in_module(state, find_module(state, "lexer"), "compiler_source_is_utf8")
+		expect(compiler_runtime_intrinsic(state, bytes)).to_be_true()
+		expect(compiler_runtime_intrinsic(state, valid)).to_be_true()
+		output := emit_qbe(state)
+		expect(has_diagnostic(state)).to_be_false()
+		expect(has_function_definition(output, bytes)).to_be_false()
+		expect(has_function_definition(output, valid)).to_be_false()
+		text := control_test_output(output)
+		expect(text.include?("call $trbn_string_bytes(")).to_be_true()
+		expect(text.include?("call $trbn_string_is_utf8(")).to_be_true()
+	end
+end
+
+describe("String escape decoding") do
+	test("binds the byte constructor through the canonical decoder and preserves siblings") do
+		mut state := load_project_sources("/project/trbconfig.jsonc", "/project/src", CompilerProjectSources.new(paths: ["/project/src/main.trb", "/project/src/lexer.trb", "/project/src/decoder.trb", "/project/src/literal_codec.trb", "/project/src/sibling.trb"], sources: ["import { compiler_source_slice } from lexer\nimport { decode_escape as decode } from decoder\nimport { ordinary } from sibling\ndef compiler_main(source: String, _mode: String, _file_mode: Boolean): Integer\nputs(compiler_source_slice(source, 0, 1))\nputs(decode(65))\nputs(ordinary())\nreturn 0\nend\ndef compiler_file_main(_source: String, _path: String, _mode: String, _file: Boolean): Integer\nreturn 0\nend\ndef main()\nend\n", "import { decode_escape } from decoder\ndef compiler_source_slice(_source: String, _start: Integer, _finish: Integer): String\nreturn decode_escape(65)\nend\n", "import { compiler_literal_byte } from literal_codec\ndef decode_escape(value: Integer): String\nreturn compiler_literal_byte(value)\nend\n", "def compiler_literal_byte(_value: Integer): String\nreturn \"unadapted\"\nend\n", "def compiler_literal_byte(_value: Integer): String\nreturn \"ordinary\"\nend\ndef ordinary(): String\nreturn compiler_literal_byte(65)\nend\n"], error: ""))
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_true()
+		canonical := find_function_in_module(state, find_module(state, "literal_codec"), "compiler_literal_byte")
+		sibling := find_function_in_module(state, find_module(state, "sibling"), "compiler_literal_byte")
+		expect(compiler_runtime_intrinsic(state, canonical)).to_be_true()
+		expect(compiler_runtime_intrinsic(state, sibling)).to_be_false()
+		expect(state.scalar_mir.signatures[canonical].adapter).to_equal(12)
+		expect(state.scalar_mir.signatures[sibling].kind).to_equal(0)
+		before := control_test_output(emit_qbe(state))
+		intrinsic_mir_erase(state)
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe_arguments(qbe, before, ["--source-content", "probe", "abc"])
+			when Result::Ok(output)
+				expect(output).to_equal("a\nA\nordinary\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+end

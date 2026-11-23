@@ -1,0 +1,47 @@
+def choose(value: Integer): Integer
+	offset := value + 1
+	if value < 0
+		if offset == 0
+			return 99
+		end
+		return offset
+	elsif value == 0
+		return 7
+	end
+	return offset * 2
+end
+
+def magnitude(value: Float): Float
+	if value < 0.0
+		return -value
+	else
+		return value + 0.25
+	end
+end
+
+def inverted(value: Boolean): Boolean
+	if value
+		return false
+	end
+	return true
+end
+
+def unused_branch(value: Integer): Integer
+	if value == 0
+		return 0
+	end
+	return 9007199254740991 / value
+end
+
+def main()
+	puts(choose(-2))
+	puts(choose(-1))
+	puts(choose(0))
+	puts(choose(3))
+	puts(magnitude(-3.5) == 3.5)
+	puts(magnitude(2.0) == 2.25)
+	puts(inverted(true))
+	puts(inverted(false))
+	puts(unused_branch(0))
+	return
+end

@@ -1,0 +1,20 @@
+class First
+	@callback: () -> String
+	def initialize(callback: () -> String)
+		@callback = callback
+	end
+end
+class Second
+	@callback: () -> String
+	def initialize(callback: () -> String)
+		@callback = callback
+	end
+end
+alias Callbacks = First | Second
+def read(value: Callbacks): String
+	return value.callback()
+end
+
+def main()
+	puts(read(First.new(fn(): String; return "called"; end)))
+end

@@ -1,0 +1,347 @@
+import { array_element_type, find_record_type, generic_instance_for_type, resolve_type_name } from frontend/resolution/type_resolution
+import { web_endpoint_owner } from frontend/checking/program/web_endpoints
+import { web_route_signature } from frontend/checking/program/web_routes
+import { find_visible_alias } from frontend/resolution/declaration_lookup
+import { namespace_parent } from frontend/types/namespace_model
+import { nullable_element } from frontend/types/nullable_types
+import { package_json_quote } from project/package_json
+import { openapi_json_format, openapi_object } from project/web_openapi_json
+import { OpenAPISchemas, openapi_authored_type_valid, openapi_field_type_valid, openapi_parameter_shape, openapi_schema, openapi_schema_error, openapi_schemas_new } from frontend/checking/program/web_openapi_schema
+import { web_route_slice } from project/web_route_paths
+import { CompilerState, has_diagnostic } from state/state
+import { standard_source_unit } from state/standard_source_kinds
+import { ProjectWebEndpoint } from state/web_routes
+import { integer_string } from support/literals
+import { string_starts_with } from support/path
+import { load_integer, load_string, sparse_integer_at } from support/storage
+
+# This exporter consumes checked source facts, not executable MIR or QBE.
+# Its schema restrictions apply only when the user asks for this document.
+def openapi_record(mut state: CompilerState, target: String, line: Integer): Integer
+	record_index := find_record_type(state, target)
+	if record_index < 0 || generic_instance_for_type(state, target) >= 0
+		openapi_schema_error(state, line, "input and parameter envelopes must be non-nullable, non-generic records")
+		return -1
+	end
+	return record_index
+end
+
+def openapi_content(schema: String): String
+	return "{\"application/json\":{\"schema\":" + schema + "}}"
+end
+
+def openapi_parameter(mut state: CompilerState, mut schemas: OpenAPISchemas, name: String, target: String, query: Boolean, line: Integer): String
+	shape := openapi_parameter_shape(state, target, query, 0)
+	if shape == "" || (!query && nullable_element(shape) != "")
+		return openapi_schema_error(state, line, "parameter has unsupported type " + target)
+	end
+	mut location := "path"
+	if query
+		location = "query"
+	end
+	mut keys := ["name", "in"]
+	mut values := [package_json_quote(name), package_json_quote(location)]
+	if !query || (nullable_element(shape) == "" && array_element_type(shape) == "")
+		keys.push("required")
+		values.push("true")
+	end
+	keys.push("schema")
+	values.push(openapi_schema(state, schemas, target, line, 0))
+	return openapi_object(keys, values, false)
+end
+
+def openapi_request(mut state: CompilerState, mut schemas: OpenAPISchemas, endpoint: ProjectWebEndpoint, mut keys: Array<String>, mut values: Array<String>): String
+	row := state.nominal.objects[endpoint.object_id]
+	route := state.module_graph.web_routes[endpoint.route_index]
+	mut path := ""
+	mut dynamic: Array<String> := []
+	route.segments.each do |segment|
+		if string_starts_with(segment, "*")
+			return openapi_schema_error(state, row.line, "generation does not support catch-all route " + route.path + " yet")
+		end
+		if string_starts_with(segment, ":")
+			name := web_route_slice(segment, 1, segment.size())
+			dynamic.push(name)
+			path += "/{" + name + "}"
+		else
+			path += "/" + segment
+		end
+	end
+	if path == ""
+		path = "/"
+	end
+	mut params := -1
+	mut query := -1
+	mut body := -1
+	if endpoint.input_type != ""
+		if !openapi_authored_type_valid(state, row.source_id, endpoint.input_name, row.line, 0)
+			return ""
+		end
+		record_index := openapi_record(state, endpoint.input_type, row.line)
+		if record_index < 0
+			return ""
+		end
+		mut field := load_integer(state.declarations.record_field_starts, record_index)
+		finish := field + load_integer(state.declarations.record_field_counts, record_index)
+		while field < finish
+			if !openapi_field_type_valid(state, record_index, field)
+				return ""
+			end
+			name := load_string(state.declarations.field_names, field)
+			if name == "params"
+				params = field
+			elsif name == "query"
+				query = field
+			elsif name == "body"
+				body = field
+			else
+				return openapi_schema_error(state, row.line, "endpoint input has unsupported field " + name + "; expected params, query, or body")
+			end
+			field += 1
+		end
+	end
+	if dynamic.size() > 0 && params < 0
+		return openapi_schema_error(state, row.line, "endpoint input is missing params for route " + route.path)
+	end
+	mut parameters: Array<String> := []
+	if params >= 0
+		record_index := openapi_record(state, load_string(state.declarations.field_types, params), row.line)
+		if record_index < 0
+			return ""
+		end
+		start := load_integer(state.declarations.record_field_starts, record_index)
+		count := load_integer(state.declarations.record_field_counts, record_index)
+		if count != dynamic.size()
+			return openapi_schema_error(state, row.line, "path parameter record must match route " + route.path + " exactly")
+		end
+		dynamic.each do |name|
+			mut selected := -1
+			mut field := start
+			while field < start + count
+				if load_string(state.declarations.field_names, field) == name
+					selected = field
+				end
+				field += 1
+			end
+			if selected < 0
+				return openapi_schema_error(state, row.line, "path record is missing route parameter " + name)
+			end
+			if !openapi_field_type_valid(state, record_index, selected)
+				return ""
+			end
+			parameters.push(openapi_parameter(state, schemas, name, load_string(state.declarations.field_types, selected), false, load_integer(state.declarations.field_lines, selected)))
+		end
+	end
+	if query >= 0
+		record_index := openapi_record(state, load_string(state.declarations.field_types, query), row.line)
+		if record_index < 0
+			return ""
+		end
+		mut field := load_integer(state.declarations.record_field_starts, record_index)
+		finish := field + load_integer(state.declarations.record_field_counts, record_index)
+		while field < finish
+			if !openapi_field_type_valid(state, record_index, field)
+				return ""
+			end
+			parameters.push(openapi_parameter(state, schemas, load_string(state.declarations.field_names, field), load_string(state.declarations.field_types, field), true, load_integer(state.declarations.field_lines, field)))
+			field += 1
+		end
+	end
+	if parameters.size() > 0
+		keys.push("parameters")
+		values.push("[" + parameters.join(",") + "]")
+	end
+	if body >= 0
+		keys.push("requestBody")
+		values.push("{\"required\":true,\"content\":" + openapi_content(openapi_schema(state, schemas, load_string(state.declarations.field_types, body), row.line, 0)) + "}")
+	end
+	return path
+end
+
+def openapi_unit(mut state: CompilerState, target: String, source: Integer, authored: String, depth: Integer): Boolean
+	if depth >= 128
+		return false
+	end
+	alias_index := find_visible_alias(state, source, authored)
+	if alias_index >= 0
+		alias_row := state.type_resolution.type_aliases[alias_index]
+		previous := state.global_bindings.declaration_owner[0]
+		state.global_bindings.declaration_owner[0] = namespace_parent(alias_row.name)
+		unit := openapi_unit(state, target, alias_row.source_id, alias_row.target, depth + 1)
+		state.global_bindings.declaration_owner[0] = previous
+		return unit
+	end
+	# The pinned exporter treats a renamed Unit import as an ordinary empty
+	# record, while a transparent alias of the canonical spelling is bodyless.
+	if authored != "Unit"
+		return false
+	end
+	record_index := find_record_type(state, target)
+	if record_index < 0
+		return false
+	end
+	if load_string(state.declarations.record_names, record_index) == "Unit" && sparse_integer_at(state.standard_modules, load_integer(state.declarations.record_modules, record_index)) == standard_source_unit()
+		return true
+	end
+	return false
+end
+
+def openapi_status_text(status: Integer): String
+	codes := [100, 101, 102, 103, 200, 201, 202, 203, 204, 205, 206, 207, 208, 226, 300, 301, 302, 303, 304, 305, 307, 308, 400, 401, 402, 403, 404, 405, 406, 407, 408, 409, 410, 411, 412, 413, 414, 415, 416, 417, 418, 421, 422, 423, 424, 425, 426, 428, 429, 431, 451, 500, 501, 502, 503, 504, 505, 506, 507, 508, 510, 511]
+	names := ["Continue", "Switching Protocols", "Processing", "Early Hints", "OK", "Created", "Accepted", "Non-Authoritative Information", "No Content", "Reset Content", "Partial Content", "Multi-Status", "Already Reported", "IM Used", "Multiple Choices", "Moved Permanently", "Found", "See Other", "Not Modified", "Use Proxy", "Temporary Redirect", "Permanent Redirect", "Bad Request", "Unauthorized", "Payment Required", "Forbidden", "Not Found", "Method Not Allowed", "Not Acceptable", "Proxy Authentication Required", "Request Timeout", "Conflict", "Gone", "Length Required", "Precondition Failed", "Request Entity Too Large", "Request URI Too Long", "Unsupported Media Type", "Requested Range Not Satisfiable", "Expectation Failed", "I'm a teapot", "Misdirected Request", "Unprocessable Entity", "Locked", "Failed Dependency", "Too Early", "Upgrade Required", "Precondition Required", "Too Many Requests", "Request Header Fields Too Large", "Unavailable For Legal Reasons", "Internal Server Error", "Not Implemented", "Bad Gateway", "Service Unavailable", "Gateway Timeout", "HTTP Version Not Supported", "Variant Also Negotiates", "Insufficient Storage", "Loop Detected", "Not Extended", "Network Authentication Required"]
+	mut index := 0
+	while index < codes.size()
+		if codes[index] == status
+			return names[index]
+		end
+		index += 1
+	end
+	return "Response"
+end
+
+def web_openapi_document(mut state: CompilerState, title: String, version: String): String
+	previous_source := state.module_graph.active_module[0]
+	previous_owner := state.global_bindings.declaration_owner[0]
+	document := web_openapi_checked_document(state, title, version)
+	state.module_graph.active_module[0] = previous_source
+	state.global_bindings.declaration_owner[0] = previous_owner
+	return document
+end
+
+# The exporter has its own boundary check for the checked catalog. Invalid
+# identities must fail before any nominal or route index is dereferenced.
+def web_openapi_catalog_valid(mut state: CompilerState): Boolean
+	state.module_graph.web_endpoints.each do |endpoint|
+		if endpoint.object_id < 0 || endpoint.object_id >= state.nominal.objects.size() || endpoint.route_index < 0 || endpoint.route_index >= state.module_graph.web_routes.size()
+			openapi_schema_error(state, 1, "invalid checked endpoint catalog identity")
+			return false
+		end
+		row := state.nominal.objects[endpoint.object_id]
+		route := state.module_graph.web_routes[endpoint.route_index]
+		state.module_graph.active_module[0] = row.source_id
+		state.global_bindings.declaration_owner[0] = row.name
+		if row.source_id != route.source_id || row.parameters.size() != 0 || !web_endpoint_owner(state, row) || route.function_id < 0 || route.function_id >= state.declarations.function_count[0]
+			openapi_schema_error(state, row.line, "invalid checked endpoint catalog ownership")
+			return false
+		end
+		if load_integer(state.declarations.function_modules, route.function_id) != row.source_id || !web_route_signature(state, route, false)
+			openapi_schema_error(state, row.line, "invalid checked endpoint handler signature")
+			return false
+		end
+		if endpoint.input_name == ""
+			if endpoint.input_type != ""
+				openapi_schema_error(state, row.line, "invalid checked endpoint input type")
+				return false
+			end
+		elsif resolve_type_name(state, row.source_id, endpoint.input_name, false) != endpoint.input_type
+			openapi_schema_error(state, row.line, "invalid checked endpoint input type")
+			return false
+		end
+		mut statuses: Hash<Integer, Boolean> := {}
+		if endpoint.responses.size() == 0
+			openapi_schema_error(state, row.line, "checked endpoint has no response declarations")
+			return false
+		end
+		endpoint.responses.each do |response|
+			if response.status < 100 || response.status > 599 || statuses.key?(response.status) || response.origin < 0 || response.origin >= state.source_tokens.token_count[0]
+				openapi_schema_error(state, row.line, "invalid checked endpoint response declaration")
+				return false
+			end
+			if resolve_type_name(state, row.source_id, response.authored_type, false) != response.type_name
+				openapi_schema_error(state, row.line, "invalid checked endpoint response type")
+				return false
+			end
+			statuses[response.status] = true
+		end
+	end
+	return !has_diagnostic(state)
+end
+
+def web_openapi_checked_document(mut state: CompilerState, title: String, version: String): String
+	if title == "" || version == ""
+		return openapi_schema_error(state, 1, "title and API version are required")
+	end
+	if state.module_graph.web_endpoints.size() == 0
+		return openapi_schema_error(state, 1, "project declares no endpoint contracts")
+	end
+	if !web_openapi_catalog_valid(state)
+		return ""
+	end
+	mut schemas := openapi_schemas_new()
+	mut operations: Hash<String, Integer> := {}
+	mut paths: Array<String> := []
+	mut path_methods: Array<Array<String>> := []
+	mut path_values: Array<Array<String>> := []
+	state.module_graph.web_endpoints.each do |endpoint|
+		row := state.nominal.objects[endpoint.object_id]
+		state.module_graph.active_module[0] = row.source_id
+		state.global_bindings.declaration_owner[0] = row.name
+		if operations.key?(row.name)
+			return openapi_schema_error(state, row.line, "operationId " + row.name + " is declared more than once")
+		end
+		operations[row.name] = 1
+		mut keys := ["operationId"]
+		mut values := [package_json_quote(row.name)]
+		path := openapi_request(state, schemas, endpoint, keys, values)
+		mut statuses: Array<String> := []
+		mut responses: Array<String> := []
+		endpoint.responses.each do |response|
+			if !openapi_authored_type_valid(state, row.source_id, response.authored_type, row.line, 0)
+				return ""
+			end
+			status := response.status
+			unit := openapi_unit(state, response.type_name, row.source_id, response.authored_type, 0)
+			if ((status >= 100 && status < 200) || status == 204 || status == 205 || status == 304) && !unit
+				return openapi_schema_error(state, row.line, "response status " + integer_string(status) + " cannot declare a response body; use Unit")
+			end
+			mut response_keys := ["description"]
+			mut response_values := [package_json_quote(openapi_status_text(status))]
+			if !unit
+				response_keys.push("content")
+				response_values.push(openapi_content(openapi_schema(state, schemas, response.type_name, load_integer(state.source_tokens.token_lines, response.origin), 0)))
+			end
+			statuses.push(integer_string(status))
+			responses.push(openapi_object(response_keys, response_values, false))
+		end
+		if has_diagnostic(state)
+			return ""
+		end
+		keys.push("responses")
+		values.push(openapi_object(statuses, responses, true))
+		mut selected := -1
+		mut index := 0
+		while index < paths.size()
+			if paths[index] == path
+				selected = index
+			end
+			index += 1
+		end
+		if selected < 0
+			selected = paths.size()
+			paths.push(path)
+			path_methods.push([])
+			path_values.push([])
+		end
+		method := state.module_graph.web_routes[endpoint.route_index].method.downcase()
+		path_methods[selected].each do |previous|
+			if previous == method
+				return openapi_schema_error(state, row.line, "route is declared more than once")
+			end
+		end
+		path_methods[selected].push(method)
+		path_values[selected].push(openapi_object(keys, values, false))
+	end
+	mut items: Array<String> := []
+	mut index := 0
+	while index < paths.size()
+		items.push(openapi_object(path_methods[index], path_values[index], true))
+		index += 1
+	end
+	mut keys := ["openapi", "info", "paths"]
+	mut values := ["\"3.1.0\"", openapi_object(["title", "version"], [package_json_quote(title), package_json_quote(version)], false), openapi_object(paths, items, true)]
+	if schemas.names.size() > 0
+		keys.push("components")
+		values.push("{\"schemas\":" + openapi_object(schemas.names, schemas.values, true) + "}")
+	end
+	return openapi_json_format(openapi_object(keys, values, false))
+end

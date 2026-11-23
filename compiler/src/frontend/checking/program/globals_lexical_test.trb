@@ -1,0 +1,88 @@
+import { native_read_text } from project/native_file_system
+import { check, emit_qbe } from compiler
+import { control_test_output } from testing/mir/control
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { logical_checked_source } from testing/pipeline
+import { logical_run_qbe } from testing/qbe_runner
+import { load_string } from support/storage
+import { compiler_new, has_diagnostic } from state/state
+import { lex } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+describe("Lexical global references") do
+	test("keeps named functions and earlier generic bodies distinct from later bindings") do
+		mut state := logical_checked_source("def read(): Integer\nreturn 1\nend\ndef before(): Integer\nreturn read()\nend\ndef generic<T>(_value: T): Integer\nreturn read()\nend\nsaved := read\nread := fn(): Integer; return 2; end\ndef after(): Integer\nreturn read()\nend\ndef main()\nputs(saved())\nputs(before())\nputs(generic<Integer>(3))\nputs(read())\nputs(after())\nend\n")
+		valid := check(state)
+		if !valid
+			puts(load_string(state.diagnostics.messages, 0))
+		end
+		expect(valid).to_be_true()
+		if valid
+			before := control_test_output(emit_qbe(state))
+			intrinsic_mir_erase(state)
+			expect(control_test_output(emit_qbe(state))).to_equal(before)
+			qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+			if qbe != nil
+				case logical_run_qbe(qbe, before)
+				when Result::Ok(stdout)
+					expect(stdout).to_equal("1\n1\n1\n2\n2\n")
+				when Result::Err(error)
+					puts(error)
+					expect(false).to_be_true()
+				end
+			end
+		end
+	end
+
+	test("does not expose a binding during its initializer or to earlier bodies") do
+		sources := ["def read(): Integer\nreturn value\nend\nvalue := 2\ndef main()\nputs(read())\nend\n", "def change()\nvalue = 3\nend\nmut value := 2\ndef main()\nchange()\nputs(value)\nend\n", "value := fn(): Integer; return value(); end\ndef main()\nputs(value())\nend\n", "def read<T>(_value: T): Integer\nreturn later\nend\nlater := 3\ndef main()\nputs(read<Integer>(2))\nend\n"]
+		sources.each do |source|
+			mut state := compiler_new(source.size() + 1)
+			expect(lex(state, source)).to_be_true()
+			expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+			if resolve(state)
+				check(state)
+			end
+			expect(has_diagnostic(state)).to_be_true()
+		end
+	end
+	test("prints optional scalars through verified payload branches without source") do
+		root := Process.environment("TYPE_RB_NATIVE_ROOT")
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if root != nil
+			if qbe != nil
+				case native_read_text(root + "/compiler/conformance/valid/optional-scalar-output-mir.trb")
+				when Result::Ok(source)
+					# Recovery's byte constructor supports ASCII only; the ordinary
+					# conformance fixture separately retains its UTF-8 and NUL bytes.
+					mut state := logical_checked_source(source.split("日").join("a").split("本").join("b").split("\\x00").join(""))
+					valid := check(state)
+					if !valid
+						puts(load_string(state.diagnostics.messages, 0))
+					end
+					expect(valid).to_be_true()
+					if valid
+						before := control_test_output(emit_qbe(state))
+						intrinsic_mir_erase(state)
+						expect(control_test_output(emit_qbe(state))).to_equal(before)
+						case logical_run_qbe(qbe, before)
+						when Result::Ok(stdout)
+							expect(stdout).to_equal("7\n<nil>\n1.5\n<nil>\nfalse\n<nil>\nab\n<nil>\n<nil>\n2\n")
+						when Result::Err(error)
+							puts(error)
+							expect(false).to_be_true()
+						end
+					end
+				when Result::Err(error)
+					puts(error)
+					expect(false).to_be_true()
+				end
+			end
+		end
+	end
+
+end

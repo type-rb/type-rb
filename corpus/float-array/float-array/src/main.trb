@@ -1,0 +1,50 @@
+def build_values(count: Integer): Array<Float>
+	mut values: Array<Float> := []
+	mut index := 0
+	while index < count
+		values.push((index % 1000) / 10.0 + 0.25)
+		index += 1
+	end
+	return values
+end
+
+def adjust(mut values: Array<Float>)
+	mut index := 0
+	while index < values.size()
+		values[index] = values[index] * 1.000001 + 0.5
+		index += 1
+	end
+	return
+end
+
+def sum(values: Array<Float>): Float
+	mut total: Float := 0
+	mut index := 0
+	while index < values.size()
+		total += values[index]
+		index += 1
+	end
+	return total
+end
+
+def main()
+	mut values := build_values(5000000)
+	adjust(values)
+	values[0] = 1
+	values[-1] += 0.25
+	total := sum(values)
+	if values.size() == 5000000
+		if values[0] == 1.0
+			if values[-1] > 100.9
+				if total > 253500200.0
+					if total < 253500300.0
+						puts("float-array-ok")
+						return
+					end
+				end
+			end
+		end
+	end
+	puts("float-array-failed")
+	return
+end

@@ -1,0 +1,31 @@
+def resize(mut table: Hash<String, Integer>): Integer
+	mut index := 0
+	while index < 64
+		table[index.to_s()] = index
+		index += 1
+	end
+	table.delete("seed")
+	table["seed"] = 100
+	return 1
+end
+
+def main()
+	key := "se" + "ed"
+	mut table := { key => 2 }
+	retained_table := table
+	old := table[key]
+	table[key] = old + resize(table)
+	puts(retained_table[key])
+	retained := table[key]
+	noise := "live" + key
+	table[key] = retained + noise.size()
+	puts(retained_table[key])
+	mut peer := table
+	retained_again := table[key]
+	peer[key] = 77
+	table[key] = retained_again + 1
+	puts(retained_table[key])
+	table[key] = table[key] + 1
+	puts(retained_table[key])
+	puts(table.size())
+end

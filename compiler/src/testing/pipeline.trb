@@ -1,0 +1,31 @@
+import { lex } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { CompilerState, compiler_new_with_mode, has_diagnostic } from state/state
+import { integer_string } from support/literals
+import { load_integer, load_string } from support/storage
+import { expect } from trb/std/test
+
+def logical_checked_source(source: String, interactive: Boolean = false): CompilerState
+	mut state := compiler_new_with_mode(source.size() + 1, interactive)
+	expect_compiler_phase(state, "lex", lex(state, source))
+	expect_compiler_phase(state, "parse", parse_module(state, 0, state.module_graph.entry_module[0]))
+	expect_compiler_phase(state, "resolve", resolve(state))
+	return state
+end
+
+# Keep the phase result as the acceptance condition, including a failed phase
+# that did not publish a compiler diagnostic.
+def compiler_phase_failure(state: CompilerState, phase: String, passed: Boolean): String
+	if passed
+		return ""
+	end
+	if !has_diagnostic(state)
+		return phase + " failed without a compiler diagnostic"
+	end
+	return phase + " failed: " + load_string(state.diagnostics.codes, 0) + " at line " + integer_string(load_integer(state.diagnostics.lines, 0)) + ": " + load_string(state.diagnostics.messages, 0)
+end
+
+def expect_compiler_phase(state: CompilerState, phase: String, passed: Boolean)
+	expect(compiler_phase_failure(state, phase, passed)).to_equal("")
+end

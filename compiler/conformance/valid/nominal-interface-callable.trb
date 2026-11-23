@@ -1,0 +1,26 @@
+interface Factory<T>
+	reader(value: T): () -> T
+	mapper(): (Integer) -> Integer
+end
+class Holder<T> implements Factory < T>
+	def reader(value: T): () -> T
+		return fn(): T
+			return value
+		end
+	end
+	def mapper(): (Integer) -> Integer
+		return fn(value: Integer): Integer
+			return value * 2
+		end
+	end
+end
+def main()
+	factory: Factory<Integer> := Holder<Integer>.new()
+	read := factory.reader(21)
+	double := factory.mapper()
+	puts(read())
+	puts(double(4))
+	text: Factory<String> := Holder<String>.new()
+	read_text := text.reader("k" + "ept")
+	puts(read_text())
+end

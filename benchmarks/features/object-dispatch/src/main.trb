@@ -1,0 +1,50 @@
+# Class construction, field updates and interface dispatch.
+
+interface Meter
+	measure(step: Integer): Integer
+end
+
+class Linear implements Meter
+	@scale: Integer
+	@total: Integer
+
+	def initialize(scale: Integer)
+		@scale = scale
+		@total = 0
+	end
+
+	def measure(step: Integer): Integer
+		@total = (@total + step * @scale) % 1000003
+		return @total
+	end
+end
+
+class Squared implements Meter
+	@offset: Integer
+
+	def initialize(offset: Integer)
+		@offset = offset
+	end
+
+	def measure(step: Integer): Integer
+		value := step % 1000 + @offset
+		return value * value % 1000003
+	end
+end
+
+def run(rounds: Integer): Integer
+	meters: Array<Meter> := [Linear.new(3), Squared.new(7), Linear.new(11), Squared.new(2)]
+	mut checksum := 0
+	mut round := 0
+	while round < rounds
+		meter := meters[round % meters.size()]
+		checksum = (checksum + meter.measure(round)) % 1000000007
+		round += 1
+	end
+	return checksum
+end
+
+def main()
+	puts(run(20000000))
+	return
+end

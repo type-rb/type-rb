@@ -1,0 +1,148 @@
+import { generic_program_fork } from frontend/checking/program/generic_fork
+import { lex_module } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { object_syntax_state } from testing/syntax/objects
+import { resolve_object_declarations, validate_object_inheritance } from frontend/resolution/object_resolution
+import { find_object_type, object_assignable } from frontend/types/object_types
+import { resolve_declarations } from frontend/checking/program/resolution
+import { add_module, compiler_new, has_diagnostic } from state/state
+import { load_integer, load_string, store_integer } from support/storage
+import { resolve_type_name, type_display } from frontend/resolution/type_resolution
+import { describe, expect, test } from trb/std/test
+import { object_resolution_state } from testing/types/objects
+
+describe("Object nominal resolution") do
+	test("distinguishes class interface and record identities with recursive fields") do
+		mut state := object_resolution_state("class Node\n@following: Node?\nend\ninterface Named\nname(): String\nend\nrecord Holder\nvalue: Node\nend\ndef main()\nend\n")
+		expect(resolve_declarations(state)).to_be_true()
+		state.global_bindings.declaration_owner[0] = ""
+		node := resolve_type_name(state, 0, "Node", false)
+		named := resolve_type_name(state, 0, "Named", false)
+		expect(node).to_equal("Class#0")
+		expect(named).to_equal("Interface#1")
+		expect(resolve_type_name(state, 0, "Holder", false)).to_equal("Record#0")
+		expect(state.nominal.object_instances[0].fields[0].type_name).to_equal("Class#0?")
+		expect(type_display(state, node)).to_equal("Node")
+		expect(load_string(state.declarations.field_types, 0)).to_equal(node)
+		expect(resolve_type_name(state, 0, "Class#1", false)).to_equal("")
+		expect(resolve_type_name(state, 0, "Interface#0", false)).to_equal("")
+	end
+	test("substitutes recursive generic storage and reuses canonical instances") do
+		mut state := object_resolution_state("class Node<T>\n@following: Node<T>?\n@values: Array<T>\n@map: Hash<String, T>\nend\nalias Link<T> = Node<T>\n")
+		integer_node := resolve_type_name(state, 0, "Node<Integer>", false)
+		expect(integer_node).to_equal("Class#0")
+		expect(resolve_type_name(state, 0, "Link<Integer>", false)).to_equal(integer_node)
+		expect(resolve_type_name(state, 0, "Node<String>", false)).to_equal("Class#1")
+		expect(state.nominal.object_instances.size()).to_equal(2)
+		expect(state.nominal.object_instances[0].fields[0].type_name).to_equal("Class#0?")
+		expect(state.nominal.object_instances[0].fields[1].type_name).to_equal("Array<Integer>")
+		expect(state.nominal.object_instances[1].fields[2].type_name).to_equal("Hash<String,String>")
+		expect(type_display(state, integer_node)).to_equal("Node<Integer>")
+		expect(resolve_type_name(state, 0, "Node", false)).to_equal("")
+		expect(resolve_type_name(state, 0, "Node<Void>", false)).to_equal("")
+		expect(resolve_type_name(state, 0, "Node<Integer,String>", false)).to_equal("")
+	end
+	test("keeps declared generic interface edges invariant and inherited") do
+		mut state := object_resolution_state("interface Source<T>\nget(): T\nend\nclass Box<T> implements Source<T>\n@value: T\nend\nclass Child < Box<Integer>\nend\nclass Similar\nend\n")
+		child := resolve_type_name(state, 0, "Child", false)
+		base := resolve_type_name(state, 0, "Box<Integer>", false)
+		contract := resolve_type_name(state, 0, "Source<Integer>", false)
+		other := resolve_type_name(state, 0, "Source<String>", false)
+		expect(object_assignable(state, child, base)).to_be_false()
+		expect(object_assignable(state, child, contract)).to_be_true()
+		expect(object_assignable(state, base, child)).to_be_false()
+		expect(object_assignable(state, child, other)).to_be_false()
+		expect(object_assignable(state, resolve_type_name(state, 0, "Similar", false), contract)).to_be_false()
+		expect(object_assignable(state, "Array<" + child + ">", "Array<" + contract + ">")).to_be_false()
+	end
+	test("canonicalizes repeated implemented interface identities") do
+		mut state := object_resolution_state("interface Contract\nend\nalias Named = Contract\nclass Value implements Contract, Named, Contract\nend\n")
+		value := resolve_type_name(state, 0, "Value", false)
+		instance := state.nominal.object_instances[find_object_type(state, value)]
+		expect(instance.interfaces.size()).to_equal(1)
+	end
+	test("resolves imported aliases and same-spelled local declarations by owner") do
+		mut state := compiler_new(1024)
+		add_module(state, "main", "/project/main.trb")
+		add_module(state, "values", "/project/values.trb")
+		mut index := 0
+		["import { Item as Remote, Alias } from values\nclass Item\nend\ndef main()\nend\n", "class Item\n@next: Item?\nend\nalias Alias = Item\n"].each do |source|
+			start := state.source_tokens.token_count[0]
+			expect(lex_module(state, source, index)).to_be_true()
+			expect(parse_module(state, start, index)).to_be_true()
+			index += 1
+		end
+		store_integer(state.module_graph.import_targets, 0, 1)
+		store_integer(state.module_graph.import_targets, 1, 1)
+		expect(resolve_declarations(state)).to_be_true()
+		state.global_bindings.declaration_owner[0] = ""
+		local := resolve_type_name(state, 0, "Item", false)
+		remote := resolve_type_name(state, 0, "Remote", false)
+		expect(local == remote).to_be_false()
+		expect(resolve_type_name(state, 0, "Alias", false)).to_equal(remote)
+		expect(state.nominal.object_instances[find_object_type(state, remote)].fields[0].type_name).to_equal(remote + "?")
+		expect(load_integer(state.module_graph.import_used, 0)).to_equal(1)
+		expect(load_integer(state.module_graph.import_used, 1)).to_equal(1)
+	end
+	test("restores lexical resolution scope through nested instance expansion") do
+		mut state := object_resolution_state("module First\nclass Item<T>\n@value: T\nend\nalias Wrapped<T> = Item<T>\nend\nmodule Second\nclass Item\nend\nclass Uses\n@value: First::Wrapped<Integer>\n@local: Item\nend\nend\n")
+		state.global_bindings.declaration_owner[0] = "Second"
+		uses := resolve_type_name(state, 0, "Uses", false)
+		fields := state.nominal.object_instances[find_object_type(state, uses)].fields
+		expect(type_display(state, fields[0].type_name)).to_equal("First::Item<Integer>")
+		expect(type_display(state, fields[1].type_name)).to_equal("Second::Item")
+		expect(state.global_bindings.declaration_owner[0]).to_equal("Second")
+	end
+	test("copies concrete catalogs for generic template checking") do
+		mut state := object_resolution_state("class Box<T>\n@value: T\nend\nalias Holder<T> = Box<T>\n")
+		expect(resolve_type_name(state, 0, "Box<Integer>", false)).to_equal("Class#0")
+		expect(resolve_type_name(state, 0, "Holder<Integer>", false)).to_equal("Class#0")
+		mut fork := generic_program_fork(state)
+		expect(resolve_type_name(fork, 0, "Holder<String>", false)).to_equal("Class#1")
+		expect(state.nominal.object_instances.size()).to_equal(1)
+		expect(fork.nominal.object_instances.size()).to_equal(2)
+		expect(state.type_resolution.alias_instances.size()).to_equal(1)
+		expect(fork.type_resolution.alias_instances.size()).to_equal(2)
+		expect(state.type_resolution.alias_instance_lookup.size()).to_equal(1)
+		expect(fork.type_resolution.alias_instance_lookup.size()).to_equal(2)
+		expect(resolve_type_name(state, 0, "Box<Boolean>", false)).to_equal("Class#1")
+		expect(state.nominal.object_instances[1].fields[0].type_name).to_equal("Boolean")
+		expect(fork.nominal.object_instances[1].fields[0].type_name).to_equal("String")
+	end
+	test("keeps parsed module facts while isolating specialization import state") do
+		mut state := compiler_new(32)
+		add_module(state, "main", "/project/main.trb")
+		store_integer(state.module_graph.import_used, 0, 1)
+		mut fork := generic_program_fork(state)
+		fork.module_graph.active_module[0] = 1
+		store_integer(fork.module_graph.import_used, 0, 2)
+		expect(state.module_graph.active_module[0]).to_equal(0)
+		expect(load_integer(state.module_graph.import_used, 0)).to_equal(1)
+		add_module(state, "shared", "/project/shared.trb")
+		expect(fork.module_graph.module_count[0]).to_equal(2)
+		expect(load_string(fork.module_graph.module_names, 1)).to_equal("shared")
+	end
+	test("rejects duplicate declarations fields and both method kinds") do
+		["class Same\nend\nclass Same\nend\n", "record Same\nend\nclass Same\nend\n", "alias Same = Integer\nclass Same\nend\n", "module Same\nend\nclass Same\nend\n", "class Fields\n@value: Integer\n@value: String\nend\n", "class Methods\ndef value(): Integer\nreturn 1\nend\ndef self.value(): Integer\nreturn 2\nend\nend\n"].each do |source|
+			mut state := object_syntax_state(source)
+			expect(resolve_object_declarations(state)).to_be_false()
+		end
+	end
+	test("rejects invalid types and inheritance edges without looping") do
+		["class Unknown\n@value: Missing\nend\n", "class Unknown<T>\n@value: Missing\nend\n", "interface Contract\nend\nclass Wrong < Contract\nend\n", "class Base\nend\nclass Wrong implements Base\nend\n", "class First < Second\nend\nclass Second < First\nend\n", "class Self < Self\nend\n"].each do |source|
+			mut state := object_syntax_state(source)
+			expect(resolve_object_declarations(state)).to_be_false()
+		end
+	end
+	test("checks inheritance cycles after lazy generic instantiation") do
+		mut state := object_resolution_state("class First<T> < Second<T>\nend\nclass Second<T> < First<T>\nend\n")
+		resolve_type_name(state, 0, "First<Integer>", false)
+		expect(validate_object_inheritance(state)).to_be_false()
+	end
+	test("bounds expanding generic storage while accepting ordinary recursion") do
+		mut state := object_resolution_state("class Growing<T>\n@value: Growing<Array<T>>\nend\n")
+		resolve_type_name(state, 0, "Growing<Integer>", false)
+		expect(has_diagnostic(state)).to_be_true()
+		expect(load_string(state.diagnostics.messages, 0)).to_equal("generic type expansion exceeds the compiler nesting limit")
+	end
+end

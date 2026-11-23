@@ -1,0 +1,151 @@
+class DynamicBox
+	readonly @value: Any?
+	def initialize(value: Any? = nil)
+		@value = value
+		return
+	end
+	def show()
+		if @value == nil
+			puts("none")
+		else
+			puts(@value)
+		end
+	end
+end
+def probe_0()
+	DynamicBox.new().show()
+	DynamicBox.new(0).show()
+	DynamicBox.new(false).show()
+	DynamicBox.new("kept").show()
+end
+
+def optional(value: Any): Any?
+	return value
+end
+def show(value: Any?)
+	if value == nil
+		puts("none")
+	else
+		puts(value)
+	end
+end
+def probe_1()
+	values: Array<Any> := [nil, 0, false, "kept"]
+	values.each do |value|
+		show(optional(value))
+	end
+end
+
+record DynamicRecord<T>
+	label: T
+	value: Any
+	optional: Any?
+end
+def probe_2()
+	item := DynamicRecord<String>.new(label: "label", value: ["kept", "array"], optional: nil)
+	puts(item.label)
+	puts(item.value)
+	puts(item.optional == nil)
+end
+
+def keep<T>(marker: T, value: Any): T
+	puts(value)
+	return marker
+end
+def maybe<T>(_marker: T, value: Any?): Any?
+	return value
+end
+def probe_3()
+	puts(keep<Integer>(3, "retained"))
+	value := maybe<String>("marker", nil)
+	puts(value == nil)
+end
+
+class Box<T>
+	readonly @value: T
+	def initialize(value: T)
+		@value = value
+		return
+	end
+	def get(): T
+		return @value
+	end
+end
+def probe_4()
+	first := Box<Any>.new(["kept", "array"])
+	puts(first.get())
+	second := Box<Any?>.new(nil)
+	puts(second.get() == nil)
+end
+
+class DynamicCell
+	@value: Any?
+	def initialize(value: Any?)
+		@value = value
+		return
+	end
+	def set(value: Any?)
+		@value = value
+		return
+	end
+	def show()
+		if @value == nil
+			puts("none")
+		else
+			puts(@value)
+		end
+	end
+end
+def probe_5()
+	cell := DynamicCell.new("first")
+	cell.show()
+	cell.set(nil)
+	cell.show()
+	cell.set(["last"])
+	cell.show()
+end
+
+class DynamicHolder
+	readonly @value: Any
+	def initialize(value: Any)
+		@value = value
+		return
+	end
+	def get(): Any
+		return @value
+	end
+end
+def probe_6()
+	holder := DynamicHolder.new(["live" + " value", "tail"])
+	read := fn(): Any
+		return holder.get()
+	end
+	mut index := 0
+	while index < 20
+		scratch := ["temporary" + index.to_s()]
+		if index == 19
+			puts(scratch.size())
+		end
+		index += 1
+	end
+	puts(read())
+end
+
+def boxed(value: String?): Any
+	return value
+end
+def probe_7()
+	puts(optional(boxed(nil)) == nil)
+	puts(optional(boxed("present")) == nil)
+end
+
+def main()
+	probe_0()
+	probe_1()
+	probe_2()
+	probe_3()
+	probe_4()
+	probe_5()
+	probe_6()
+	probe_7()
+end

@@ -1,0 +1,13 @@
+def join(left: String, right: String): String
+	return left + right
+end
+
+def main()
+	message := join("strings", "-ok")
+	if message != "strings-bad"
+		puts(message)
+	else
+		puts("strings-bad")
+	end
+	return
+end

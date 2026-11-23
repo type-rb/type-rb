@@ -1,0 +1,24 @@
+import { QbeOutput, qbe_output_line } from backend/qbe/output
+
+# Shared sized allocation protocol for ordinary Array copies and verified static
+# fragment materialization. The caller supplies checked count/capacity values;
+# GC admits the header plus backing before allocation and owns the real backing.
+# Small cached backing is used only by the ordinary-growth materializer.
+def emit_sized_array_allocation(descriptor: String, cached: Boolean, mut output: QbeOutput)
+	qbe_output_line(output, " %array =l call $trbn_gc_alloc(l " + descriptor + ", l 24, l %bytes)")
+	if cached
+		qbe_output_line(output, " %cacheable =w ceql %capacity, 4\n jnz %cacheable, @cached_backing, @direct_backing\n@cached_backing\n %cached_data =l call $trbn_array_backing_new()\n jmp @backing\n@direct_backing\n %direct_data =l call $calloc(l %capacity, l 8)\n jmp @backing\n@backing\n %data =l phi @cached_backing %cached_data, @direct_backing %direct_data")
+	else
+		qbe_output_line(output, " %data =l call $calloc(l %capacity, l 8)")
+	end
+	qbe_output_line(output, " %failed =w ceql %data, 0\n jnz %failed, @allocation_failure, @initialize\n@allocation_failure\n call $trbn_fatal(l $trbn_allocation_error, l 26)\n hlt\n@initialize\n %heap =l loadl $trbn_gc_heap_bytes\n %heap_after =l add %heap, %bytes\n storel %heap_after, $trbn_gc_heap_bytes\n %allocated =l loadl $trbn_gc_allocated_bytes\n %allocated_after =l add %allocated, %bytes\n storel %allocated_after, $trbn_gc_allocated_bytes\n call $trbn_gc_update_peak(l %heap_after)\n %result_length =l add %array, 8\n %result_capacity =l add %array, 16\n %result_data =l add %array, 24\n storel %count, %result_length\n storel %capacity, %result_capacity\n storel %data, %result_data")
+end
+
+# Copy raw element slots into a fresh outer Array; descriptor identity retains
+# managed children. Bounds are checked before inclusive increment or allocation.
+# The caller roots source/bounds across the sole managed allocation.
+def emit_array_copy_runtime(mut output: QbeOutput)
+	qbe_output_line(output, "data $trbn_array_empty_error = { b \"panic: Array is empty\", b 10 }\ndata $trbn_array_slice_error = { b \"panic: Array slice range is out of bounds\", b 10 }\nfunction l $trbn_array_copy(l %owner, l %bounds, w %mode, l %descriptor) {\n@start\n %length_slot =l add %owner, 8\n %length =l loadl %length_slot\n %slicing =w ceqw %mode, 2\n jnz %slicing, @bounds, @whole\n@whole\n jmp @selected\n@bounds\n %first_slot =l add %bounds, 8\n %last_slot =l add %bounds, 16\n %exclusive_slot =l add %bounds, 24\n %first =l loadl %first_slot\n %last =l loadl %last_slot\n %exclusive =l loadl %exclusive_slot\n %negative_first =w csltl %first, 0\n %negative_last =w csltl %last, 0\n %reversed =w csgtl %first, %last\n %negative =w or %negative_first, %negative_last\n %invalid_order =w or %negative, %reversed\n jnz %invalid_order, @failure, @limit\n@limit\n %exclusive_nonzero =w cnel %exclusive, 0\n jnz %exclusive_nonzero, @exclusive, @inclusive\n@exclusive\n %past =w csgtl %last, %length\n jnz %past, @failure, @exclusive_end\n@exclusive_end\n jmp @slice\n@inclusive\n %outside =w csgel %last, %length\n jnz %outside, @failure, @inclusive_end\n@inclusive_end\n %after_last =l add %last, 1\n jmp @slice\n@slice\n %stop =l phi @exclusive_end %last, @inclusive_end %after_last\n %span =l sub %stop, %first\n jmp @selected\n@failure\n call $trbn_fail(l $trbn_array_slice_error, l 42)\n hlt\n@selected\n %start =l phi @whole 0, @slice %first\n %count =l phi @whole %length, @slice %span\n %small =w csltl %count, 4\n jnz %small, @minimum, @exact\n@minimum\n jmp @allocate\n@exact\n jmp @allocate\n@allocate\n %capacity =l phi @minimum 4, @exact %count\n %bytes =l mul %capacity, 8")
+	emit_sized_array_allocation("%descriptor", false, output)
+	qbe_output_line(output, " %source_slot =l add %owner, 24\n %source =l loadl %source_slot\n %backward =w ceqw %mode, 1\n jnz %backward, @reverse, @forward\n@forward\n %offset =l mul %start, 8\n %selected_source =l add %source, %offset\n %selected_bytes =l mul %count, 8\n call $memcpy(l %data, l %selected_source, l %selected_bytes)\n ret %array\n@reverse\n jmp @loop\n@loop\n %index =l phi @reverse 0, @element %next\n %done =w csgel %index, %count\n jnz %done, @finish, @element\n@element\n %remaining =l sub %count, %index\n %source_index =l sub %remaining, 1\n %source_offset =l mul %source_index, 8\n %source_address =l add %source, %source_offset\n %value =l loadl %source_address\n %target_offset =l mul %index, 8\n %target =l add %data, %target_offset\n storel %value, %target\n %next =l add %index, 1\n jmp @loop\n@finish\n ret %array\n}\n")
+end

@@ -1,0 +1,72 @@
+import { check, emit_qbe } from compiler
+import { mir_function_index } from mir/model/module
+import { logical_checked_source } from testing/pipeline
+import { control_test_output } from testing/mir/control
+import { logical_run_qbe } from testing/qbe_runner
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+describe("MIR joined String total bounds") do
+	test("accepts exact portable totals and rejects an overflowing prefix or wrapped sum") do
+		mut state := logical_checked_source("def measure(first: String, rest: String): Integer\nreturn [first, rest, rest, rest].join(\"/\").size()\nend\ndef main()\nend\n")
+		expect(check(state)).to_be_true()
+		base := control_test_output(emit_qbe(state)).split("export function w $main(").join("function w $unused_join_main(")
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			# The successful totals are limit - 1 and limit. Later cases exceed
+			# the portable limit or wrap signed64; no fragment data is read.
+			cases: Array<Array<String>> := [
+				["9007199254740987", "0", "ok"],
+				["9007199254740988", "0", "ok"],
+				["9007199254740989", "0", "failure"],
+				["9007199254740991", "9007199254740991", "failure"],
+				["4611686018427387904", "4611686018427387904", "failure"],
+				["-1", "0", "failure"],
+			]
+			cases.each do |row|
+				mut output := base
+				output += "data $join_first = align 8 { l 0, l " + row[0] + ", l 0, b 0 }\n"
+				output += "data $join_rest = align 8 { l 0, l " + row[1] + ", l 0, b 0 }\n"
+				output += "data $join_ok = { b \"ok\", b 0 }\nexport function w $main() {\n@start\n %size =l call $trbnf0(l $join_first, l $join_rest)\n %same =w ceql %size, 3\n jnz %same, @ok, @bad\n@bad\n ret 7\n@ok\n call $puts(l $join_ok)\n ret 0\n}\n"
+				case logical_run_qbe(qbe, output)
+				when Result::Ok(actual)
+					expect(row[2]).to_equal("ok")
+					expect(actual).to_equal("ok\n")
+				when Result::Err(error)
+					expect(row[2]).to_equal("failure")
+					expect(error.include?("panic: allocation failed")).to_be_true()
+				end
+			end
+		end
+	end
+
+	test("includes every repeated virtual concat and separator in the total") do
+		mut state := logical_checked_source("def measure(text: String): Integer\nlabel := text + \"x\"\nreturn [label, label, label, label].join(\"/\").size()\nend\ndef main()\nend\n")
+		expect(check(state)).to_be_true()
+		index := mir_function_index(state.scalar_mir, 0)
+		expect(state.scalar_mir.array_joins[index][0].size_concats.size() > 0).to_be_true()
+		base := control_test_output(emit_qbe(state)).split("export function w $main(").join("function w $unused_join_main(")
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			cases: Array<Array<String>> := [
+				["2251799813685246", "ok"],
+				["2251799813685247", "failure"],
+				["9007199254740991", "failure"],
+			]
+			cases.each do |row|
+				mut output := base
+				output += "data $join_text = align 8 { l 0, l " + row[0] + ", l 0, b 0 }\n"
+				output += "data $join_ok = { b \"ok\", b 0 }\nexport function w $main() {\n@start\n %size =l call $trbnf0(l $join_text)\n %same =w ceql %size, 7\n jnz %same, @ok, @bad\n@bad\n ret 7\n@ok\n call $puts(l $join_ok)\n ret 0\n}\n"
+				case logical_run_qbe(qbe, output)
+				when Result::Ok(actual)
+					expect(row[1]).to_equal("ok")
+					expect(actual).to_equal("ok\n")
+				when Result::Err(error)
+					expect(row[1]).to_equal("failure")
+					expect(error.include?("panic: allocation failed")).to_be_true()
+				end
+			end
+		end
+	end
+end

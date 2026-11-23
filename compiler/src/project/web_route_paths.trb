@@ -1,0 +1,228 @@
+import { string_ends_with, string_starts_with } from support/path
+import { ascii_code } from support/literals
+import { package_name_less } from project/package_json
+import { ProjectWebRoute } from state/web_routes
+
+# Discovery and ordering are source semantics, never backend name inference.
+def web_route_parameter_name(name: String): Boolean
+	if name == ""
+		return false
+	end
+	points := name
+	mut index := 0
+	while index < points.size()
+		point := ascii_code(points[index])
+		if point != 95 && !(point >= 65 && point <= 90) && !(point >= 97 && point <= 122) && !(index > 0 && point >= 48 && point <= 57)
+			return false
+		end
+		index += 1
+	end
+	return true
+end
+
+def web_route_segments(relative: String): Array<String>
+	parts := web_route_parts(relative)
+	mut finish := parts.size()
+	if finish > 0 && parts[finish - 1] == "index"
+		finish -= 1
+	end
+	mut result: Array<String> := []
+	mut index := 0
+	while index < finish
+		result.push(parts[index])
+		index += 1
+	end
+	return result
+end
+
+def web_route_path_error(parts: Array<String>): String
+	mut seen: Array<String> := []
+	mut index := 0
+	while index < parts.size()
+		part := parts[index]
+		mut name := ""
+		if string_starts_with(part, "[...") && string_ends_with(part, "]")
+			name = web_route_slice(part, 4, part.size() - 1)
+			if !web_route_parameter_name(name)
+				return "invalid catch-all route parameter " + name
+			end
+			if index + 1 != parts.size()
+				return "catch-all route parameter must be the final segment"
+			end
+		elsif string_starts_with(part, "[") || string_ends_with(part, "]")
+			if part.size() < 3 || !string_starts_with(part, "[") || !string_ends_with(part, "]")
+				return "invalid route segment " + part
+			end
+			name = web_route_slice(part, 1, part.size() - 1)
+			if !web_route_parameter_name(name)
+				return "invalid route parameter " + name
+			end
+		end
+		if name != ""
+			if web_route_has(seen, name)
+				return "route parameter is duplicated: " + name
+			end
+			seen.push(name)
+		end
+		index += 1
+	end
+	return ""
+end
+
+def web_route_pattern(parts: Array<String>): Array<String>
+	mut result: Array<String> := []
+	parts.each do |part|
+		if string_starts_with(part, "[...")
+			result.push("*" + web_route_slice(part, 4, part.size() - 1))
+		elsif string_starts_with(part, "[")
+			result.push(":" + web_route_slice(part, 1, part.size() - 1))
+		else
+			result.push(part)
+		end
+	end
+	return result
+end
+
+def web_route_rank(segment: String): Integer
+	if string_starts_with(segment, ":")
+		return 1
+	elsif string_starts_with(segment, "*")
+		return 2
+	end
+	return 0
+end
+
+def web_route_less(left: ProjectWebRoute, right: ProjectWebRoute): Boolean
+	mut index := 0
+	while index < left.segments.size() && index < right.segments.size()
+		l := left.segments[index]
+		r := right.segments[index]
+		lr := web_route_rank(l)
+		rr := web_route_rank(r)
+		if lr != rr
+			return lr < rr
+		end
+		if lr == 0 && l != r
+			return package_name_less(l, r)
+		end
+		index += 1
+	end
+	if left.segments.size() != right.segments.size()
+		return left.segments.size() < right.segments.size()
+	end
+	if left.path != right.path
+		return package_name_less(left.path, right.path)
+	end
+	return package_name_less(left.method, right.method)
+end
+
+def web_route_overlap(left: ProjectWebRoute, right: ProjectWebRoute): Boolean
+	mut index := 0
+	while index < left.segments.size() && index < right.segments.size()
+		l := left.segments[index]
+		r := right.segments[index]
+		if web_route_rank(l) == 2 || web_route_rank(r) == 2
+			return true
+		end
+		if l != r && web_route_rank(l) == 0 && web_route_rank(r) == 0
+			return false
+		end
+		index += 1
+	end
+	return left.segments.size() == right.segments.size()
+end
+
+def web_route_precedence(left: ProjectWebRoute, right: ProjectWebRoute): Boolean
+	if left.segments.size() != right.segments.size()
+		return false
+	end
+	mut left_specific := false
+	mut right_specific := false
+	mut index := 0
+	while index < left.segments.size()
+		l := web_route_rank(left.segments[index])
+		r := web_route_rank(right.segments[index])
+		if l == 2 || r == 2
+			return false
+		end
+		if l < r
+			left_specific = true
+		elsif r < l
+			right_specific = true
+		end
+		index += 1
+	end
+	if left_specific
+		return !right_specific
+	end
+	return right_specific
+end
+
+def web_route_directory_applies(directory: String, route_directory: String): Boolean
+	if directory == "" || directory == route_directory
+		return true
+	end
+	return string_starts_with(route_directory, directory + "/")
+end
+
+def web_route_slice(value: String, start: Integer, finish: Integer): String
+	mut result := ""
+	mut index := start
+	while index < finish
+		result += value[index]
+		index += 1
+	end
+	return result
+end
+
+def web_route_parts(value: String): Array<String>
+	mut result: Array<String> := []
+	mut part := ""
+	mut index := 0
+	while index < value.size()
+		if value[index] == "/"
+			result.push(part)
+			part = ""
+		else
+			part += value[index]
+		end
+		index += 1
+	end
+	result.push(part)
+	return result
+end
+
+def web_route_join(values: Array<String>, separator: String): String
+	mut result := ""
+	mut index := 0
+	while index < values.size()
+		if index > 0
+			result += separator
+		end
+		result += values[index]
+		index += 1
+	end
+	return result
+end
+
+def web_route_has(values: Array<String>, expected: String): Boolean
+	values.each do |value|
+		if value == expected
+			return true
+		end
+	end
+	return false
+end
+
+def web_route_method(method: String): String
+	lower := ["delete", "get", "head", "options", "patch", "post", "put", "call"]
+	upper := ["DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT", "CALL"]
+	mut index := 0
+	while index < lower.size()
+		if lower[index] == method
+			return upper[index]
+		end
+		index += 1
+	end
+	return ""
+end

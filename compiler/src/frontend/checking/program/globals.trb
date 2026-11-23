@@ -1,0 +1,167 @@
+import { checking_discovery } from state/checking_phases
+import { resolve_function_body } from frontend/checking/program/resolution
+import { declare_default_functions } from frontend/resolution/default_arguments
+import { resolution_locals_new } from state/resolution_locals
+import { generic_program_fork } from frontend/checking/program/generic_fork
+import { checked_function_locals } from frontend/checking/program/functions
+import { check_expression } from frontend/checking/body/expressions
+import { checked_readonly_reference_binding } from frontend/checking/body/statements
+import { CompilerState, diagnostic, has_diagnostic } from state/state
+import { token_is } from frontend/syntax/syntax_tokens
+import { load_string, store_string } from support/storage
+
+# An unannotated constant may retain the reference's empty collection type.
+# Locals still require an element or key/value witness before MIR publication.
+def global_empty_literal(state: CompilerState, start: Integer, finish: Integer): Integer
+	mut left := start
+	mut right := finish
+	while right - left > 2 && token_is(state, left, "(") && token_is(state, right - 1, ")")
+		left += 1
+		right -= 1
+	end
+	if right != left + 2
+		return 0
+	end
+	if token_is(state, left, "[") && token_is(state, left + 1, "]")
+		return 1
+	end
+	if token_is(state, left, "{") && token_is(state, left + 1, "}")
+		return 2
+	end
+	return 0
+end
+
+# A speculative inference pass owns its mutable semantic catalogs. Only a
+# successful concrete initializer is checked once in the real program; generic
+# identities and closure bodies from a probe never escape into lowering.
+def infer_global_value(mut state: CompilerState, index: Integer): Boolean
+	row := state.global_bindings.globals[index]
+	function := state.global_bindings.global_functions[index]
+	mut locals := checked_function_locals(state, function)
+	mut position := [row.start]
+	mut expected := load_string(state.declarations.function_result_types, function)
+	empty := global_empty_literal(state, row.start, row.finish)
+	if row.constant && expected == "" && empty == 1
+		expected = "Array<Any>"
+	end
+	value := check_expression(state, position, locals, 1, expected)
+	if row.mutable && checked_readonly_reference_binding(state, locals, value)
+		diagnostic(state, "TRBN4004", row.line, "cannot initialize mutable " + row.name + " from an immutable value")
+	end
+	mut type_name := expected
+	if type_name == ""
+		type_name = value.type_name
+	end
+	mut invalid := false
+	if type_name == "Void" || type_name == "Nil" || type_name == "Never" || type_name == ""
+		invalid = true
+	end
+	if type_name == "Hash" && !(row.constant && empty == 2)
+		invalid = true
+	end
+	if invalid
+		diagnostic(state, "TRBN4004", row.line, "constant requires a concrete value type; add an annotation when needed")
+	end
+	if position[0] != row.finish
+		diagnostic(state, "TRBN4004", row.line, "checker did not consume the constant initializer")
+	end
+	if has_diagnostic(state)
+		return false
+	end
+	state.global_bindings.global_types[index] = type_name
+	if state.submissions.size() > 0
+		store_string(state.submissions[0].presentations, row.origin, value.presentation)
+	end
+	store_string(state.declarations.function_result_types, function, type_name)
+	return !has_diagnostic(state)
+end
+
+def infer_cyclic_global_types(mut state: CompilerState, component: Integer): Boolean
+	mut pending: Array<Integer> := []
+	mut annotations: Array<Integer> := []
+	state.global_bindings.global_order.each do |index|
+		row := state.global_bindings.globals[index]
+		if state.global_bindings.module_components[row.source_id] == component
+			if row.annotation == ""
+				pending.push(index)
+			else
+				annotations.push(index)
+			end
+		end
+	end
+	mut remaining := pending.size()
+	while remaining > 0
+		mut progressed := false
+		mut position := 0
+		while position < pending.size()
+			index := pending[position]
+			if index >= 0
+				mut probe := generic_program_fork(state)
+				probe.type_resolution.generic_template_mode[0] = false
+				mut names := resolution_locals_new(probe.source_tokens.token_count[0] + 1)
+				resolve_function_body(probe, probe.global_bindings.global_functions[index], names)
+				declare_default_functions(probe)
+				if !has_diagnostic(probe) && infer_global_value(probe, index)
+					if !infer_global_value(state, index)
+						return false
+					end
+					pending[position] = -1
+					remaining -= 1
+					progressed = true
+				elsif load_string(probe.diagnostics.messages, 0) != "constant initializer cannot read a later constant"
+					# Preserve a real expression/type error instead of reporting it
+					# as a dependency cycle after unsuccessful inference passes.
+					return infer_global_value(state, index)
+				end
+			end
+			position += 1
+		end
+		if !progressed
+			pending.each do |index|
+				if index >= 0
+					row := state.global_bindings.globals[index]
+					state.module_graph.active_module[0] = row.source_id
+					diagnostic(state, "TRBN4004", row.line, "type inference cycle for constant " + row.name + "; add an explicit type annotation")
+					return false
+				end
+			end
+		end
+	end
+	annotations.each do |index|
+		if !infer_global_value(state, index)
+			return false
+		end
+	end
+	return true
+end
+
+# Acyclic components retain declaration-order checking. Cyclic components
+# converge their value signatures before any body is lowered to MIR.
+def infer_global_types(mut state: CompilerState): Boolean
+	if state.global_bindings.global_order.size() == 0
+		return !has_diagnostic(state)
+	end
+	previous_phase := state.callables.lambda_phase[0]
+	state.callables.lambda_phase[0] = checking_discovery()
+	mut visited: Array<Integer> := []
+	state.global_bindings.component_modules.each do |_members|
+		visited.push(0)
+	end
+	state.global_bindings.global_order.each do |index|
+		if has_diagnostic(state)
+			break
+		end
+		row := state.global_bindings.globals[index]
+		component := state.global_bindings.module_components[row.source_id]
+		if state.global_bindings.component_cyclic[component] == 1
+			if visited[component] == 0
+				infer_cyclic_global_types(state, component)
+				visited[component] = 1
+			end
+		else
+			infer_global_value(state, index)
+		end
+	end
+	state.callables.lambda_phase[0] = previous_phase
+	return !has_diagnostic(state)
+end

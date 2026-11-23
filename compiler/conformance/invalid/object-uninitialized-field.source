@@ -1,0 +1,6 @@
+class Box
+@value: Integer
+end
+def main()
+Box.new()
+end

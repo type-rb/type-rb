@@ -1,0 +1,406 @@
+import { FormatToken, format_lex } from format/tokens
+import { character_in } from frontend/syntax/lexer
+
+def format_one_of(word: String, choices: Array<String>): Boolean
+	mut index := 0
+	while index < choices.size()
+		if word == choices[index]
+			return true
+		end
+		index += 1
+	end
+	return false
+end
+
+def format_operator(word: String): Boolean
+	return format_one_of(word, [":=", "=", "+", "-", "*", "/", "%", "**", "==", "!=", "<", ">", "<=", ">=", "<=>", "=~", "!~", "&&", "||", "=>", "+=", "-=", "*=", "/=", "||=", "&&=", "|", "&", "^", "..", "..."])
+end
+
+def format_upper(word: String): Boolean
+	return word.size() > 0 && character_in(word[0], "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+end
+
+def format_lower(word: String): Boolean
+	return word.size() > 0 && character_in(word[0], "abcdefghijklmnopqrstuvwxyz_")
+end
+
+def format_unary(before: String, sign: String): Boolean
+	return (sign == "+" || sign == "-") && (before == "" || format_operator(before) || format_one_of(before, ["(", "[", "{", ",", ":", "?", "return", "break", "next", "if", "unless", "while", "until", "when", "case"]))
+end
+
+def format_symbol_colon(tokens: Array<FormatToken>, index: Integer): Boolean
+	if index == 0
+		return true
+	end
+	previous := tokens[index - 1]
+	return format_operator(previous.text) || tokens[index].start > previous.finish || format_one_of(previous.text, ["(", "[", "{", ",", "=", ":=", "=>", "return"])
+end
+
+def format_space(tokens: Array<FormatToken>, index: Integer): Boolean
+	previous := tokens[index - 1]
+	current := tokens[index]
+	p := previous.text
+	c := current.text
+	mut before := ""
+	if index > 1
+		before = tokens[index - 2].text
+	end
+	if previous.kind == 4 || p == "!" || p == "~"
+		return false
+	end
+	if format_unary(before, p)
+		return c == "+" || c == "-"
+	end
+	if c == "?"
+		return true
+	end
+	if c == ":"
+		return current.start > previous.finish
+	end
+	if c == ".." || c == "..." || p == ".." || p == "..." || (p == "-" && c == ">")
+		return false
+	end
+	if c == "["
+		return format_one_of(p, [":", ":=", "=", ",", "return"])
+	end
+	if (c == "<" && format_upper(p)) || (p == "<" && format_upper(before)) || (c == ">" && before == "<")
+		return false
+	end
+	if c == "}"
+		return p != "{"
+	end
+	if format_one_of(c, [")", "]", ",", ";", ".", "&.", "::"])
+		return false
+	end
+	if p == "::"
+		return format_lower(before)
+	end
+	if format_one_of(p, ["(", "[", ".", "&."])
+		return false
+	end
+	if p == "," || p == ";"
+		return true
+	end
+	if p == ":"
+		return !format_symbol_colon(tokens, index - 1)
+	end
+	if c == "("
+		if p == "->"
+			return true
+		end
+		if (p == ">" || p == ">>") && format_upper(before)
+			return false
+		end
+		return format_one_of(p, ["if", "while", "unless", "until", "return", ","]) || format_operator(p)
+	end
+	if c == "{"
+		return p != "(" && p != "["
+	end
+	if p == "{"
+		return true
+	end
+	if p == "|" || c == "|"
+		return previous.finish != current.start
+	end
+	return true
+end
+
+def format_matching(tokens: Array<FormatToken>, open: Integer): Integer
+	mut depth := 0
+	mut index := open
+	while index < tokens.size()
+		word := tokens[index].text
+		if word == "<"
+			depth += 1
+		elsif word == ">"
+			depth -= 1
+		elsif word == ">>"
+			depth -= 2
+		end
+		if depth == 0
+			return index
+		end
+		index += 1
+	end
+	return -1
+end
+
+def format_generic(tokens: Array<FormatToken>, open: Integer): Boolean
+	close := format_matching(tokens, open)
+	if close < 0
+		return false
+	end
+	mut index := close + 1
+	while index < tokens.size() && tokens[index].kind == 4
+		index += 1
+	end
+	return index < tokens.size() && format_one_of(tokens[index].text, ["(", ".", "::"])
+end
+
+def format_class_parameters(tokens: Array<FormatToken>, open: Integer): Boolean
+	if open != 2
+		return false
+	end
+	close := format_matching(tokens, open)
+	if close < 0
+		return false
+	end
+	mut index := open + 1
+	while index < close
+		if tokens[index].kind != 4 && tokens[index].kind != 1 && tokens[index].text != ","
+			return false
+		end
+		index += 1
+	end
+	return true
+end
+
+# Pair only ternary punctuation at the same delimiter depth. Nullable suffixes
+# and the colon in a symbol literal do not participate in that pairing.
+def format_ternary(tokens: Array<FormatToken>): Array<Boolean>
+	mut marked: Array<Boolean> := []
+	mut questions: Array<Integer> := []
+	mut depths: Array<Integer> := []
+	mut depth := 0
+	mut index := 0
+	while index < tokens.size()
+		marked.push(false)
+		index += 1
+	end
+	index = 0
+	while index < tokens.size()
+		word := tokens[index].text
+		if format_one_of(word, ["(", "[", "{"])
+			depth += 1
+		elsif format_one_of(word, [")", "]", "}"])
+			if depth > 0
+				depth -= 1
+			end
+		elsif word == "?"
+			if index + 1 < tokens.size() && !format_one_of(tokens[index + 1].text, [",", ")", "]", "}", "=", ":=", "|", ">", ">>"])
+				questions.push(index)
+				depths.push(depth)
+			end
+		elsif word == ":" && index > 0
+			before := tokens[index - 1].text
+			if !format_one_of(before, ["?", "(", "[", "{", ",", "=", ":=", "=>", "return"]) && !format_operator(before)
+				mut candidate := questions.size() - 1
+				while candidate >= 0
+					if depths[candidate] == depth
+						marked[questions[candidate]] = true
+						marked[index] = true
+						depths[candidate] = -1
+						break
+					end
+					candidate -= 1
+				end
+			end
+		end
+		index += 1
+	end
+	return marked
+end
+
+def format_boundary(previous: FormatToken, current: FormatToken): Boolean
+	if previous.finish == current.start
+		return false
+	end
+	combined := format_lex(previous.text + current.text)
+	if combined.error != "" || combined.tokens.size() != 2
+		return true
+	end
+	return combined.tokens[0].kind != previous.kind || combined.tokens[0].text != previous.text || combined.tokens[1].kind != current.kind || combined.tokens[1].text != current.text
+end
+
+def format_line(tokens: Array<FormatToken>): String
+	mut output := ""
+	mut generic_depth := 0
+	mut inheritance := false
+	mut parameters := false
+	ternary := format_ternary(tokens)
+	first := tokens[0].text
+	mut import_line := first == "import"
+	mut index := 0
+	while index < tokens.size()
+		if tokens[index].text == "from"
+			import_line = true
+		end
+		index += 1
+	end
+	index = 0
+	while index < tokens.size()
+		current := tokens[index]
+		c := current.text
+		if index > 0
+			previous := tokens[index - 1]
+			p := previous.text
+			mut space := current.kind == 4 || format_space(tokens, index)
+			mut generic_open := c == "<" && (format_upper(p) || format_generic(tokens, index))
+			if generic_open && first == "class" && generic_depth == 0 && !inheritance && !format_class_parameters(tokens, index)
+				generic_open = false
+				inheritance = true
+			end
+			mut closers := 0
+			if c == ">" && generic_depth > 0
+				closers = 1
+			elsif c == ">>" && generic_depth >= 2
+				closers = 2
+			end
+			opening_pipe := c == "|" && format_one_of(p, ["do", "{", "catch"])
+			closing_pipe := c == "|" && parameters && !opening_pipe
+			if c == "?"
+				space = ternary[index]
+			end
+			if (c == ":" && ternary[index]) || (p == ":" && ternary[index - 1])
+				space = true
+			end
+			if (c == "|" || p == "|") && !opening_pipe && !closing_pipe && !parameters
+				space = true
+			end
+			if first == "class" && ((c == "<" && !generic_open) || (p == "<" && generic_depth == 0))
+				space = true
+			end
+			if import_line && (p == "/" || c == "/")
+				space = false
+			end
+			if (parameters && p == "|") || closing_pipe || generic_open || closers > 0 || (generic_depth > 0 && p == "<")
+				space = false
+			end
+			if !space && !import_line && format_boundary(previous, current)
+				space = true
+			end
+			if space
+				output += " "
+			end
+			if opening_pipe
+				parameters = true
+			elsif closing_pipe
+				parameters = false
+			end
+			if generic_open
+				generic_depth += 1
+			end
+			generic_depth -= closers
+		end
+		output += c
+		index += 1
+	end
+	return output.rstrip()
+end
+
+def format_symbol_name(tokens: Array<FormatToken>, index: Integer): Boolean
+	return index > 0 && tokens[index - 1].text == ":" && format_symbol_colon(tokens, index - 1)
+end
+
+def format_opens(tokens: Array<FormatToken>, initial_depth: Integer): Boolean
+	first := tokens[0].text
+	if format_one_of(first, ["class", "record", "enum", "module", "interface", "def", "if", "unless", "case", "begin", "while", "until", "for"])
+		return true
+	end
+	mut conditional := -1
+	mut depth := 0
+	mut index := 0
+	while index < tokens.size()
+		word := tokens[index].text
+		if format_one_of(word, ["(", "[", "{"])
+			depth += 1
+		elsif format_one_of(word, [")", "]", "}"])
+			depth -= 1
+		elsif word == "if" && depth == 0 && format_one_of(first, ["return", "break", "next"]) && !format_symbol_name(tokens, index)
+			conditional = index
+		end
+		index += 1
+	end
+	index = 0
+	depth = initial_depth
+	while index < tokens.size()
+		word := tokens[index].text
+		if !format_symbol_name(tokens, index)
+			if word == "case" || (word == "if" && index != conditional)
+				return true
+			end
+			if format_one_of(word, ["(", "[", "{"])
+				depth += 1
+			elsif format_one_of(word, [")", "]", "}"])
+				depth -= 1
+			elsif depth == 0 && (word == "do" || word == "fn" || (word == "catch" && index + 1 < tokens.size() && tokens[index + 1].text == "|"))
+				return true
+			end
+		end
+		index += 1
+	end
+	return false
+end
+
+def format_statement(tokens: Array<FormatToken>, mut levels: Array<Integer>, indentation: String): String
+	first := tokens[0].text
+	dedent := format_one_of(first, ["end", "else", "elsif", "when", "rescue", "ensure"])
+	if dedent && levels[0] > 0
+		levels[0] -= 1
+	end
+	mut continuation := levels[1]
+	if continuation > 0 && format_one_of(first, ["}", ")", "]"])
+		continuation -= 1
+	end
+	mut output := ""
+	mut index := 0
+	while index < levels[0] + continuation
+		output += indentation
+		index += 1
+	end
+	if (dedent && first != "end") || format_opens(tokens, levels[1])
+		levels[0] += 1
+	end
+	index = 0
+	while index < tokens.size()
+		word := tokens[index].text
+		if format_one_of(word, ["(", "[", "{"])
+			levels[1] += 1
+		elsif format_one_of(word, [")", "]", "}"])
+			levels[1] -= 1
+		end
+		index += 1
+	end
+	if levels[1] < 0
+		levels[1] = 0
+	end
+	return output + format_line(tokens) + "\n"
+end
+
+def format_print(tokens: Array<FormatToken>, indentation: String): String
+	mut levels := [0, 0]
+	mut statement: Array<FormatToken> := []
+	mut output := ""
+	mut blank := true
+	mut depth := 0
+	mut index := 0
+	while index <= tokens.size()
+		mut flush := index == tokens.size()
+		mut physical := flush
+		if !flush
+			item := tokens[index]
+			physical = item.kind == 5
+			flush = physical || (item.text == ";" && depth == 0)
+			if !flush
+				statement.push(item)
+				if format_one_of(item.text, ["(", "[", "{"])
+					depth += 1
+				elsif format_one_of(item.text, [")", "]", "}"])
+					depth -= 1
+				end
+			end
+		end
+		if flush
+			if statement.size() > 0
+				output += format_statement(statement, levels, indentation)
+				statement = []
+				blank = false
+			elsif physical && !blank && output != ""
+				output += "\n"
+				blank = true
+			end
+		end
+		index += 1
+	end
+	return output.rstrip() + "\n"
+end

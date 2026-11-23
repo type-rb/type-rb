@@ -1,0 +1,4 @@
+def main()
+	values: Array<Array<Array<Array<Boolean>>>> := [[[[true]]]]
+	puts(values[0][0][0][0])
+end

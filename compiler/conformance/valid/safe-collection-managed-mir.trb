@@ -1,0 +1,37 @@
+record Entry
+	text: String
+	values: Array<String>
+end
+
+def copy(values: Array<Entry>?): Array<String>?
+	return values&.map do |entry|
+		entry.text + entry.values[0]
+	end
+end
+
+def main()
+	mut values := [Entry.new(text: "b", values: ["1"]), Entry.new(text: "a", values: ["2"])]
+	optional: Array<Entry>? := values
+	mut calls := 0
+	ordered := optional&.sort_by do |entry|
+		calls += 1
+		if calls == 1
+			values.push(Entry.new(text: "a", values: ["3"]))
+		end
+		entry.text + "!"
+	end
+	ordered&.each { |entry| puts(entry.values[0]) }
+	puts(calls)
+	copy(optional)&.each { |value| puts(value) }
+	puts(copy(nil) == nil)
+	mut callback_total := 0
+	callback := fn(value: Integer): Integer
+		callback_total += value
+		return callback_total
+	end
+	callbacks: Array<(Integer) -> Integer>? := [callback, callback]
+	callbacks&.map { |call| call(2) }&.each { |value| puts(value) }
+	puts(callback_total)
+	table: Hash<String, Array<String>>? := { "a": ["retained"] }
+	table&.each { |key, entries| puts(key + entries[0]) }
+end

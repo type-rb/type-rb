@@ -1,0 +1,127 @@
+import { qbe_runtime_hash_concat_slot, qbe_runtime_hash_mode_slot } from backend/qbe/runtime_slots
+import { StringStorage, load_string, store_string, string_storage } from support/storage
+
+record QbeOutput
+	mir_literal_symbols: Array<String>
+	# Zero-origin append-only lines own the single alias-visible length.
+	lines: StringStorage
+	# Hash emission mode lives behind the named helpers below; aliases share it.
+	runtime_flags: Array<Integer>
+end
+
+def qbe_output_new(capacity: Integer, runtime_flags: Array<Integer>): QbeOutput
+	return QbeOutput.new(mir_literal_symbols: [], lines: string_storage(capacity), runtime_flags: runtime_flags)
+end
+
+def qbe_output_line(mut output: QbeOutput, line: String)
+	index := output.lines.used[0]
+	# Emission size follows MIR expansion, not a guessed source-token multiple.
+	if index >= output.lines.limit[0]
+		output.lines.limit[0] = index + 1024
+	end
+	store_string(output.lines, index, line)
+	return
+end
+
+def qbe_output_branch(
+		mut output: QbeOutput,
+		condition: String,
+		when_true: String,
+		when_false: String,
+	)
+	qbe_output_line(output, "\tjnz " + condition + ", " + when_true + ", " + when_false)
+	return
+end
+
+# Preserve complete lines, including embedded newlines, while bounding copying
+# between stdout writes. A single oversized line is emitted without splitting.
+# Balance concatenation so each line is copied at most once per tree level.
+def qbe_output_join(lines: StringStorage, start: Integer, finish: Integer, first: Integer): String
+	if finish - start == 1
+		line := load_string(lines, start)
+		if start == first
+			return line
+		end
+		return "\n" + line
+	end
+	middle := start + (finish - start) / 2
+	return qbe_output_join(lines, start, middle, first) + qbe_output_join(lines, middle, finish, first)
+end
+
+def qbe_output_chunk(output: QbeOutput, mut position: Array<Integer>): String
+	start := position[0]
+	first := load_string(output.lines, position[0])
+	mut length := first.size()
+	# Indexed writes must also fit the snapshot v4 recovery subset.
+	position[0] = position[0] + 1
+	while position[0] < output.lines.used[0]
+		following := load_string(output.lines, position[0])
+		if length + following.size() + 1 > 4096
+			return qbe_output_join(output.lines, start, position[0], start)
+		end
+		length += following.size() + 1
+		position[0] = position[0] + 1
+	end
+	return qbe_output_join(output.lines, start, position[0], start)
+end
+
+def qbe_output_append(mut output: QbeOutput, appended: QbeOutput)
+	mut index := 0
+	while index < appended.lines.used[0]
+		qbe_output_line(output, load_string(appended.lines, index))
+		index += 1
+	end
+	return
+end
+
+# The shared legacy flag cell stores absent/generic/Integer/String/both as 0..4.
+# Keep this encoding here so call sites express the key representation they need.
+def qbe_require_hash(mut output: QbeOutput, key_mode: String)
+	current := output.runtime_flags[qbe_runtime_hash_mode_slot()]
+	if key_mode == "integer"
+		if current == 3
+			output.runtime_flags[qbe_runtime_hash_mode_slot()] = 4
+		elsif current < 2
+			output.runtime_flags[qbe_runtime_hash_mode_slot()] = 2
+		end
+	elsif key_mode == "string"
+		if current == 2
+			output.runtime_flags[qbe_runtime_hash_mode_slot()] = 4
+		elsif current < 2
+			output.runtime_flags[qbe_runtime_hash_mode_slot()] = 3
+		end
+	elsif current == 0
+		output.runtime_flags[qbe_runtime_hash_mode_slot()] = 1
+	end
+end
+
+def qbe_hash_integer_reads(output: QbeOutput): Boolean
+	if output.runtime_flags[qbe_runtime_hash_mode_slot()] == 2
+		return true
+	end
+	return output.runtime_flags[qbe_runtime_hash_mode_slot()] == 4
+end
+
+def qbe_hash_string_reads(output: QbeOutput): Boolean
+	if output.runtime_flags[qbe_runtime_hash_mode_slot()] == 3
+		return true
+	end
+	return output.runtime_flags[qbe_runtime_hash_mode_slot()] == 4
+end
+
+# Function bodies and their module share the feature cells. Append this named
+# requirement without changing the existing plain-key representation encoding.
+def qbe_require_hash_concat(mut output: QbeOutput)
+	qbe_require_hash(output, "string")
+	while output.runtime_flags.size() <= qbe_runtime_hash_concat_slot()
+		output.runtime_flags.push(0)
+	end
+	output.runtime_flags[qbe_runtime_hash_concat_slot()] = 1
+end
+
+def qbe_hash_concat_reads(output: QbeOutput): Boolean
+	if output.runtime_flags.size() <= qbe_runtime_hash_concat_slot()
+		return false
+	end
+	return output.runtime_flags[qbe_runtime_hash_concat_slot()] == 1
+end

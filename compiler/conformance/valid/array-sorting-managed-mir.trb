@@ -1,0 +1,26 @@
+def sorted(value: Array<String>): Array<String>
+	return value.sort()
+end
+
+def main()
+	part := "a"
+	original := [part + "b", "z", "a", "aa", "", "zz", "x", "a"]
+	mut copy := sorted(original)
+	copy = sorted(copy)
+	puts(copy.join("|"))
+	puts(original[0])
+	copy[0] = "changed"
+	puts(original[4] == "")
+	puts(copy.sort_descending().join("|"))
+	optional: Array<String>? := original
+	present := optional&.sort_descending()
+	if present != nil
+		puts(present[0])
+	end
+	absent: Array<String>? := nil
+	puts(absent&.sort() == nil)
+	read := fn(): String
+		return original.sort()[2]
+	end
+	puts(read())
+end

@@ -1,0 +1,78 @@
+import { check, emit_qbe } from compiler
+import { CompilerState } from state/state
+import { verify_mir } from mir/verify/module
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { output_source } from testing/compiler
+import { expect_compiler_phase, logical_checked_source } from testing/pipeline
+import { logical_run_qbe_arguments } from testing/qbe_runner
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+# Public acquisition now exercises discovery, lowering and caller commit together.
+# Source erasure keeps the independent MIR proof responsible for execution.
+def file_body_lowered_fixture(): CompilerState
+	source := "import { File, FileMode } from trb/std/file\nimport trb/std/path\nimport trb/std/result\nimport trb/std/process\nimport { FileSystemError } from trb/std/errors\ndef accept(_file: File): Integer\nreturn 3\nend\ndef execute(path: String, mode: FileMode, mut counter: Integer, label: String): Result<Integer, FileSystemError>\nresult := File.open(Path.new(path), mode: mode) do |file|\nputs(label)\ncounter += accept(file)\ncounter\nend\nreturn result\nend\ndef main()\nargs := Process.argv()\ncase execute(args[0].strip(), FileMode::Read, 7, \"scope\".upcase())\nwhen Result::Ok(value)\nputs(value)\nwhen Result::Err(error)\nputs(error.message)\nend\nend\n"
+	mut state := logical_checked_source(source)
+	expect_compiler_phase(state, "public File body", check(state))
+	expect(state.scalar_mir.file_scopes.size() > 0).to_be_true()
+	intrinsic_mir_erase(state)
+	return state
+end
+
+describe("Scoped File source body lowering") do
+	test("preserves ordinary caller offsets shared mutable cells and managed roots after source erasure") do
+		state := file_body_lowered_fixture()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe_arguments(qbe, output_source(emit_qbe(state)), ["/dev/null"])
+			when Result::Ok(actual)
+				expect(actual).to_equal("opened handle is not a regular file\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("executes an analyzed File body and mutated capture while collecting before every allocation") do
+		file_body_lowering_execution_test()
+	end
+end
+
+def file_body_lowering_execution_test()
+	qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+	if qbe == nil
+		return
+	end
+	state := file_body_lowered_fixture()
+	expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	allocation := "function l $trbn_gc_alloc(l %descriptor, l %payload_size, l %reserved_size) {\n@start"
+	source := output_source(emit_qbe(state)).split(allocation).join(allocation + "\n call $trbn_gc_collect(w 0)")
+	allocated := case Process.run("/usr/bin/mktemp", ["/tmp/type-rb-native-file-body.XXXXXX"])
+	when Result::Ok(value)
+		value
+	when Result::Err(error)
+		puts(error.message)
+		expect(false).to_be_true()
+		return
+	end
+	expect(allocated.success).to_be_true()
+	path := allocated.stdout.strip()
+	actual := logical_run_qbe_arguments(qbe, source, [path])
+	case Process.run("/bin/rm", [path])
+	when Result::Ok(value)
+		expect(value.success).to_be_true()
+	when Result::Err(error)
+		puts(error.message)
+		expect(false).to_be_true()
+	end
+	case actual
+	when Result::Ok(value)
+		expect(value).to_equal("SCOPE\n10\n")
+	when Result::Err(error)
+		puts(error)
+		expect(false).to_be_true()
+	end
+end

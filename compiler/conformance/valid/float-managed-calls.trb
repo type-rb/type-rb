@@ -1,0 +1,34 @@
+alias Real = Float
+record Sample
+	value: Real
+	label: String
+end
+
+def named_number<T>(item: T, operation: (T) -> Integer): Integer
+	return operation(item)
+end
+
+def probe()
+	label := "kept" + 3.to_s()
+	sample := Sample.new(value: -2.5, label: label)
+	callback := fn(item: Sample): Integer
+		puts(item.label)
+		return item.value.abs().round()
+	end
+	puts(named_number<Sample>(sample, callback))
+	rounded := [-2.5, 0.5, 9007199254740991.0].map { |value| value.round() }
+	rounded.each { |value| puts(value) }
+	mut count := 0
+	next_value := fn(): Float
+		count += 1
+		return -1.5
+	end
+	puts(next_value().abs().ceil())
+	puts(count)
+	puts(sample.label)
+	puts(sample.value.floor())
+end
+
+def main()
+	probe()
+end

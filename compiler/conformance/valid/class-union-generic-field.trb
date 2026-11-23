@@ -1,0 +1,25 @@
+class Text<T>
+	readonly @kind: 1 := 1
+	@value: T
+	def initialize(value: T)
+		@value = value
+	end
+end
+class Code
+	readonly @kind: 2 := 2
+	@code: Integer := 9
+end
+alias Item = Text<String> | Code
+def read(value: Item): String
+	return case value.kind
+	when 1
+		value.value
+	when 2
+		value.code.to_s()
+	end
+end
+
+def main()
+	puts(read(Text<String>.new("generic")))
+	puts(read(Code.new()))
+end

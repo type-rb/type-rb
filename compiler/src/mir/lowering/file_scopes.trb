@@ -1,0 +1,66 @@
+import { resource_source_call } from frontend/checking/body/resource_calls
+import { CheckedValue, checked_mir_value, checked_value, mir_checked_value, scalar_mir_disable, scalar_mir_instruction, scalar_mir_value } from frontend/checking/body/values
+import { builtin_result_variant } from frontend/checking/builtins/results
+import { nullable_capture_call } from frontend/checking/nominal/nullable_flow
+import { CheckedFileBody } from frontend/types/callable_types
+import { checked_category_value } from frontend/types/value_categories
+import { mir_binding_capture } from mir/build/bindings
+import { mir_control_active, mir_control_prepare } from mir/build/control
+import { mir_op_file_scope } from mir/model/instructions
+import { MirFileScope } from mir/model/module
+import { mir_semantic_type_id } from mir/model/types
+import { CheckedLocals, local_slot } from state/local_state
+import { CompilerState } from state/state
+import { load_integer, load_string, sparse_integer_at, store_integer } from support/storage
+
+# The acquired File stays inside this verified operation. Only a Result reaches
+# the caller; neither the borrowed handle nor a resource-carrying closure exists
+# as a result value in the containing function.
+def lower_file_scope(mut state: CompilerState, mut locals: CheckedLocals, body: CheckedFileBody, error: Integer, path: CheckedValue, mode: CheckedValue, origin: Integer): CheckedValue
+	mir_control_prepare(state, locals)
+	body.captures.each do |capture|
+		slot := local_slot(locals, capture.identity)
+		if slot >= 0
+			store_integer(locals.binding_use_counts, slot, sparse_integer_at(locals.binding_use_counts, slot) + 1)
+		end
+	end
+	mut captures: Array<Integer> := []
+	if mir_control_active(locals)
+		body.captures.each do |capture|
+			captures.push(mir_binding_capture(state, locals, capture, origin))
+		end
+	end
+	return mir_checked_file_scope(state, locals, body.function[0], error, path, mode, captures, origin)
+end
+
+# Keep builder offsets out of module-owned operation plans. The same boundary
+# accepts the checked lexical body and independently typed generated callers.
+def mir_checked_file_scope(mut state: CompilerState, mut locals: CheckedLocals, body: Integer, error: Integer, path: CheckedValue, mode: CheckedValue, captures: Array<Integer>, origin: Integer): CheckedValue
+	result_type := load_string(state.declarations.function_result_types, body)
+	resource_source_call(state, locals, body)
+	resource_source_call(state, locals, error)
+	nullable_capture_call(state, locals)
+	mir_control_prepare(state, locals)
+	if checked_mir_value(path) < 0 || checked_mir_value(mode) < 0
+		scalar_mir_disable(locals)
+	end
+	captures.each do |capture|
+		if capture < 0
+			scalar_mir_disable(locals)
+		end
+	end
+	if !mir_control_active(locals)
+		return checked_value(result_type, checked_category_value(), origin, 0)
+	end
+	result := scalar_mir_value(state, locals, mir_semantic_type_id(state.scalar_mir, result_type), origin)
+	# This plan owns a module-level span already. SSA identities remain local to
+	# the instruction's function and must not be offset again at builder commit.
+	start := state.scalar_mir.arguments.size()
+	captures.each do |capture|
+		state.scalar_mir.arguments.push(capture)
+	end
+	plan := state.scalar_mir.file_scopes.size()
+	state.scalar_mir.file_scopes.push(MirFileScope.new(body: body, error: error, error_variant: builtin_result_variant(state, result_type, false), argument_start: start, argument_count: captures.size()))
+	scalar_mir_instruction(state, locals, mir_op_file_scope(), result, checked_mir_value(path), checked_mir_value(mode), plan, -1, load_integer(state.source_tokens.token_lines, origin))
+	return mir_checked_value(result_type, result, origin, 0)
+end

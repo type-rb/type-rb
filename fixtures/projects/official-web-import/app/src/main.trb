@@ -1,0 +1,9 @@
+import { Request } from trb/web
+
+def describe(request: Request): String
+	return "request"
+end
+
+def main()
+	puts("ok")
+end

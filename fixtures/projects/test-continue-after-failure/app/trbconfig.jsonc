@@ -1,0 +1,8 @@
+{
+  "name": "scenario",
+  "mode": "go",
+  "sourceDir": "src",
+  "go": {
+    "module": "example.com/scenario"
+  }
+}

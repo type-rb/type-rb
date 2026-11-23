@@ -1,0 +1,129 @@
+import { standard_network_host } from frontend/resolution/network_intrinsics
+import { standard_source_web_server } from state/standard_source_kinds
+import { expect_compiler_phase, logical_checked_source } from testing/pipeline
+import { check, emit_qbe } from compiler
+import { CompilerState, compiler_new } from state/state
+import { load_integer, store_integer, store_string } from support/storage
+import { lex } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { MirCall, MirSignature, mir_function_index } from mir/model/module
+import { verify_mir } from mir/verify/module
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { control_test_output } from testing/mir/control
+import { describe, expect, test } from trb/std/test
+
+# Exercise only the owned host declarations. Socket acceptance executes the
+# complete Web provider separately, including the managed request lifecycle.
+def network_test_state(): CompilerState
+	source := "import trb/internal/network_host as NetworkHost\ndef main()\nputs(NetworkHost.start(\"127.0.0.1\", 8080, 32, 250))\nconnection := NetworkHost.next_request()\nputs(NetworkHost.read(connection, 0).size())\nputs(NetworkHost.status(connection))\nputs(NetworkHost.write(connection, \"ok\".to_bytes(), false))\nNetworkHost.stop()\nend\n"
+	mut state := compiler_new(1048576)
+	expect_compiler_phase(state, "lex", lex(state, source))
+	store_integer(state.standard_modules, 0, standard_source_web_server())
+	expect_compiler_phase(state, "parse", parse_module(state, 0, 0))
+	expect_compiler_phase(state, "resolve", resolve(state))
+	expect_compiler_phase(state, "check", check(state))
+	return state
+end
+
+describe("Trusted network adapters") do
+	test("preserves typed allocation and I/O through source-erased MIR") do
+		mut state := network_test_state()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		mut count := 0
+		state.scalar_mir.signatures.each do |signature|
+			kind := standard_network_host(state, signature.id)
+			if kind >= 0
+				count += 1
+				expect(signature.kind).to_equal(3)
+				expect(signature.adapter).to_equal(19 + kind)
+				expect(mir_function_index(state.scalar_mir, signature.id)).to_equal(-1)
+				signature.parameter_mutable.each do |mutable|
+					expect(mutable).to_equal(0)
+				end
+			end
+		end
+		expect(count).to_equal(6)
+		state.scalar_mir.calls.each do |call|
+			if state.scalar_mir.signatures[call.callee].adapter >= 19
+				expect(call.effects).to_equal(15)
+			end
+		end
+		before := control_test_output(emit_qbe(state))
+		intrinsic_mir_erase(state)
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+	end
+
+	test("does not grant adapter access to authored names") do
+		mut state := logical_checked_source("def read(length: Integer): String\nreturn length.to_s()\nend\ndef main()\nputs(read(7))\nend\n")
+		expect_compiler_phase(state, "check", check(state))
+		state.scalar_mir.signatures.each do |signature|
+			expect(standard_network_host(state, signature.id)).to_equal(-1)
+		end
+	end
+
+	test("requires complete owned declarations rather than trusted spelling") do
+		["owner", "name", "mutable", "parameter", "result", "body", "default"].each do |damage|
+			mut state := network_test_state()
+			state.scalar_mir.signatures.each do |signature|
+				if standard_network_host(state, signature.id) == 2
+					parameter := load_integer(state.declarations.function_parameter_starts, signature.id)
+					if damage == "owner"
+						store_integer(state.standard_modules, signature.source_id, 0)
+					elsif damage == "name"
+						store_string(state.declarations.function_names, signature.id, "authored_read")
+					elsif damage == "mutable"
+						store_integer(state.declarations.parameter_mutable, parameter, 1)
+					elsif damage == "parameter"
+						store_string(state.declarations.parameter_types, parameter, "Boolean")
+					elsif damage == "result"
+						store_string(state.declarations.function_result_types, signature.id, "Integer")
+					elsif damage == "body"
+						store_integer(state.declarations.function_body_ends, signature.id, 99999)
+					else
+						store_integer(state.parsed.parameter_defaults, parameter, 1)
+					end
+					expect(standard_network_host(state, signature.id)).to_equal(-1)
+				end
+			end
+		end
+	end
+
+	test("independently rejects tampered MIR signatures and effects") do
+		["name", "parameter", "mutable", "result", "effects"].each do |damage|
+			mut state := network_test_state()
+			mut index := 0
+			while index < state.scalar_mir.signatures.size()
+				row := state.scalar_mir.signatures[index]
+				if row.adapter == 21 && damage != "effects"
+					mut name := row.name
+					mut parameters := row.parameter_types
+					mut mutable := row.parameter_mutable
+					mut result := row.result_type
+					if damage == "name"
+						name = "authored.read"
+					elsif damage == "parameter"
+						parameters = ["Integer", "Boolean"]
+					elsif damage == "mutable"
+						mutable = [1, 0]
+					elsif damage == "result"
+						result = "Integer"
+					end
+					state.scalar_mir.signatures[index] = MirSignature.new(id: row.id, kind: row.kind, name: name, adapter: row.adapter, source_id: row.source_id, line: row.line, parameter_types: parameters, parameter_mutable: mutable, result_type: result)
+				end
+				index += 1
+			end
+			if damage == "effects"
+				index = 0
+				while index < state.scalar_mir.calls.size()
+					row := state.scalar_mir.calls[index]
+					if state.scalar_mir.signatures[row.callee].adapter == 21
+						state.scalar_mir.calls[index] = MirCall.new(callee: row.callee, argument_start: row.argument_start, argument_count: row.argument_count, effects: 0)
+					end
+					index += 1
+				end
+			end
+			expect(verify_mir(state.scalar_mir, true) != "").to_be_true()
+		end
+	end
+end

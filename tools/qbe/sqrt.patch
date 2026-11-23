@@ -1,0 +1,51 @@
+--- a/ops.h
++++ b/ops.h
+@@ -33,6 +33,7 @@
+ O(add,     T(w,l,s,d, w,l,s,d), F(1,1,0,1,1,0,0,0,0,0)) X(2,1,0) V(1)
+ O(sub,     T(w,l,s,d, w,l,s,d), F(1,1,0,0,0,0,0,0,0,0)) X(2,1,0) V(0)
+ O(neg,     T(w,l,s,d, x,x,x,x), F(1,0,0,0,0,0,0,0,0,0)) X(1,1,0) V(0)
++O(sqrt,    T(e,e,s,d, x,x,x,x), F(0,0,0,0,0,0,0,0,0,0)) X(1,0,1) V(0)
+ O(div,     T(w,l,s,d, w,l,s,d), F(1,1,1,0,0,0,0,0,0,0)) X(0,0,0) V(0)
+ O(rem,     T(w,l,e,e, w,l,e,e), F(1,0,0,0,0,0,0,0,0,0)) X(0,0,0) V(0)
+ O(udiv,    T(w,l,e,e, w,l,e,e), F(1,1,1,0,0,0,0,0,0,0)) X(0,0,0) V(0)
+--- a/arm64/emit.c
++++ b/arm64/emit.c
+@@ -45,6 +45,7 @@
+ 	{ Osub,    Ka, "fsub %=, %0, %1" },
+ 	{ Oneg,    Ki, "neg %=, %0" },
+ 	{ Oneg,    Ka, "fneg %=, %0" },
++	{ Osqrt,   Ka, "fsqrt %=, %0" },
+ 	{ Oand,    Ki, "and %=, %0, %1" },
+ 	{ Oor,     Ki, "orr %=, %0, %1" },
+ 	{ Oxor,    Ki, "eor %=, %0, %1" },
+--- a/amd64/emit.c
++++ b/amd64/emit.c
+@@ -82,6 +82,8 @@
+ 	{ Omul,     Ks, "+mulss %1, %=" },
+ 	{ Omul,     Kd, "+mulsd %1, %=" },
+ 	{ Odiv,     Ka, "-div%k %1, %=" },
++	{ Osqrt,    Ks, "sqrtss %0, %=" },
++	{ Osqrt,    Kd, "sqrtsd %0, %=" },
+ 	{ Ostorel,  Ka, "movq %L0, %M1" },
+ 	{ Ostorew,  Ka, "movl %W0, %M1" },
+ 	{ Ostoreh,  Ka, "movw %H0, %M1" },
+--- a/amd64/isel.c
++++ b/amd64/isel.c
+@@ -427,6 +427,7 @@
+ 	case Oadd:
+ 	case Osub:
+ 	case Oneg:
++	case Osqrt:
+ 	case Omul:
+ 	case Oand:
+ 	case Oor:
+--- a/rv64/emit.c
++++ b/rv64/emit.c
+@@ -16,6 +16,7 @@
+ 	{ Osub,    Ka, "fsub.%k %=, %0, %1" },
+ 	{ Oneg,    Ki, "neg%k %=, %0" },
+ 	{ Oneg,    Ka, "fneg.%k %=, %0" },
++	{ Osqrt,   Ka, "fsqrt.%k %=, %0" },
+ 	{ Odiv,    Ki, "div%k %=, %0, %1" },
+ 	{ Odiv,    Ka, "fdiv.%k %=, %0, %1" },
+ 	{ Orem,    Ki, "rem%k %=, %0, %1" },

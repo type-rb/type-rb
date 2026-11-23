@@ -1,0 +1,145 @@
+import { check, emit_qbe } from compiler
+import { MirHashLookupReuse } from mir/model/module
+import { mir_hash_lookup_equal, mir_hash_lookup_find, mir_hash_lookup_plans, mir_hash_lookup_preserves } from mir/analysis/hash_lookup
+import { mir_instruction_effects } from mir/analysis/call_effects
+import { optimize_verified_mir } from mir/passes/optimize
+import { verify_mir } from mir/verify/module
+import { CompilerState } from state/state
+import { logical_checked_source } from testing/pipeline
+import { compiler_test_instruction_with_cell } from testing/compiler
+import { control_test_output } from testing/mir/control
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { hash_value_mir_state, managed_mir_test_fixture } from testing/mir/managed
+import { describe, expect, test } from trb/std/test
+
+def hash_lookup_checked(source: String): CompilerState
+	mut state := logical_checked_source(source)
+	expect(check(state)).to_be_true()
+	expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	return state
+end
+
+def hash_lookup_source(body: String): String
+	return "def step(mut table: Hash<String, Integer>, mut other: Hash<String, Integer>, key: String, peer: String)\n" + body + "\nend\ndef scalar(value: Integer): Integer\nreturn value + 1\nend\ndef main()\nmut table := {\"a\" => 2}\nstep(table, table, \"a\", \"a\")\nputs(table[\"a\"])\nend\n"
+end
+
+describe("MIR Hash lookup reuse") do
+	test("owns ordinary numeric updates without narrowing effects or roots") do
+		state := hash_lookup_checked(hash_lookup_source("table[key] = table[key] + 1\ntable[key] = table[key] + 2"))
+		plans := state.scalar_mir.hash_lookup_reuse[0]
+		expect(plans.size()).to_equal(2)
+		plans.each do |plan|
+			expect(mir_hash_lookup_find(plans, plan.producer, true)).to_equal(plan.producer)
+			expect(mir_hash_lookup_find(plans, plan.store, false)).to_equal(plan.producer)
+			expect(mir_instruction_effects(state.scalar_mir, state.scalar_mir.instructions[plan.producer])).to_equal(8)
+			expect(mir_instruction_effects(state.scalar_mir, state.scalar_mir.instructions[plan.store])).to_equal(11)
+		end
+		qbe := control_test_output(emit_qbe(state))
+		expect(qbe.include?("%hash_slot_")).to_be_true()
+		expect(qbe.include?("call $trbn_hash_existing_slot_string(")).to_be_true()
+		expect(mir_hash_lookup_find(plans, -1, false)).to_equal(-1)
+	end
+
+	test("invalidates on calls allocation mutation other identities and CFG edges") do
+		bodies := [
+			"value := table[key]\ntable[key] = scalar(value)",
+			"value := table[key]\narray := [value]\ntable[key] = array[0]",
+			"value := table[key]\nother[peer] = 9\ntable[key] = value + 1",
+			"value := table[key]\ntable.delete(key)\ntable[key] = value + 1",
+			"value := table[key]\ntable.update(other)\ntable[key] = value + 1",
+			"value := table[key]\nif value > 0\ntable[key] = value + 1\nend",
+			"value := table[key]\nother[key] = value + 1",
+			"value := table[key]\ntable[peer] = value + 1",
+			"mut selected := key\nvalue := table[selected]\nselected = peer\ntable[selected] = value + 1",
+			"mut selected := table\nvalue := selected[key]\nselected = other\nselected[key] = value + 1",
+			"mut selected := key\nreader := fn(): String\nreturn selected\nend\nvalue := table[selected]\nselected = peer\ntable[selected] = value + 1\nputs(reader())",
+		]
+		bodies.each do |body|
+			state := hash_lookup_checked(hash_lookup_source(body))
+			expect(state.scalar_mir.hash_lookup_reuse[0].size()).to_equal(0)
+			expect(control_test_output(emit_qbe(state)).include?("function l $trbn_hash_existing_slot")).to_be_false()
+		end
+		state := hash_lookup_checked(hash_lookup_source("value := table[key]\ntable[key] = value + 1\ntable[key] = value + 2"))
+		expect(state.scalar_mir.hash_lookup_reuse[0].size()).to_equal(1)
+		instruction := state.scalar_mir.instructions[0]
+		expect(mir_hash_lookup_preserves(compiler_test_instruction_with_cell(instruction, 0, 999))).to_be_false()
+	end
+
+	test("keeps mixed and literal-union key conversions on the ordinary path") do
+		state := hash_lookup_checked("alias Key = \"a\" | \"b\"\ndef main()\nkey: Key := \"a\"\nmut table: Hash<Key, Integer> := {key => 1}\ntable[key] = table[key] + 1\nputs(table[key])\nend\n")
+		expect(state.scalar_mir.hash_lookup_reuse[0].size()).to_equal(0)
+		ordinary := hash_value_mir_state()
+		expect(ordinary.scalar_mir.hash_lookup_reuse[0].size()).to_equal(0)
+	end
+
+	test("preserves the existing rejection of compound Hash assignment") do
+		mut state := logical_checked_source("def main()\nmut table := {1 => 2}\ntable[1] += 1\nend\n")
+		expect(check(state)).to_be_false()
+	end
+
+	test("rejects supplied forged missing duplicated and stale plans") do
+		mut mode := 0
+		while mode < 6
+			mut state := hash_lookup_checked(hash_lookup_source("table[key] = table[key] + 1"))
+			original := state.scalar_mir.hash_lookup_reuse[0][0]
+			if mode == 0
+				state.scalar_mir.hash_lookup_reuse[0] = []
+			elsif mode == 1
+				state.scalar_mir.hash_lookup_reuse[0].push(original)
+			elsif mode == 2
+				state.scalar_mir.hash_lookup_reuse[0][0] = MirHashLookupReuse.new(producer: original.producer + 1, store: original.store)
+			elsif mode == 3
+				state.scalar_mir.hash_lookup_reuse[0][0] = MirHashLookupReuse.new(producer: original.producer, store: original.store - 1)
+			elsif mode == 4
+				store := state.scalar_mir.instructions[original.store]
+				state.scalar_mir.instructions[original.store] = compiler_test_instruction_with_cell(store, 3, 3)
+			else
+				state.scalar_mir.hash_lookup_reuse.push([])
+			end
+			expect(verify_mir(state.scalar_mir, true).empty?()).to_be_false()
+			mode += 1
+		end
+		state := hash_lookup_checked(hash_lookup_source("table[key] = table[key] + 1"))
+		expect(verify_mir(state.scalar_mir, false)).to_equal("MIR input cannot supply Hash lookup plans")
+	end
+
+	test("derives canonical plans after source erasure and storage reordering") do
+		mut state := hash_lookup_checked(hash_lookup_source("while table.key?(key)\ntable[key] = table[key] + 1\nif table[key] > 4\nbreak\nend\nend"))
+		before := control_test_output(emit_qbe(state))
+		plans := state.scalar_mir.hash_lookup_reuse[0]
+		expect(plans.size()).to_equal(1)
+		intrinsic_mir_erase(state)
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+		state.scalar_mir.functions.each do |function|
+			mut left := function.block_start
+			mut right := left + function.block_count - 1
+			while left < right
+				saved := state.scalar_mir.blocks[left]
+				state.scalar_mir.blocks[left] = state.scalar_mir.blocks[right]
+				state.scalar_mir.blocks[right] = saved
+				left += 1
+				right -= 1
+			end
+		end
+		saved := state.scalar_mir.functions[0]
+		state.scalar_mir.functions[0] = state.scalar_mir.functions[1]
+		state.scalar_mir.functions[1] = saved
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(mir_hash_lookup_equal(plans, state.scalar_mir.hash_lookup_reuse[0])).to_be_true()
+	end
+
+	test("does not attach module-wide facts to shared physical instruction spans") do
+		mut state := hash_lookup_checked(hash_lookup_source("table[key] = table[key] + 1"))
+		expect(state.scalar_mir.hash_lookup_reuse[0].size()).to_equal(1)
+		# A second logical traversal of the same storage invalidates every fact
+		# in the span, even before ordinary structure validation rejects this copy.
+		state.scalar_mir.functions.push(state.scalar_mir.functions[0])
+		expect(mir_hash_lookup_plans(state.scalar_mir).empty?()).to_be_true()
+		expect(verify_mir(state.scalar_mir, true).empty?()).to_be_false()
+	end
+
+	test("executes alias invalidation under forced GC") do
+		managed_mir_test_fixture("hash-lookup-alias-barriers", 4)
+	end
+end

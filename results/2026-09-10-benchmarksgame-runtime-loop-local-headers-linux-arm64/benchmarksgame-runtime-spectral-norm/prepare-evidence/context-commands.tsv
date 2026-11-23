@@ -1,0 +1,31 @@
+case	language	phase	command
+fannkuch-redux	c	build	/usr/bin/cc -O3 -std=gnu11 -x c /home/runner/work/_temp/prepare-workspace/context/programs/fannkuch-redux/c/source/fannkuchredux.gcc -lm -o /home/runner/work/_temp/prepare-workspace/context/programs/fannkuch-redux/c/program
+fannkuch-redux	c	run	/home/runner/work/_temp/prepare-workspace/context/programs/fannkuch-redux/c/program 7
+fannkuch-redux	cpp	build	/usr/bin/clang++ -O3 -std=gnu++17 -x c++ /home/runner/work/_temp/prepare-workspace/context/programs/fannkuch-redux/cpp/source/fannkuchredux.gpp-3.gpp -lm -o /home/runner/work/_temp/prepare-workspace/context/programs/fannkuch-redux/cpp/program
+fannkuch-redux	cpp	run	/home/runner/work/_temp/prepare-workspace/context/programs/fannkuch-redux/cpp/program 7
+fannkuch-redux	go	build	/opt/hostedtoolcache/go/1.27.1/arm64/bin/go build -trimpath -o /home/runner/work/_temp/prepare-workspace/context/programs/fannkuch-redux/go/program /home/runner/work/_temp/prepare-workspace/context/programs/fannkuch-redux/go/source/fannkuchredux.go-8.go
+fannkuch-redux	go	run	/home/runner/work/_temp/prepare-workspace/context/programs/fannkuch-redux/go/program 7
+fannkuch-redux	rust	build	/home/runner/.cargo/bin/rustc --crate-name fannkuchredux_rust -C opt-level=3 /home/runner/work/_temp/prepare-workspace/context/programs/fannkuch-redux/rust/source/fannkuchredux.rust-2.rust -o /home/runner/work/_temp/prepare-workspace/context/programs/fannkuch-redux/rust/program
+fannkuch-redux	rust	run	/home/runner/work/_temp/prepare-workspace/context/programs/fannkuch-redux/rust/program 7
+fannkuch-redux	java	build	/usr/bin/javac -d /home/runner/work/_temp/prepare-workspace/context/programs/fannkuch-redux/java/classes /home/runner/work/_temp/prepare-workspace/context/programs/fannkuch-redux/java/source/fannkuchredux.java
+fannkuch-redux	java	run	/usr/bin/java -cp /home/runner/work/_temp/prepare-workspace/context/programs/fannkuch-redux/java/classes fannkuchredux 7
+n-body	c	build	/usr/bin/cc -O3 -std=gnu11 -x c /home/runner/work/_temp/prepare-workspace/context/programs/n-body/c/source/nbody.gcc -lm -o /home/runner/work/_temp/prepare-workspace/context/programs/n-body/c/program
+n-body	c	run	/home/runner/work/_temp/prepare-workspace/context/programs/n-body/c/program 1000
+n-body	cpp	build	/usr/bin/clang++ -O3 -std=gnu++17 -include cstdlib -x c++ /home/runner/work/_temp/prepare-workspace/context/programs/n-body/cpp/source/nbody.gpp-2.gpp -lm -o /home/runner/work/_temp/prepare-workspace/context/programs/n-body/cpp/program
+n-body	cpp	run	/home/runner/work/_temp/prepare-workspace/context/programs/n-body/cpp/program 1000
+n-body	go	build	/opt/hostedtoolcache/go/1.27.1/arm64/bin/go build -trimpath -o /home/runner/work/_temp/prepare-workspace/context/programs/n-body/go/program /home/runner/work/_temp/prepare-workspace/context/programs/n-body/go/source/nbody.go-8.go
+n-body	go	run	/home/runner/work/_temp/prepare-workspace/context/programs/n-body/go/program 1000
+n-body	rust	build	/home/runner/.cargo/bin/rustc --crate-name nbody_rust -C opt-level=3 /home/runner/work/_temp/prepare-workspace/context/programs/n-body/rust/source/nbody.rust -o /home/runner/work/_temp/prepare-workspace/context/programs/n-body/rust/program
+n-body	rust	run	/home/runner/work/_temp/prepare-workspace/context/programs/n-body/rust/program 1000
+n-body	java	build	/usr/bin/javac -d /home/runner/work/_temp/prepare-workspace/context/programs/n-body/java/classes /home/runner/work/_temp/prepare-workspace/context/programs/n-body/java/source/nbody.java
+n-body	java	run	/usr/bin/java -cp /home/runner/work/_temp/prepare-workspace/context/programs/n-body/java/classes nbody 1000
+spectral-norm	c	build	/usr/bin/cc -O3 -std=gnu11 -x c /home/runner/work/_temp/prepare-workspace/context/programs/spectral-norm/c/source/spectralnorm.gcc-8.gcc -lm -o /home/runner/work/_temp/prepare-workspace/context/programs/spectral-norm/c/program
+spectral-norm	c	run	/home/runner/work/_temp/prepare-workspace/context/programs/spectral-norm/c/program 100
+spectral-norm	cpp	build	/usr/bin/clang++ -O3 -std=gnu++17 -x c++ /home/runner/work/_temp/prepare-workspace/context/programs/spectral-norm/cpp/source/spectralnorm.gpp -lm -o /home/runner/work/_temp/prepare-workspace/context/programs/spectral-norm/cpp/program
+spectral-norm	cpp	run	/home/runner/work/_temp/prepare-workspace/context/programs/spectral-norm/cpp/program 100
+spectral-norm	go	build	/opt/hostedtoolcache/go/1.27.1/arm64/bin/go build -trimpath -o /home/runner/work/_temp/prepare-workspace/context/programs/spectral-norm/go/program /home/runner/work/_temp/prepare-workspace/context/programs/spectral-norm/go/source/spectralnorm.go-8.go
+spectral-norm	go	run	/home/runner/work/_temp/prepare-workspace/context/programs/spectral-norm/go/program 100
+spectral-norm	rust	build	/home/runner/.cargo/bin/rustc --crate-name spectralnorm_rust -C opt-level=3 /home/runner/work/_temp/prepare-workspace/context/programs/spectral-norm/rust/source/spectralnorm.rust-3.rust -o /home/runner/work/_temp/prepare-workspace/context/programs/spectral-norm/rust/program
+spectral-norm	rust	run	/home/runner/work/_temp/prepare-workspace/context/programs/spectral-norm/rust/program 100
+spectral-norm	java	build	/usr/bin/javac -d /home/runner/work/_temp/prepare-workspace/context/programs/spectral-norm/java/classes /home/runner/work/_temp/prepare-workspace/context/programs/spectral-norm/java/source/spectralnorm.java
+spectral-norm	java	run	/usr/bin/java -cp /home/runner/work/_temp/prepare-workspace/context/programs/spectral-norm/java/classes spectralnorm 100

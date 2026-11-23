@@ -1,0 +1,65 @@
+import { TestPathSelection, select_test_paths, test_absolute_path, test_path_below, test_project_paths, test_source_path } from project/test_selection
+import { describe, expect, test } from trb/std/test
+
+def selected_test_path(path: String, directory: Boolean): TestPathSelection
+	return TestPathSelection.new(authored: path, absolute: test_absolute_path("/project", path), directory: directory, error: "")
+end
+
+describe("Test file selection") do
+	test("retains every production path but excludes unselected test bodies") do
+		inventory := ["/project/src/z_test.trb", "/project/src/helper.trb", "/project/src/nested/b_test.trb", "/project/src/main.trb", "/project/src/a_test.trb"]
+		selected := test_project_paths("/project/src", "src", inventory, [selected_test_path("src/a_test.trb", false)])
+		expect(selected.error).to_equal("")
+		expect(selected.paths).to_equal(["/project/src/a_test.trb", "/project/src/helper.trb", "/project/src/main.trb"])
+		expect(test_project_paths("/project/src", "src", inventory, [selected_test_path("src/nested", true)]).paths).to_equal(["/project/src/helper.trb", "/project/src/main.trb", "/project/src/nested/b_test.trb"])
+		expect(test_project_paths("/project/src", "src", inventory, [selected_test_path("src/missing_test.trb", false)]).paths).to_equal([])
+	end
+
+	test("normalizes lexical roots while preserving directory boundaries") do
+		expect(test_absolute_path("/project", "src/../src/a_test.trb")).to_equal("/project/src/a_test.trb")
+		expect(test_absolute_path("/project", "/other/./a_test.trb")).to_equal("/other/a_test.trb")
+		expect(test_path_below("/project/src", "/project/src")).to_be_true()
+		expect(test_path_below("/project/src", "/project/src/nested/a_test.trb")).to_be_true()
+		expect(test_path_below("/project/src", "/project/src-other/a_test.trb")).to_be_false()
+		expect(test_path_below("/", "/project/src/a_test.trb")).to_be_true()
+	end
+
+	test("matches case-insensitive test basenames") do
+		expect(test_source_path("/project/src/A_TEST.trb")).to_be_true()
+		expect(test_source_path("/project/src/A_test.TRB")).to_be_true()
+		expect(test_source_path("/project/src/_test.trb")).to_be_true()
+		expect(test_source_path("/project/src/a_test.trb.bak")).to_be_false()
+		expect(test_source_path("/project/src/a_test.trb/other.trb")).to_be_false()
+	end
+
+	test("sorts and deduplicates overlapping file and directory selections") do
+		inventory := ["/project/src/z_test.trb", "/project/src/nested/b_test.trb", "/project/src/a_test.trb"]
+		selections := [selected_test_path("src/z_test.trb", false), selected_test_path("src", true), selected_test_path("src/./a_test.trb", false)]
+		result := select_test_paths("/project/src", "src", inventory, selections)
+		expect(result.error).to_equal("")
+		expect(result.paths).to_equal(["/project/src/a_test.trb", "/project/src/nested/b_test.trb", "/project/src/z_test.trb"])
+		expect(select_test_paths("/project/src", "src", inventory, []).paths).to_equal(result.paths)
+		expect(select_test_paths("/project/src", "src", inventory, [selected_test_path("src/nested", true)]).paths).to_equal(["/project/src/nested/b_test.trb"])
+	end
+
+	test("checks containment before host errors and retains the authored spelling") do
+		selection := TestPathSelection.new(authored: "src/../../missing_test.trb", absolute: "/missing_test.trb", directory: false, error: "missing")
+		result := select_test_paths("/project/src", "src", [], [selection])
+		expect(result.error).to_equal("test path src/../../missing_test.trb is outside configured sourceDir src")
+		missing := TestPathSelection.new(authored: "src/./missing_test.trb", absolute: "/project/src/missing_test.trb", directory: false, error: "no such file or directory")
+		expect(select_test_paths("/project/src", "src", [], [missing]).error).to_equal("test path src/./missing_test.trb: no such file or directory")
+	end
+
+	test("distinguishes non-test files, excluded files and empty directories") do
+		expect(select_test_paths("/project/src", "src", [], [selected_test_path("src/main.trb", false)]).error).to_equal("test path src/main.trb is not a *_test.trb file")
+		expect(select_test_paths("/project/src", "src", [], [selected_test_path("src/.trb/a_test.trb", false)]).error).to_equal("test file src/.trb/a_test.trb was not found in the configured project")
+		expect(select_test_paths("/project/src", "src", [], [selected_test_path("src/empty", true)]).error).to_equal("no *_test.trb files found under src/empty")
+		expect(select_test_paths("/project/src", "src", [], []).paths).to_equal([])
+	end
+
+	test("fails the entire request without returning an earlier partial selection") do
+		result := select_test_paths("/project/src", "src", ["/project/src/a_test.trb"], [selected_test_path("src/a_test.trb", false), selected_test_path("src/main.trb", false)])
+		expect(result.paths).to_equal([])
+		expect(result.error).to_equal("test path src/main.trb is not a *_test.trb file")
+	end
+end

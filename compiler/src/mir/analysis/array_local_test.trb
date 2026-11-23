@@ -1,0 +1,169 @@
+import { emit_qbe } from compiler
+import { mir_op_array_store } from mir/model/instructions
+import { compiler_test_instruction_with_cell } from testing/compiler
+import { mir_numeric_nonnegative_power_division_mode } from mir/model/numeric_modes
+import { mir_numeric_plans_equal } from mir/analysis/numeric
+import { optimize_verified_mir } from mir/passes/optimize
+import { verify_mir } from mir/verify/module
+import { CompilerState } from state/state
+import { array_loop_mir_check } from testing/mir/array_loops
+import { control_test_output } from testing/mir/control
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { logical_run_qbe } from testing/qbe_runner
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+def local_array_positive_divisions(state: CompilerState): Integer
+	mut count := 0
+	state.scalar_mir.numeric_plans[0].each do |plan|
+		plan.operations.each do |operation|
+			if operation.mode == mir_numeric_nonnegative_power_division_mode()
+				count += 1
+			end
+		end
+	end
+	return count
+end
+
+def local_array_run(source: String, expected: String)
+	state := array_loop_mir_check(source)
+	qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+	if qbe != nil
+		case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+		when Result::Ok(actual)
+			expect(actual).to_equal(expected)
+		when Result::Err(error)
+			puts(error)
+			expect(false).to_be_true()
+		end
+	end
+end
+
+describe("MIR local Array element ranges") do
+	test("proves closed permutation cycles and rederives facts from reordered MIR") do
+		source := "def run(): Integer\nmut first := [2, 4, 6, 8]\nmut second := [10, 12, 14, 16]\nmut index := 0\nwhile index < 4\ntemporary := first[index]\nfirst[index] = second[index]\nsecond[index] = temporary\nindex += 1\nend\nreturn first[0] / 2 + second[3] / 2\nend\ndef main()\nputs(run())\nend\n"
+		mut state := array_loop_mir_check(source)
+		expect(local_array_positive_divisions(state)).to_equal(2)
+		plans := state.scalar_mir.numeric_plans[0]
+		before := control_test_output(emit_qbe(state))
+		intrinsic_mir_erase(state)
+		optimize_verified_mir(state.scalar_mir)
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+		state.scalar_mir.functions.each do |function|
+			mut left := function.block_start
+			mut right := left + function.block_count - 1
+			while left < right
+				saved := state.scalar_mir.blocks[left]
+				state.scalar_mir.blocks[left] = state.scalar_mir.blocks[right]
+				state.scalar_mir.blocks[right] = saved
+				left += 1
+				right -= 1
+			end
+		end
+		mut left := 0
+		mut right := state.scalar_mir.values.size() - 1
+		while left < right
+			saved := state.scalar_mir.values[left]
+			state.scalar_mir.values[left] = state.scalar_mir.values[right]
+			state.scalar_mir.values[right] = saved
+			left += 1
+			right -= 1
+		end
+		mut pass := 0
+		while pass < 2
+			optimize_verified_mir(state.scalar_mir)
+			expect(verify_mir(state.scalar_mir, true)).to_equal("")
+			expect(mir_numeric_plans_equal(plans, state.scalar_mir.numeric_plans[0])).to_be_true()
+			pass += 1
+		end
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+			when Result::Ok(actual)
+				expect(actual).to_equal("9\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("invalidates negative unknown escaping and ambiguously forwarded writers") do
+		[
+			"values[0] = -8",
+			"mut view := values\nview[0] = -8",
+			"values[0] = unknown",
+			"touch(values)",
+			"holder := Box.new(items: values)\nputs(holder.items.size())",
+			"mut view := values\nif unknown > 0\nview = other\nend\nview[0] = -8",
+			"values.pop()",
+		].each do |mutation|
+			source := "def run(unknown: Integer, mut other: Array<Integer>): Integer\nmut values := [8, 16]\n" + mutation + "\nreturn values[0] / 2\nend\nrecord Box\nitems: Array<Integer>\nend\ndef touch(mut values: Array<Integer>)\nvalues[0] = -8\nend\ndef main()\nputs(run(-8, [0]))\nend\n"
+			state := array_loop_mir_check(source)
+			expect(local_array_positive_divisions(state)).to_equal(0)
+		end
+		local_array_run("def run(): Integer\nmut values := [8]\nmut view := values\nview[0] = -9\nreturn values[0] / 2\nend\ndef main()\nputs(run())\nend\n", "-4\n")
+	end
+
+	test("propagates a late negative writer through dependent Arrays and stale plans") do
+		source := "def run(unknown: Integer): Integer\nmut first := [8]\nmut second := [first[0]]\nresult := second[0] / 2\nfirst[0] = 16\nsecond[0] = first[0]\nreturn result + unknown % 1\nend\ndef main()\nputs(run(-16))\nend\n"
+		mut state := array_loop_mir_check(source)
+		expect(local_array_positive_divisions(state)).to_equal(1)
+		stale := state.scalar_mir.numeric_plans[0]
+		mut index := 0
+		while index < state.scalar_mir.instructions.size()
+			instruction := state.scalar_mir.instructions[index]
+			if instruction.kind == mir_op_array_store()
+				state.scalar_mir.instructions[index] = compiler_test_instruction_with_cell(instruction, 4, 0)
+				break
+			end
+			index += 1
+		end
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(local_array_positive_divisions(state)).to_equal(0)
+		state.scalar_mir.numeric_plans[0] = stale
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR numeric plan differs")
+	end
+
+	test("keeps empty and oversized accesses failing and preserves checked addition") do
+		[
+			"mut values: Array<Integer> := []\nreturn values[0] / 2",
+			"values := [8]\nreturn values[1] / 2",
+			"values := [9007199254740991]\nreturn (values[0] + 1) / 2",
+		].each do |body|
+			state := array_loop_mir_check("def run(): Integer\n" + body + "\nend\ndef main()\nputs(run())\nend\n")
+			qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+			if qbe != nil
+				case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+				when Result::Ok(_actual)
+					expect(false).to_be_true()
+				when Result::Err(error)
+					expect(error.include?("out of bounds") || error.include?("portable range")).to_be_true()
+				end
+			end
+		end
+		local_array_run("def run(): Integer\nvalues := [9007199254740991]\nreturn values[-1] / 2\nend\ndef main()\nputs(run())\nend\n", "4503599627370495\n")
+	end
+
+	test("retains roots during growth and unrelated forced collection") do
+		source := "def run(): String\nmut values: Array<Integer> := []\nmut index := 0\nwhile index < 100\nvalues.push(index)\nindex += 1\nend\ntext := values[99].to_s()\nreturn text + (values[98] / 2).to_s()\nend\ndef main()\nputs(run())\nend\n"
+		state := array_loop_mir_check(source)
+		expect(local_array_positive_divisions(state)).to_equal(1)
+		output := control_test_output(emit_qbe(state))
+		allocation := "function l $trbn_string_alloc(l %size) {\n@start\n"
+		expect(output.split(allocation).size()).to_equal(2)
+		forced := output.split(allocation).join(allocation + "\tcall $trbn_gc_collect(w 0)\n")
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, forced)
+			when Result::Ok(actual)
+				expect(actual).to_equal("9949\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+end

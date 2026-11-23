@@ -1,0 +1,34 @@
+def show(value: Integer?)
+	if value == nil
+		puts("nil")
+	else
+		puts(value)
+	end
+end
+
+def probe()
+	puts("".empty?())
+	puts("z".empty?())
+	puts("".include?(""))
+	puts("".start_with?(""))
+	puts("".end_with?(""))
+	show("".index(""))
+	show("".rindex(""))
+	puts("".include?("a"))
+	puts("a".start_with?("ab"))
+	puts("a".end_with?("ab"))
+	show("a".index("ab"))
+	show("a".rindex("ab"))
+	puts("z".include?(""))
+	puts("z".start_with?(""))
+	puts("z".end_with?(""))
+	show("z".index(""))
+	show("z".rindex(""))
+	show("z".index("z"))
+	show("z".rindex("z"))
+	puts("a\nb".include?("\n"))
+end
+
+def main()
+	probe()
+end

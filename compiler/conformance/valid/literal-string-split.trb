@@ -1,0 +1,31 @@
+# Constant fragments retain exact bytes, while every result Array is fresh.
+def main()
+	line := "¢,\xFF,\000,雪,"
+	mut round := 0
+	while round < 3
+		mut first := line.split(",")
+		second := line.split(",")
+		first[0] = "changed"
+		first.push("tail")
+		puts(second.size())
+		puts(second[0] == "¢")
+		puts(second[1] == "\xFF")
+		puts(second[2] == "\000")
+		puts(second[3].size())
+		puts(second[4].size())
+		puts(first.size())
+		round += 1
+	end
+	cut := "\xC2\xA2x\xC2\xA2".split("\xA2")
+	puts(cut.size())
+	puts(cut[0] == "\xC2")
+	puts(cut[1] == "x\xC2")
+	puts(cut[1].size())
+	puts(cut[2].size())
+	wide := "\xF0\x9F\x98\x80".split("\x9F")
+	puts(wide[0].size())
+	puts(wide[1].size())
+	puts("\000a\000".split("\000").size())
+	puts("".split(",").size())
+	puts("aaaaa".split("aa")[2])
+end

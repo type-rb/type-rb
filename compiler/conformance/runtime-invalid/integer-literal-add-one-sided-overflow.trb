@@ -1,0 +1,9 @@
+def add_right(value: Integer): Integer
+	return value + 1
+end
+
+def main()
+	maximum := 9007199254740991
+	puts(add_right(maximum).to_s())
+	return
+end

@@ -1,0 +1,454 @@
+import { mir_adapter_set_sqlite_link } from mir/model/call_kinds
+import { sqlite_kind, sqlite_mutable, sqlite_names, sqlite_parameters, sqlite_result } from mir/model/sqlite_contract
+import { process_kind, process_mutable, process_names, process_parameters, process_result } from mir/model/process_contract
+import { mir_adapter_runtime_deadline } from mir/model/call_kinds
+import { mir_test_inspection_plan } from mir/analysis/test_inspection
+import { mir_test_comparison_plan } from mir/analysis/test_comparison
+import { mir_test_outcome, mir_test_value_id, test_adapter_capture, test_adapter_equal, test_adapter_fail, test_adapter_finish, test_adapter_inspect, test_adapter_scalar_kind } from mir/model/test_contract
+import { filesystem_adapter_start, filesystem_mutable, filesystem_names, filesystem_parameters, filesystem_result } from mir/model/filesystem_contract
+import { mir_type_composite_start } from mir/model/type_ids
+import { mir_adapter_set_oidc_link } from mir/model/call_kinds
+import { oidc_kind, oidc_mutable, oidc_names, oidc_parameters, oidc_result } from mir/model/oidc_contract
+import { crypto_adapter_start, crypto_names, crypto_parameters, crypto_result, crypto_signature_name } from mir/model/crypto_contract
+import { mir_adapter_gzip, mir_adapter_set_compression_link, mir_adapter_set_crypto_link } from mir/model/call_kinds
+import { builder_adapter_start, builder_mutates, builder_names, builder_parameters, builder_result, builder_signature_name } from mir/model/string_builder_contract
+import { network_adapter_start, network_names, network_parameters, network_result } from mir/model/network_contract
+import { callable_type } from frontend/types/callable_types
+import { mir_adapter_collect_package_files, mir_adapter_collect_project_sources, mir_adapter_collect_test_paths, mir_adapter_entropy, mir_adapter_eputs, mir_adapter_file_exists, mir_adapter_host, mir_adapter_literal_byte, mir_adapter_none, mir_adapter_reset_temporary_storage, mir_adapter_runtime_fail, mir_adapter_runtime_recover, mir_adapter_set_network_link, mir_adapter_source_is_utf8, mir_adapter_source_slice, mir_adapter_sqrt, mir_adapter_string_bytes, mir_adapter_time_clock, mir_adapter_time_zone_data, mir_adapter_time_zone_environment, mir_signature_compiler_runtime, mir_signature_host, mir_signature_interface, mir_signature_ordinary, mir_signature_standard } from mir/model/call_kinds
+import { ascii_code, integer_string } from support/literals
+import { MirModule, MirSignature, mir_type_id } from mir/model/module
+import { mir_semantic_type_name, mir_semantic_value_type } from mir/model/types
+
+# The checked declaration owns the adapter. Source aliases and call-site spelling
+# never select a runtime operation, and the backend never resolves them again.
+def mir_runtime_adapter(name: String): Integer
+	if name == "compiler_set_sqlite_link"
+		return mir_adapter_set_sqlite_link()
+	end
+	if name == "compiler_set_oidc_link"
+		return mir_adapter_set_oidc_link()
+	end
+	if name == "compiler_set_crypto_link"
+		return mir_adapter_set_crypto_link()
+	end
+	if name == "compiler_set_compression_link"
+		return mir_adapter_set_compression_link()
+	end
+	if name == "compiler_set_network_link"
+		return mir_adapter_set_network_link()
+	end
+	if name == "compiler_collect_test_paths"
+		return mir_adapter_collect_test_paths()
+	end
+	if name == "compiler_collect_package_files"
+		return mir_adapter_collect_package_files()
+	end
+	if name == "compiler_literal_byte"
+		return mir_adapter_literal_byte()
+	end
+	names := ["compiler_file_exists", "compiler_read_source", "compiler_source_is_utf8", "compiler_string_bytes", "compiler_source_slice", "compiler_collect_project_sources", "compiler_eputs", "compiler_reset_temporary_storage"]
+	mut index := 0
+	while index < names.size()
+		if names[index] == name
+			return index + mir_adapter_file_exists()
+		end
+		index += 1
+	end
+	return mir_adapter_none()
+end
+
+def mir_call_symbol(signature: MirSignature): String
+	if signature.kind == mir_signature_standard()
+		if signature.adapter == test_adapter_finish()
+			return "trbn_test_finish"
+		end
+		if signature.adapter == test_adapter_scalar_kind()
+			return "trbn_test_scalar_kind_" + integer_string(signature.id)
+		end
+		if signature.adapter == test_adapter_inspect()
+			return "trbn_test_inspect_" + integer_string(signature.id)
+		end
+		if signature.adapter == test_adapter_equal()
+			return "trbn_test_equal_" + integer_string(signature.id)
+		end
+		if signature.adapter == test_adapter_capture()
+			return "trbn_test_capture"
+		elsif signature.adapter == test_adapter_fail()
+			return "trbn_test_raise"
+		end
+	end
+	if signature.kind == mir_signature_standard() && signature.adapter >= filesystem_adapter_start() && signature.adapter < filesystem_adapter_start() + filesystem_names().size()
+		return "trbn_filesystem_" + filesystem_names()[signature.adapter - filesystem_adapter_start()]
+	end
+	if signature.kind == mir_signature_compiler_runtime() && signature.adapter == mir_adapter_set_oidc_link()
+		return "trbn_set_oidc_link"
+	end
+	if signature.kind == mir_signature_compiler_runtime() && signature.adapter == mir_adapter_set_sqlite_link()
+		return "trbn_set_sqlite_link"
+	end
+	if signature.kind == mir_signature_standard() && oidc_kind(signature.adapter) >= 0
+		return "trbn_oidc_" + oidc_names()[oidc_kind(signature.adapter)]
+	end
+	if signature.kind == mir_signature_standard() && signature.adapter >= crypto_adapter_start() && signature.adapter < crypto_adapter_start() + crypto_names().size()
+		return "trbn_crypto_" + crypto_names()[signature.adapter - crypto_adapter_start()]
+	end
+	if signature.kind == mir_signature_compiler_runtime() && signature.adapter == mir_adapter_set_crypto_link()
+		return "trbn_set_crypto_link"
+	end
+	if signature.kind == mir_signature_standard() && signature.adapter == mir_adapter_gzip()
+		return "trbn_gzip"
+	end
+	if signature.kind == mir_signature_compiler_runtime() && signature.adapter == mir_adapter_set_compression_link()
+		return "trbn_set_compression_link"
+	end
+	if signature.kind == mir_signature_standard() && signature.adapter >= builder_adapter_start() && signature.adapter < builder_adapter_start() + builder_names().size()
+		return "trbn_builder_" + builder_names()[signature.adapter - builder_adapter_start()]
+	end
+	if signature.kind == mir_signature_standard()
+		if signature.adapter >= network_adapter_start() && signature.adapter < network_adapter_start() + network_names().size()
+			return "trbn_network_" + network_names()[signature.adapter - network_adapter_start()]
+		end
+		if signature.adapter == mir_adapter_entropy()
+			return "trbn_entropy_read"
+		end
+		process := process_kind(signature.adapter)
+		if process >= 0
+			return "trbn_process_" + process_names()[process]
+		end
+		sqlite := sqlite_kind(signature.adapter)
+		if sqlite >= 0
+			return "trbn_sqlite_" + sqlite_names()[sqlite]
+		end
+		if signature.adapter == mir_adapter_runtime_fail()
+			return "trbn_runtime_fail"
+		end
+		if signature.adapter == mir_adapter_runtime_deadline()
+			return "trbn_runtime_deadline_l"
+		end
+		if signature.adapter == mir_adapter_runtime_recover()
+			return "trbn_runtime_recover_l"
+		end
+		if signature.adapter == mir_adapter_time_clock()
+			return "trbn_time_clock"
+		end
+		if signature.adapter == mir_adapter_time_zone_data()
+			return "trbn_time_zone_data"
+		end
+		if signature.adapter == mir_adapter_time_zone_environment()
+			return "trbn_time_zone_environment"
+		end
+		return "sqrt"
+	end
+	if signature.kind == mir_signature_ordinary() || signature.kind == mir_signature_interface()
+		return "trbnf" + integer_string(signature.id)
+	end
+	if signature.kind == mir_signature_host()
+		return signature.name
+	end
+	if signature.adapter == mir_adapter_set_network_link()
+		return "trbn_set_network_link"
+	end
+	if signature.adapter == mir_adapter_collect_test_paths()
+		return "trbn_collect_test_paths"
+	end
+	if signature.adapter == mir_adapter_collect_package_files()
+		return "trbn_collect_package_files"
+	end
+	if signature.adapter == mir_adapter_literal_byte()
+		return "trbn_literal_byte"
+	end
+	symbols := ["trbn_file_exists", "trbn_read_source", "trbn_string_is_utf8", "trbn_string_bytes", "trbn_source_slice", "trbn_collect_project_sources", "trbn_eputs", "trbn_temp_reset"]
+	return symbols[signature.adapter - mir_adapter_file_exists()]
+end
+
+def mir_host_symbol_valid(name: String): Boolean
+	if name.size() == 0
+		return false
+	end
+	mut index := 0
+	while index < name.size()
+		code := ascii_code(name[index])
+		mut valid := code == 95
+		if code >= 65 && code <= 90
+			valid = true
+		end
+		if code >= 97 && code <= 122
+			valid = true
+		end
+		if index > 0 && code >= 48 && code <= 57
+			valid = true
+		end
+		if !valid
+			return false
+		end
+		index += 1
+	end
+	return true
+end
+
+def mir_project_sources_result(native_module: MirModule, name: String): Boolean
+	native_module.records.each do |definition|
+		if mir_semantic_type_name(native_module, definition.type_id) == name
+			if definition.name != "CompilerProjectSources" || definition.field_count != 3
+				return false
+			end
+			names := ["paths", "sources", "error"]
+			types := ["Array<String>", "Array<String>", "String"]
+			mut index := 0
+			while index < 3
+				field := native_module.fields[definition.field_start + index]
+				if field.name != names[index] || mir_semantic_type_name(native_module, field.type_id) != types[index]
+					return false
+				end
+				index += 1
+			end
+			return true
+		end
+	end
+	return false
+end
+
+def mir_intrinsic_signature_error(native_module: MirModule, signature: MirSignature): String
+	if signature.kind == mir_signature_interface()
+		# The independent object verifier checks method ownership and ABI.
+		return ""
+	end
+	if signature.kind == mir_signature_standard()
+		mut name := ""
+		mut parameters: Array<String> := []
+		mut result := ""
+		process := process_kind(signature.adapter)
+		sqlite := sqlite_kind(signature.adapter)
+		if process >= 0
+			name = "trb/internal/process." + process_names()[process]
+			parameters = process_parameters(process)
+			result = process_result(process)
+		elsif sqlite >= 0
+			name = "trb/internal/sqlite." + sqlite_names()[sqlite]
+			parameters = sqlite_parameters(sqlite)
+			result = sqlite_result(sqlite)
+		elsif signature.adapter == mir_adapter_sqrt()
+			name = "trb/std/math.sqrt"
+			parameters = ["Float"]
+			result = "Float"
+		elsif signature.adapter == test_adapter_finish()
+			name = "trb/internal/test.finish"
+			parameters = ["Integer"]
+			result = "Void"
+		elsif signature.adapter == test_adapter_scalar_kind()
+			name = "trb/internal/test.scalar_kind"
+			if signature.parameter_types.size() != 1
+				return "MIR test scalar predicate requires one value"
+			end
+			parameters = signature.parameter_types
+			result = "Integer"
+			plan := mir_test_inspection_plan(native_module, [mir_test_value_id(native_module, parameters[0])])
+			if plan.error != ""
+				return plan.error
+			end
+		elsif signature.adapter == test_adapter_inspect()
+			name = "trb/internal/test.inspect_value"
+			if signature.parameter_types.size() != 1
+				return "MIR test inspection requires one value"
+			end
+			parameters = signature.parameter_types
+			result = "String"
+			plan := mir_test_inspection_plan(native_module, [mir_test_value_id(native_module, parameters[0])])
+			if plan.error != ""
+				return plan.error
+			end
+		elsif signature.adapter == test_adapter_equal()
+			name = "trb/internal/test.deep_equal"
+			if signature.parameter_types.size() != 2
+				return "MIR test equality requires two values"
+			end
+			parameters = [signature.parameter_types[0], signature.parameter_types[0]]
+			result = "Boolean"
+			plan := mir_test_comparison_plan(native_module, [mir_test_value_id(native_module, parameters[0])])
+			if plan.error != ""
+				return plan.error
+			end
+		elsif signature.adapter == test_adapter_capture()
+			name = "trb/internal/test.capture"
+			parameters = [callable_type([], "Void"), "String", "Integer", "Integer"]
+			result = signature.result_type
+			if !mir_test_outcome(native_module, result)
+				return "MIR test capture requires the exact managed outcome"
+			end
+		elsif signature.adapter == mir_adapter_runtime_deadline() || signature.adapter == mir_adapter_runtime_fail() || signature.adapter == mir_adapter_runtime_recover() || signature.adapter == test_adapter_fail()
+			name = "trb/internal/runtime.fail"
+			parameters = ["String"]
+			result = signature.result_type
+			if signature.adapter == test_adapter_fail()
+				name = "trb/internal/test.fail"
+				parameters = ["String", "String", "Integer", "Integer"]
+			end
+			if signature.adapter == mir_adapter_runtime_recover()
+				name = "trb/internal/runtime.recover"
+				parameters = [callable_type([], result), result]
+			end
+			if signature.adapter == mir_adapter_runtime_deadline()
+				name = "trb/internal/runtime.deadline"
+				parameters = [callable_type([], result), "Integer", result]
+			end
+			mut valid := mir_semantic_value_type(native_module, mir_type_id(result))
+			native_module.types.each do |row|
+				if row.name == result
+					valid = true
+				end
+			end
+			if !valid || result == "Void" || result == "Address" || result == "Invalid"
+				return "MIR runtime failure result type is invalid"
+			end
+		elsif signature.adapter == mir_adapter_time_clock()
+			name = "trb/internal/time_host.clock"
+			parameters = ["Array<Integer>"]
+			result = "Boolean"
+		elsif signature.adapter == mir_adapter_time_zone_data()
+			name = "trb/internal/time_host.zone_data"
+			parameters = ["String", "Integer", "Integer", "Array<String>"]
+			result = "Integer"
+		elsif signature.adapter == mir_adapter_time_zone_environment()
+			name = "trb/internal/time_host.zone_environment"
+			parameters = ["Array<String>"]
+			result = "Boolean"
+		elsif signature.adapter >= filesystem_adapter_start() && signature.adapter < filesystem_adapter_start() + filesystem_names().size()
+			filesystem := signature.adapter - filesystem_adapter_start()
+			name = "trb/internal/filesystem_host." + filesystem_names()[filesystem]
+			parameters = filesystem_parameters(filesystem)
+			result = filesystem_result(filesystem)
+			if filesystem < 5
+				if signature.parameter_types.size() == 0
+					return "MIR filesystem resource parameter is missing"
+				end
+				mut owned := false
+				native_module.objects.each do |object|
+					if object.resource_kind == 1 && native_module.types[object.type_id - mir_type_composite_start()].name == signature.parameter_types[0]
+						owned = true
+					end
+				end
+				if !owned
+					return "MIR filesystem parameter requires the owned File resource"
+				end
+				parameters[0] = signature.parameter_types[0]
+			end
+		elsif oidc_kind(signature.adapter) >= 0
+			oidc := oidc_kind(signature.adapter)
+			name = "trb/internal/auth/oidc_host." + oidc_names()[oidc]
+			parameters = oidc_parameters(oidc)
+			result = oidc_result(oidc)
+		elsif signature.adapter >= crypto_adapter_start() && signature.adapter < crypto_adapter_start() + crypto_names().size()
+			crypto := signature.adapter - crypto_adapter_start()
+			name = crypto_signature_name(crypto)
+			parameters = crypto_parameters(crypto)
+			result = crypto_result(crypto)
+		elsif signature.adapter == mir_adapter_gzip()
+			name = "trb/internal/web/compression.gzip"
+			parameters = ["Bytes"]
+			result = "Bytes"
+		elsif signature.adapter == mir_adapter_entropy()
+			name = "trb/internal/entropy.read"
+			parameters = ["Integer"]
+			result = "String"
+		elsif signature.adapter >= network_adapter_start() && signature.adapter < network_adapter_start() + network_names().size()
+			network := signature.adapter - network_adapter_start()
+			name = "trb/internal/network_host." + network_names()[network]
+			parameters = network_parameters(network)
+			result = network_result(network)
+		elsif signature.adapter >= builder_adapter_start() && signature.adapter < builder_adapter_start() + builder_names().size()
+			builder := signature.adapter - builder_adapter_start()
+			name = builder_signature_name(builder)
+			parameters = builder_parameters(builder)
+			result = builder_result(builder)
+		else
+			return "MIR standard package adapter is invalid"
+		end
+		if signature.name != name || signature.result_type != result || signature.parameter_types.size() != parameters.size()
+			return "MIR standard package signature differs"
+		end
+		mut index := 0
+		while index < parameters.size()
+			mut mutable := 0
+			if process >= 0
+				mutable = process_mutable(process, index)
+			elsif sqlite >= 0
+				mutable = sqlite_mutable(sqlite, index)
+			end
+			if signature.adapter >= filesystem_adapter_start() && signature.adapter < filesystem_adapter_start() + filesystem_names().size()
+				mutable = filesystem_mutable(signature.adapter - filesystem_adapter_start(), index)
+			end
+			if oidc_kind(signature.adapter) >= 0
+				mutable = oidc_mutable(oidc_kind(signature.adapter), index)
+			end
+			if signature.adapter == mir_adapter_time_clock() || signature.adapter == mir_adapter_time_zone_environment() || (signature.adapter == mir_adapter_time_zone_data() && index == 3) || (index == 0 && signature.adapter >= builder_adapter_start() && signature.adapter < builder_adapter_start() + builder_names().size() && builder_mutates(signature.adapter - builder_adapter_start()))
+				mutable = 1
+			end
+			if signature.parameter_types[index] != parameters[index] || signature.parameter_mutable[index] != mutable
+				return "MIR standard package parameter differs"
+			end
+			index += 1
+		end
+		return ""
+	end
+	if signature.kind == mir_signature_ordinary()
+		if signature.adapter != mir_adapter_none()
+			return "MIR ordinary declaration has an external adapter"
+		end
+		return ""
+	end
+	adapter := signature.adapter
+	if signature.kind == mir_signature_host()
+		if adapter != mir_adapter_host()
+			return "MIR host adapter differs"
+		end
+		if !mir_host_symbol_valid(signature.name)
+			return "MIR host symbol is invalid"
+		end
+		return ""
+	end
+	if signature.kind != mir_signature_compiler_runtime() || adapter < mir_adapter_file_exists() || (adapter > mir_adapter_reset_temporary_storage() && adapter != mir_adapter_literal_byte() && adapter != mir_adapter_collect_package_files() && adapter != mir_adapter_collect_test_paths() && adapter != mir_adapter_set_network_link() && adapter != mir_adapter_set_compression_link() && adapter != mir_adapter_set_crypto_link() && adapter != mir_adapter_set_oidc_link() && adapter != mir_adapter_set_sqlite_link())
+		return "MIR external adapter is invalid"
+	end
+	if mir_runtime_adapter(signature.name) != adapter
+		return "MIR runtime declaration identity differs"
+	end
+	mut parameters := ["String"]
+	mut result := "String"
+	if adapter == mir_adapter_file_exists() || adapter == mir_adapter_source_is_utf8()
+		result = "Boolean"
+	elsif adapter == mir_adapter_string_bytes()
+		result = "Array<Integer>"
+	elsif adapter == mir_adapter_source_slice()
+		parameters = ["String", "Integer", "Integer"]
+	elsif adapter == mir_adapter_collect_project_sources() || adapter == mir_adapter_collect_package_files() || adapter == mir_adapter_collect_test_paths()
+		parameters = ["String"]
+		if adapter == mir_adapter_collect_project_sources() || adapter == mir_adapter_collect_test_paths()
+			parameters.push("String")
+		end
+		result = signature.result_type
+		if !mir_project_sources_result(native_module, result)
+			return "MIR project source result layout differs"
+		end
+	elsif adapter == mir_adapter_eputs()
+		result = "Void"
+	elsif adapter == mir_adapter_set_oidc_link() || adapter == mir_adapter_set_network_link() || adapter == mir_adapter_set_compression_link() || adapter == mir_adapter_set_crypto_link() || adapter == mir_adapter_set_sqlite_link()
+		parameters = ["Boolean"]
+		result = "Void"
+	elsif adapter == mir_adapter_reset_temporary_storage()
+		parameters = []
+		result = "Void"
+	elsif adapter == mir_adapter_literal_byte()
+		parameters = ["Integer"]
+	end
+	if signature.parameter_types.size() != parameters.size() || signature.result_type != result
+		return "MIR runtime signature differs"
+	end
+	mut index := 0
+	while index < parameters.size()
+		if signature.parameter_types[index] != parameters[index] || signature.parameter_mutable[index] != 0
+			return "MIR runtime parameter differs"
+		end
+		index += 1
+	end
+	return ""
+end

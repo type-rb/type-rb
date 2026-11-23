@@ -1,0 +1,45 @@
+def churn()
+	mut count := 0
+	while count < 30000
+		discarded := "garbage-" + count.to_s()
+		if discarded == ""
+			puts("unexpected")
+		end
+		count += 1
+	end
+	return
+end
+
+def release(mut rows: Array<Array<Integer>>): Integer
+	rows[0] = [8, 8]
+	churn()
+	return -1
+end
+
+def change_string(mut values: Array<String>): String
+	values[0] = "replacement"
+	churn()
+	values.push("tail")
+	return "-new"
+end
+
+def main()
+	mut original := [1, 2]
+	mut rows := [original]
+	rows[0][release(rows)] = 9
+	puts(original[1])
+	puts(rows[0][1])
+	# Only the pending target retains this inner Array after index evaluation.
+	rows = [[1, 2]]
+	rows[0][release(rows)] = 7
+	puts(rows[0][1])
+	mut strings := ["old-" + rows[0][0].to_s()]
+	mut pass := 0
+	while pass < 1
+		strings[-1] += change_string(strings)
+		pass += 1
+	end
+	puts(strings[0])
+	puts(strings[1])
+	return
+end

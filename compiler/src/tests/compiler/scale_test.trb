@@ -1,0 +1,20 @@
+import { check, emit_qbe } from compiler
+import { lex } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { CompilerState, compiler_new } from state/state
+import { describe, expect, test } from trb/std/test
+import { output_source, scale_test_source } from testing/compiler
+
+describe("Native TypeRB frontend") do
+	test("checks a generated declaration-chain scale probe") do
+		source := scale_test_source(128)
+		mut state := compiler_new(source.size() + 1)
+		expect(lex(state, source)).to_be_true()
+		expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_true()
+		expect(state.declarations.function_count[0]).to_equal(129)
+		expect(output_source(emit_qbe(state)).include?("function l $trbnf127")).to_be_true()
+	end
+end

@@ -1,0 +1,15 @@
+import { native_managed_type } from frontend/types/hash_types
+import { describe, expect, test } from trb/std/test
+
+describe("Native managed type classification") do
+	test("retains union headers alongside scalar and managed storage categories") do
+		managed := ["$Union<Integer,String>", "$Union<名>", "$Union<,>", "$Union<<>", "String", "Bytes", "Range<Integer>", "Array<Integer>", "Class#0", "Interface#0", "Record#0", "Enum#0", "Hash<Integer,String>", "Hash", "Integer?", "$Callable<Void>"]
+		managed.each do |name|
+			expect(native_managed_type(name)).to_be_true()
+		end
+		unmanaged := ["", "Integer", "Float", "Boolean", "Void", "$Union<>", "$Union<A]", "$Unión<A>"]
+		unmanaged.each do |name|
+			expect(native_managed_type(name)).to_be_false()
+		end
+	end
+end

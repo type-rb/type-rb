@@ -1,0 +1,71 @@
+import { mir_op_array_copy, mir_op_array_join, mir_op_array_mutate, mir_op_guard, mir_op_puts, mir_op_string_case, mir_op_string_compare, mir_op_string_query, mir_op_string_replace, mir_op_string_sequence, mir_op_string_slice, mir_op_string_split, mir_op_string_trim } from mir/model/instructions
+import { MirModule } from mir/model/module
+
+# Optional runtime families follow verified MIR operations, including operations
+# in bodies that are not called by main. Core storage, GC and UTF-8 primitives
+# remain unconditional. Compiler gateways retain the complete runtime because
+# their injected adapters can call helpers outside ordinary MIR instructions.
+record QbeRuntimeNeeds
+	concat_three: Boolean
+	concat_many: Boolean
+	queries: Boolean
+	sequences: Boolean
+	slices: Boolean
+	trimming: Boolean
+	transforms: Boolean
+	case_mapping: Boolean
+	copies: Boolean
+	join: Boolean
+	mutations: Boolean
+end
+
+def qbe_runtime_needs(native_module: MirModule, complete: Boolean): QbeRuntimeNeeds
+	mut concat_three := complete
+	mut concat_many := complete
+	native_module.string_concats.each do |plans|
+		plans.each do |plan|
+			if plan.fragments.size() == 3
+				concat_three = true
+			elsif plan.fragments.size() > 3
+				concat_many = true
+			end
+		end
+	end
+	mut queries := complete
+	mut sequences := complete
+	mut slices := complete
+	mut trimming := complete
+	mut transforms := complete
+	mut case_mapping := complete
+	mut copies := complete
+	mut join := complete
+	mut mutations := complete
+	native_module.instructions.each do |instruction|
+		kind := instruction.kind
+		if kind == mir_op_string_query() || (kind == mir_op_string_compare() && instruction.payload == 2) || (kind == mir_op_puts() && instruction.payload == 1)
+			# Dynamic output can order String-key Hash values from its type catalog.
+			queries = true
+		elsif kind == mir_op_string_sequence()
+			sequences = true
+		elsif kind == mir_op_string_slice()
+			slices = true
+		elsif kind == mir_op_array_copy() || (kind == mir_op_guard() && instruction.payload == 2)
+			copies = true
+		elsif kind == mir_op_array_mutate()
+			mutations = true
+			# Removal and explicit empty guards share the copy-family error data.
+			copies = true
+		elsif kind == mir_op_array_join()
+			join = true
+		elsif kind == mir_op_string_trim()
+			trimming = true
+		elsif kind == mir_op_string_split() || kind == mir_op_string_replace()
+			transforms = true
+			# Split and replace use the bounded byte-search helper.
+			queries = true
+		elsif kind == mir_op_string_case()
+			case_mapping = true
+		end
+	end
+	return QbeRuntimeNeeds.new(concat_three: concat_three, concat_many: concat_many, queries: queries, sequences: sequences, slices: slices, trimming: trimming, transforms: transforms, case_mapping: case_mapping, copies: copies, join: join, mutations: mutations)
+end

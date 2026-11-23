@@ -1,0 +1,179 @@
+import { JsonCodecSchema } from frontend/providers/json_schema
+import { json_provider_decode, json_provider_encode, json_provider_request } from frontend/providers/json_declarations
+import { package_json_quote } from project/package_json
+import { integer_string } from support/literals
+
+# JSON quoting covers controls; additionally escape interpolation spelling in
+# the TypeRB source literal. Wire names are data, never generated syntax.
+def json_codec_quote(value: String): String
+	quoted := package_json_quote(value)
+	mut result := ""
+	mut index := 0
+	while index < quoted.size()
+		if quoted[index] == "#"
+			result += "\\u0023"
+		else
+			result += quoted[index]
+		end
+		index += 1
+	end
+	return result
+end
+
+def json_codec_pointer(value: String): String
+	mut result := ""
+	mut index := 0
+	while index < value.size()
+		if value[index] == "~"
+			result += "~0"
+		elsif value[index] == "/"
+			result += "~1"
+		else
+			result += value[index]
+		end
+		index += 1
+	end
+	return result
+end
+
+def json_codec_error(path: String, message: String): String
+	return "return Result<Target, JSON::Error>::Err(JSON::Error.new(kind: JSON::ErrorKind::Decode, message: " + json_codec_quote(message) + ", path: " + path + ", line: nil, column: nil))\n"
+end
+
+def json_codec_decode_body(schemas: Array<JsonCodecSchema>, index: Integer, value: String, path: String): String
+	row := schemas[index]
+	id := integer_string(index)
+	node_type := "Node" + id
+	mut payload := "payload" + id
+	if row.kind == "record" && row.children.size() == 0
+		payload = "_" + payload
+	end
+	if row.kind == "time"
+		mut method := "try_parse"
+		if row.display == "TimeZone"
+			method = "try_get"
+		end
+		return "case " + value + "\nwhen JSON::Value::String(text" + id + ")\ncase " + node_type + "." + method + "(text" + id + ")\nwhen Result::Ok(parsed" + id + ")\nparsed" + id + "\nwhen Result::Err(_time_error" + id + ")\n" + json_codec_error(path, "invalid " + row.display) + "end\nelse\n" + json_codec_error(path, "expected String") + "end"
+	end
+	if row.kind == "nullable"
+		return "case " + value + "\nwhen JSON::Value::Null\nabsent" + id + ": " + node_type + " := nil\nabsent" + id + "\nelse\npresent" + id + ": " + node_type + " := " + json_codec_decode_body(schemas, row.children[0], value, path) + "\npresent" + id + "\nend"
+	end
+	if row.kind == "enum"
+		return "case Node" + id + ".from_raw(" + json_codec_decode_body(schemas, row.children[0], value, path) + ")\nwhen Result::Ok(member" + id + ")\nmember" + id + "\nwhen Result::Err(_enum_error" + id + ")\n" + json_codec_error(path, "unknown raw value for " + row.display) + "end"
+	end
+	if row.kind == "newtype"
+		return node_type + ".new(" + json_codec_decode_body(schemas, row.children[0], value, path) + ")"
+	end
+	mut expected := row.kind
+	mut variant := row.kind
+	if row.kind == "record"
+		expected = row.display
+		variant = "Object"
+	elsif row.kind == "hash"
+		expected = "Object"
+		variant = "Object"
+	elsif row.kind == "array"
+		expected = "Array"
+		variant = "Array"
+	end
+	mut body := "case " + value + "\nwhen JSON::Value::" + variant + "(" + payload + ")\n"
+	if row.kind == "array"
+		child := row.children[0]
+		item := "item" + id
+		position := "position" + id
+		body += "mut output" + id + ": " + node_type + " := []\nmut " + position + " := 0\nwhile " + position + " < " + payload + ".size()\n"
+		body += item + ": Node" + integer_string(child) + " := " + json_codec_decode_body(schemas, child, payload + "[" + position + "]", "(" + path + " + \"/\" + " + position + ".to_s())") + "\n"
+		body += "output" + id + ".push(" + item + ")\n" + position + " += 1\nend\noutput" + id + "\n"
+	elsif row.kind == "hash"
+		child := row.children[0]
+		key := "key" + id
+		child_path := "path" + id
+		body += "mut output" + id + ": " + node_type + " := {}\n" + payload + ".each do |" + key + ", item" + id + "|\n"
+		body += "mut " + child_path + " := " + path + " + \"/\"\nmut position" + id + " := 0\nwhile position" + id + " < " + key + ".size()\ncharacter" + id + " := " + key + "[position" + id + "]\nif character" + id + " == \"~\"\n" + child_path + " += \"~0\"\nelsif character" + id + " == \"/\"\n" + child_path + " += \"~1\"\nelse\n" + child_path + " += character" + id + "\nend\nposition" + id + " += 1\nend\n"
+		body += "decoded" + id + ": Node" + integer_string(child) + " := " + json_codec_decode_body(schemas, child, "item" + id, child_path) + "\noutput" + id + "[" + key + "] = decoded" + id + "\nend\noutput" + id + "\n"
+	elsif row.kind == "record"
+		mut arguments := ""
+		mut field := 0
+		while field < row.children.size()
+			child := row.children[field]
+			wire := json_codec_quote(row.wire_names[field])
+			field_path := "(" + path + " + " + json_codec_quote("/" + json_codec_pointer(row.wire_names[field])) + ")"
+			local := "field" + id + "_" + integer_string(field)
+			body += local + ": Node" + integer_string(child) + " := if " + payload + ".key?(" + wire + ")\n" + json_codec_decode_body(schemas, child, payload + "[" + wire + "]", field_path) + "\nelse\n"
+			if schemas[child].kind == "nullable"
+				body += "nil\n"
+			else
+				body += json_codec_error(field_path, "missing field " + row.wire_names[field])
+			end
+			body += "end\n"
+			if field > 0
+				arguments += ", "
+			end
+			arguments += row.names[field] + ": " + local
+			field += 1
+		end
+		body += node_type + ".new(" + arguments + ")\n"
+	else
+		body += payload + "\n"
+	end
+	if row.kind == "Float"
+		body += "when JSON::Value::Integer(integer" + id + ")\ninteger" + id + ".to_f()\n"
+	end
+	return body + "else\n" + json_codec_error(path, "expected " + expected) + "end"
+end
+
+def json_codec_encode_body(schemas: Array<JsonCodecSchema>, index: Integer, value: String): String
+	row := schemas[index]
+	id := integer_string(index)
+	if row.kind == "time"
+		mut method := "to_s"
+		if row.display == "TimeZone"
+			method = "identifier"
+		end
+		return "JSON::Value::String(" + value + "." + method + "())"
+	end
+	if row.kind == "nullable"
+		return "if " + value + " == nil\nJSON::Value::Null\nelse\n" + json_codec_encode_body(schemas, row.children[0], value) + "\nend"
+	end
+	if row.kind == "enum"
+		return json_codec_encode_body(schemas, row.children[0], value + ".raw_value()")
+	end
+	if row.kind == "newtype"
+		return json_codec_encode_body(schemas, row.children[0], value + ".value()")
+	end
+	if row.kind == "array"
+		return "if true\nmut output" + id + ": Array<JSON::Value> := []\n" + value + ".each do |item" + id + "|\nencoded" + id + ": JSON::Value := " + json_codec_encode_body(schemas, row.children[0], "item" + id) + "\noutput" + id + ".push(encoded" + id + ")\nend\nJSON::Value::Array(output" + id + ")\nelse\nJSON::Value::Null\nend"
+	end
+	if row.kind == "hash"
+		return "if true\nmut output" + id + ": Hash<String, JSON::Value> := {}\n" + value + ".each do |key" + id + ", item" + id + "|\nencoded" + id + ": JSON::Value := " + json_codec_encode_body(schemas, row.children[0], "item" + id) + "\noutput" + id + "[key" + id + "] = encoded" + id + "\nend\nJSON::Value::Object(output" + id + ")\nelse\nJSON::Value::Null\nend"
+	end
+	if row.kind == "record"
+		mut body := "if true\nmut output" + id + ": Hash<String, JSON::Value> := {}\n"
+		mut field := 0
+		while field < row.children.size()
+			# A stable local lets nullable narrowing survive nested field reads.
+			local := "field" + id + "_" + integer_string(field)
+			body += local + " := " + value + "." + row.names[field] + "\nencoded" + id + "_" + integer_string(field) + ": JSON::Value := " + json_codec_encode_body(schemas, row.children[field], local) + "\noutput" + id + "[" + json_codec_quote(row.wire_names[field]) + "] = encoded" + id + "_" + integer_string(field) + "\n"
+			field += 1
+		end
+		return body + "JSON::Value::Object(output" + id + ")\nelse\nJSON::Value::Null\nend"
+	end
+	return "JSON::Value::" + row.kind + "(" + value + ")"
+end
+
+def json_codec_request_body(): String
+	return "content_types := self.headers.values(\"content-type\")\nif content_types.size() == 0\nreturn Result<Target, RequestError>::Err(RequestError::MissingContentType)\nend\nif content_types.size() != 1\nreturn Result<Target, RequestError>::Err(RequestError::DuplicateContentType)\nend\ncontent_type := content_types[0]\nmedia_type := content_type.split(\";\")[0].strip().downcase()\nif media_type != \"application/json\" && !(media_type.start_with?(\"application/\") && media_type.end_with?(\"+json\"))\nreturn Result<Target, RequestError>::Err(RequestError::UnsupportedContentType(content_type))\nend\nbytes := self.body.bytes()\nif !bytes.valid_utf8?()\nreturn Result<Target, RequestError>::Err(RequestError::InvalidUtf8)\nend\ncase JSON.decode<Target>(bytes.to_s())\nwhen Result::Ok(value)\nreturn Result<Target, RequestError>::Ok(value)\nwhen Result::Err(error)\nreturn Result<Target, RequestError>::Err(RequestError::InvalidJson(error))\nend\nend\n"
+end
+
+def json_codec_body(schemas: Array<JsonCodecSchema>, root: Integer, kind: Integer): String
+	if kind == json_provider_decode()
+		return "case parse(source)\nwhen Result::Ok(parsed)\nvalue: Target := " + json_codec_decode_body(schemas, root, "parsed", "\"\"") + "\nreturn Result<Target, JSON::Error>::Ok(value)\nwhen Result::Err(error)\nreturn Result<Target, JSON::Error>::Err(error)\nend\nend\n"
+	end
+	if kind == json_provider_encode()
+		return "encoded: JSON::Value := " + json_codec_encode_body(schemas, root, "value") + "\nreturn stringify(encoded)\nend\n"
+	end
+	if kind == json_provider_request()
+		return json_codec_request_body()
+	end
+	return "headers := Headers.new().with(\"content-type\", \"application/json; charset=utf-8\")\ncase JSON.encode<Target>(value)\nwhen Result::Ok(encoded)\nreturn Response.new(status: status, headers: headers, body: Body.new(encoded.to_bytes()))\nwhen Result::Err(_error)\nreturn Response.new(status: 500, headers: headers, body: Body.new(\"{\\\"error\\\":\\\"internal_server_error\\\"}\".to_bytes()))\nend\nend\n"
+end

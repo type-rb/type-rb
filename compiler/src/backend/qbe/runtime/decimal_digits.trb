@@ -1,0 +1,23 @@
+import { QbeOutput, qbe_output_line } from backend/qbe/output
+
+# Two ASCII bytes for each value from 00 through 99. Both scalar formatters
+# use this same table; loading and storing a pair preserves byte order.
+def emit_decimal_pair_table(mut output: QbeOutput)
+	qbe_output_line(output, "data $trbn_decimal_pairs = align 2 { b \"00010203040506070809101112131415161718192021222324252627282930313233343536373839404142434445464748495051525354555657585960616263646566676869707172737475767778798081828384858687888990919293949596979899\" }\n")
+end
+
+# Inline this loop inside each formatter, avoiding a runtime call. The caller
+# supplies unsigned %decimal_value and %decimal_end, then branches to
+# @decimal_begin. The exit supplies %decimal_start at @decimal_digits_done.
+# Every unsigned word fits 20 digits; both callers reserve 32 stack bytes.
+# Quotient * 100 cannot exceed the current value. Its remainder indexes one
+# table pair, including interior zeros; only the leading group may be one byte.
+def emit_decimal_digits(mut output: QbeOutput)
+	qbe_output_line(output, "@decimal_begin\n jmp @decimal_pairs\n")
+	qbe_output_line(output, "@decimal_pairs\n %decimal_current =l phi @decimal_begin %decimal_value, @decimal_pair %decimal_quotient\n %decimal_cursor =l phi @decimal_begin %decimal_end, @decimal_pair %decimal_next_cursor\n %decimal_leading =w cultl %decimal_current, 100\n jnz %decimal_leading, @decimal_leading, @decimal_pair\n")
+	qbe_output_line(output, "@decimal_pair\n %decimal_quotient =l udiv %decimal_current, 100\n %decimal_hundreds =l mul %decimal_quotient, 100\n %decimal_remainder =l sub %decimal_current, %decimal_hundreds\n %decimal_pair_offset =l shl %decimal_remainder, 1\n %decimal_pair_address =l add $trbn_decimal_pairs, %decimal_pair_offset\n %decimal_pair =w loaduh %decimal_pair_address\n %decimal_next_cursor =l sub %decimal_cursor, 2\n storeh %decimal_pair, %decimal_next_cursor\n jmp @decimal_pairs\n")
+	qbe_output_line(output, "@decimal_leading\n %decimal_two_digits =w cugel %decimal_current, 10\n jnz %decimal_two_digits, @decimal_leading_pair, @decimal_leading_single\n")
+	qbe_output_line(output, "@decimal_leading_pair\n %decimal_leading_offset =l shl %decimal_current, 1\n %decimal_leading_address =l add $trbn_decimal_pairs, %decimal_leading_offset\n %decimal_leading_pair =w loaduh %decimal_leading_address\n %decimal_pair_start =l sub %decimal_cursor, 2\n storeh %decimal_leading_pair, %decimal_pair_start\n jmp @decimal_digits_done\n")
+	qbe_output_line(output, "@decimal_leading_single\n %decimal_digit =l add %decimal_current, 48\n %decimal_digit_byte =w copy %decimal_digit\n %decimal_single_start =l sub %decimal_cursor, 1\n storeb %decimal_digit_byte, %decimal_single_start\n jmp @decimal_digits_done\n")
+	qbe_output_line(output, "@decimal_digits_done\n %decimal_start =l phi @decimal_leading_pair %decimal_pair_start, @decimal_leading_single %decimal_single_start\n")
+end

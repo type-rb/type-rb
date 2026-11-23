@@ -1,0 +1,158 @@
+import { LambdaParameter, LambdaSyntax, callable_parts, callable_type } from frontend/types/callable_types
+import { generic_application, generic_arguments, generic_base } from frontend/types/generic_arguments
+import { GlobalDeclaration } from frontend/types/global_model
+import { literal_type_base } from frontend/types/literal_types
+import { nullable_element, nullable_type } from frontend/types/nullable_types
+import { union_parts, union_type } from frontend/types/union_types
+import { resolve_type_name } from frontend/resolution/type_resolution
+import { ProjectedType } from state/source_state
+import { CompilerState, diagnostic, find_module, has_diagnostic, terminal_token } from state/state
+import { load_integer, load_string, store_string } from support/storage
+
+def projected_type_binding(bindings: Array<ProjectedType>, name: String): Integer
+	mut index := 0
+	while index < bindings.size()
+		if bindings[index].name == name
+			return index
+		end
+		index += 1
+	end
+	return -1
+end
+
+# Descriptor arguments are finite checked type expressions. Recursive storage
+# edges stay in the ordinary nominal resolver, with its existing depth checks.
+def projected_type_name(mut state: CompilerState, name: String, bindings: Array<ProjectedType>, mut resolved: Array<String>, mut active: Array<Integer>): String
+	binding := projected_type_binding(bindings, name)
+	if binding >= 0
+		if active[binding] == 2
+			return resolved[binding]
+		end
+		if active[binding] == 1
+			diagnostic(state, "TRBN4003", state.nominal.projected_type_lines[0], "cyclic retained type descriptor")
+			return ""
+		end
+		active[binding] = 1
+		row := bindings[binding]
+		owner := find_module(state, row.module_name)
+		mut arguments: Array<String> := []
+		row.arguments.each do |argument|
+			arguments.push(projected_type_name(state, argument, bindings, resolved, active))
+		end
+		mut target := row.declaration
+		if arguments.size() > 0
+			target = generic_application(target, arguments)
+		end
+		mut result := ""
+		if owner >= 0 && !has_diagnostic(state)
+			previous_owner := state.global_bindings.declaration_owner[0]
+			state.global_bindings.declaration_owner[0] = ""
+			result = resolve_type_name(state, owner, target, false)
+			state.global_bindings.declaration_owner[0] = previous_owner
+		end
+		if result == "" && !has_diagnostic(state)
+			diagnostic(state, "TRBN4003", state.nominal.projected_type_lines[0], "retained type declaration is no longer available")
+		end
+		active[binding] = 2
+		resolved[binding] = result
+		return result
+	end
+	if literal_type_base(name) != ""
+		return name
+	end
+	alternatives := union_parts(name)
+	if alternatives.size() > 0
+		mut values: Array<String> := []
+		alternatives.each do |alternative|
+			values.push(projected_type_name(state, alternative, bindings, resolved, active))
+		end
+		return union_type(values)
+	end
+	optional := nullable_element(name)
+	if optional != ""
+		return nullable_type(projected_type_name(state, optional, bindings, resolved, active))
+	end
+	callable := callable_parts(name)
+	if callable.size() > 0
+		mut parameters: Array<String> := []
+		mut index := 1
+		while index < callable.size()
+			parameters.push(projected_type_name(state, callable[index], bindings, resolved, active))
+			index += 1
+		end
+		return callable_type(parameters, projected_type_name(state, callable[0], bindings, resolved, active))
+	end
+	parts := generic_arguments(name)
+	if parts.size() > 0
+		mut arguments: Array<String> := []
+		parts.each do |part|
+			arguments.push(projected_type_name(state, part, bindings, resolved, active))
+		end
+		return generic_application(generic_base(name), arguments)
+	end
+	return name
+end
+
+def projected_type_origin(state: CompilerState, source_id: Integer, line: Integer): Boolean
+	if source_id != state.module_graph.entry_module[0] || state.nominal.projected_type_lines[0] < 0
+		return false
+	end
+	if line < state.nominal.projected_type_lines[0]
+		return false
+	end
+	return line < state.nominal.projected_type_lines[1]
+end
+
+# Rebind only the compiler-owned witness span. The authored token stream keeps
+# ordinary name resolution even when an identifier has the same spelling.
+def resolve_projected_types(mut state: CompilerState, bindings: Array<ProjectedType>): Boolean
+	if bindings.size() == 0
+		return true
+	end
+	if state.module_graph.entry_module[0] != 0
+		diagnostic(state, "TRBN4003", 1, "retained type projections require the leading entry module")
+		return false
+	end
+	mut resolved: Array<String> := []
+	mut active: Array<Integer> := []
+	bindings.each do |_binding|
+		resolved.push("")
+		active.push(0)
+	end
+	state.source_tokens.type_names.each do |annotation|
+		if projected_type_origin(state, annotation.source_id, load_integer(state.source_tokens.token_lines, annotation.origin)) && !has_diagnostic(state)
+			name := load_string(state.source_tokens.token_texts, annotation.origin)
+			projected := projected_type_name(state, name, bindings, resolved, active)
+			if projected != name
+				store_string(state.source_tokens.token_texts, annotation.origin, projected)
+			end
+		end
+	end
+	mut index := 0
+	while !terminal_token(state, index)
+		index += 1
+	end
+	entry_finish := index
+	index = 0
+	while index < state.callables.lambdas.size() && !has_diagnostic(state)
+		row := state.callables.lambdas[index]
+		if row.origin < entry_finish && projected_type_origin(state, state.module_graph.entry_module[0], load_integer(state.source_tokens.token_lines, row.origin))
+			mut parameters: Array<LambdaParameter> := []
+			row.parameters.each do |parameter|
+				parameters.push(LambdaParameter.new(name: parameter.name, type_name: projected_type_name(state, parameter.type_name, bindings, resolved, active), origin: parameter.origin, mutable: parameter.mutable))
+			end
+			state.callables.lambdas[index] = LambdaSyntax.new(origin: row.origin, parameters: parameters, result_type: projected_type_name(state, row.result_type, bindings, resolved, active), body_start: row.body_start, body_finish: row.body_finish, finish: row.finish)
+		end
+		index += 1
+	end
+	index = 0
+	while index < state.global_bindings.globals.size() && !has_diagnostic(state)
+		row := state.global_bindings.globals[index]
+		if projected_type_origin(state, row.source_id, row.line)
+			annotation := projected_type_name(state, row.annotation, bindings, resolved, active)
+			state.global_bindings.globals[index] = GlobalDeclaration.new(constant: row.constant, mutable: row.mutable, name: row.name, source_id: row.source_id, line: row.line, origin: row.origin, start: row.start, finish: row.finish, annotation: annotation)
+		end
+		index += 1
+	end
+	return !has_diagnostic(state)
+end

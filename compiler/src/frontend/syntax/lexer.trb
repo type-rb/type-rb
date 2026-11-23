@@ -1,0 +1,580 @@
+import { token_kind_attribute, token_kind_end_of_input, token_kind_end_of_module, token_kind_identifier, token_kind_interpolation, token_kind_newline, token_kind_number, token_kind_string, token_kind_symbol } from state/token_kinds
+import { store_fused_literal } from state/source_state
+import { decode_escape } from frontend/syntax/string_escapes
+import { compiler_string_bytes } from support/compiler_bytes
+import { unicode_identifier_part, unicode_identifier_start, unicode_identifier_upper } from support/unicode_identifiers
+import { CompilerState, add_module, diagnostic, has_diagnostic } from state/state
+import { load_integer, load_string, store_integer, store_string } from support/storage
+
+# The source body supports recovery; the compiler runtime adapts this declaration.
+def compiler_source_slice(source: String, start: Integer, finish: Integer): String
+	mut value := ""
+	mut index := start
+	while index < finish
+		value += source[index]
+		index += 1
+	end
+	return value
+end
+
+# The reference frontend validates source encoding before recovery. Ordinary
+# compilers adapt this identity to byte validation before decoding any token.
+def compiler_source_is_utf8(_source: String): Boolean
+	return true
+end
+
+def character_in(character: String, characters: String): Boolean
+	mut index := 0
+	while index < characters.size()
+		if characters[index] == character
+			return true
+		end
+		index += 1
+	end
+	return false
+end
+
+def number_character(character: String): Boolean
+	if character_in(character, "0123456789")
+		return true
+	end
+	return character == "_"
+end
+
+def push_token(mut state: CompilerState, kind: Integer, text: String, line: Integer)
+	mut index := state.source_tokens.token_count[0]
+	# The following token distinguishes a complete right literal from a postfix.
+	if index >= 3
+		if load_integer(state.source_tokens.token_kinds, index - 3) == token_kind_string()
+			if load_integer(state.source_tokens.token_kinds, index - 2) == token_kind_symbol()
+				if load_string(state.source_tokens.token_texts, index - 2) == "+"
+					if load_integer(state.source_tokens.token_kinds, index - 1) == token_kind_string()
+						if text != "."
+							if text != "["
+								combined := load_string(state.source_tokens.token_texts, index - 3) + load_string(state.source_tokens.token_texts, index - 1)
+								store_string(state.source_tokens.token_texts, index - 3, combined)
+								store_fused_literal(state.source_tokens, index - 3, 1)
+								index -= 2
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+	store_fused_literal(state.source_tokens, index, 0)
+	store_integer(state.source_tokens.token_kinds, index, kind)
+	store_string(state.source_tokens.token_texts, index, text)
+	store_integer(state.source_tokens.token_lines, index, line)
+	store_integer(state.source_tokens.token_columns, index, state.source_tokens.lexer_column[0])
+	state.source_tokens.token_count[0] = index + 1
+	return
+end
+
+def scan_identifier(
+		mut state: CompilerState,
+		source: String,
+		source_length: Integer,
+		mut position: Array<Integer>,
+		line: Integer,
+	)
+	start := position[0]
+	mut scanning := true
+	while scanning
+		if position[0] >= source_length
+			scanning = false
+		else
+			if character_in(
+					source[position[0]],
+					"0123456789fretnmoidupglsavchbyxkwqzjABCDEFGHIJKLMNOPQRSTUVWXYZ_@",
+				) || unicode_identifier_part(source[position[0]])
+				position[0] += 1
+			else
+				scanning = false
+			end
+		end
+	end
+	if position[0] < source_length
+		if !character_in(source[start], "ABCDEFGHIJKLMNOPQRSTUVWXYZ") && !unicode_identifier_upper(source[start])
+			if source[position[0]] == "?" || source[position[0]] == "!"
+				position[0] += 1
+			end
+		end
+	end
+	mut kind := token_kind_identifier()
+	if source[start] == "@"
+		kind = token_kind_attribute()
+	end
+	push_token(state, kind, compiler_source_slice(source, start, position[0]), line)
+	return
+end
+
+def scan_number(
+		mut state: CompilerState,
+		source: String,
+		source_length: Integer,
+		mut position: Array<Integer>,
+		line: Integer,
+	)
+	start := position[0]
+	mut scanning := true
+	while scanning
+		if position[0] >= source_length
+			scanning = false
+		else
+			if number_character(source[position[0]])
+				position[0] += 1
+			else
+				scanning = false
+			end
+		end
+	end
+	if position[0] + 1 < source_length
+		if source[position[0]] == "."
+			if character_in(source[position[0] + 1], "0123456789")
+				position[0] += 1
+				scanning = true
+				while scanning
+					if position[0] >= source_length
+						scanning = false
+					else
+						if number_character(source[position[0]])
+							position[0] += 1
+						else
+							scanning = false
+						end
+					end
+				end
+			end
+		end
+	end
+	push_token(state, token_kind_number(), compiler_source_slice(source, start, position[0]), line)
+	return
+end
+
+# Locate embedded expressions without treating quoted braces as delimiters.
+def interpolation_end(source: String, source_length: Integer, mut index: Integer): Integer
+	mut depth := 1
+	while index < source_length
+		character := source[index]
+		if character == "\"" || character == "'"
+			mut nested_interpolation := [false]
+			index = interpolation_quote_end(source, source_length, index + 1, character, nested_interpolation)
+			if index < 0
+				return -1
+			end
+		else
+			if character == "{"
+				depth += 1
+			end
+			if character == "}"
+				depth -= 1
+				if depth == 0
+					return index
+				end
+			end
+			if character == "#"
+				index = skip_comment(source, source_length, index)
+			end
+		end
+		index += 1
+	end
+	return -1
+end
+
+def interpolation_quote_end(source: String, source_length: Integer, mut index: Integer, quote: String, mut interpolated: Array<Boolean>): Integer
+	while index < source_length
+		character := source[index]
+		if character == "\\"
+			index += 1
+		else
+			if character == quote
+				return index
+			end
+			mut opening := character == "#"
+			if quote != "\""
+				opening = false
+			end
+			if opening
+				if index + 1 < source_length
+					if source[index + 1] == "{"
+						interpolated[0] = true
+						index = interpolation_end(source, source_length, index + 2)
+						if index < 0
+							return -1
+						end
+					end
+				end
+			end
+		end
+		index += 1
+	end
+	return -1
+end
+
+# Normalize interpolation to grouped String concatenation before checking.
+# Each embedded expression is evaluated once by the shared ordinary pipeline.
+def scan_string(
+		mut state: CompilerState,
+		source: String,
+		source_length: Integer,
+		mut position: Array<Integer>,
+		mut line: Integer,
+		interpolation: Boolean,
+	): Integer
+	start_line := line
+	quote := source[position[0]]
+	position[0] += 1
+	mut interpolated := false
+	mut text := ""
+	mut chunk_start := position[0]
+	mut scanning := true
+	mut closed := false
+	while scanning
+		if position[0] >= source_length
+			scanning = false
+		else
+			current := source[position[0]]
+			if current == quote
+				text += compiler_source_slice(source, chunk_start, position[0])
+				closed = true
+				scanning = false
+				position[0] += 1
+			else
+				if current == "\n"
+					diagnostic(state, "TRBN4001", line, "unterminated String literal")
+					scanning = false
+				else
+					if current == "\\"
+						text += compiler_source_slice(source, chunk_start, position[0])
+						position[0] += 1
+						if position[0] >= source_length
+							diagnostic(state, "TRBN4001", line, "unterminated String escape")
+							scanning = false
+						else
+							mut escaped_hash := source[position[0]] == "#"
+							if quote != "\""
+								escaped_hash = false
+							end
+							if escaped_hash
+								text += "#"
+								position[0] += 1
+							else
+								text += decode_escape(state, source, position, line, quote)
+							end
+							if has_diagnostic(state)
+								return line - start_line
+							end
+							chunk_start = position[0]
+						end
+					else
+						if current == "#"
+							if position[0] + 1 < source_length
+								mut opening := source[position[0] + 1] == "{"
+								if opening
+									opening = interpolation
+								end
+								if opening
+									finish := interpolation_end(source, source_length, position[0] + 2)
+									if finish < 0
+										diagnostic(state, "TRBN4001", line, "unterminated String interpolation")
+										scanning = false
+									else
+										if finish == position[0] + 2
+											position[0] = finish + 1
+										else
+											if !interpolated
+												push_token(state, token_kind_symbol(), "(", start_line)
+												interpolated = true
+											end
+											text += compiler_source_slice(source, chunk_start, position[0])
+											push_token(state, token_kind_string(), text, line)
+											push_token(state, token_kind_symbol(), "+", line)
+											push_token(state, token_kind_symbol(), "(", line)
+											first_token := state.source_tokens.token_count[0]
+											inner := compiler_source_slice(source, position[0] + 2, finish)
+											mut first := 0
+											mut last := inner.size()
+											mut inner_line := line
+											mut trim := true
+											while trim
+												if first >= last
+													trim = false
+												else
+													if character_in(inner[first], " \t\r\n")
+														if inner[first] == "\n"
+															inner_line += 1
+														end
+														first += 1
+													else
+														trim = false
+													end
+												end
+											end
+											trim = true
+											while trim
+												if last <= first
+													trim = false
+												else
+													if character_in(inner[last - 1], " \t\r\n")
+														last -= 1
+													else
+														trim = false
+													end
+												end
+											end
+											outer_column := state.source_tokens.lexer_column[0]
+											mut inner_column := 1
+											mut preceding := position[0] + 1 + first
+											while preceding >= 0 && source[preceding] != "\n"
+												inner_column += compiler_string_bytes(source[preceding]).size()
+												preceding -= 1
+											end
+											lex_source(state, compiler_source_slice(inner, first, last), token_kind_end_of_input())
+											state.source_tokens.lexer_column[0] = outer_column
+											state.source_tokens.token_count[0] = state.source_tokens.token_count[0] - 1
+											mut token := first_token
+											while token < state.source_tokens.token_count[0]
+												if load_integer(state.source_tokens.token_lines, token) == 1
+													store_integer(state.source_tokens.token_columns, token, load_integer(state.source_tokens.token_columns, token) + inner_column - 1)
+												end
+												store_integer(state.source_tokens.token_lines, token, load_integer(state.source_tokens.token_lines, token) + inner_line - 1)
+												token += 1
+											end
+											if has_diagnostic(state)
+												store_integer(state.diagnostics.lines, 0, load_integer(state.diagnostics.lines, 0) + inner_line - 1)
+												return line - start_line
+											end
+											mut character_index := 0
+											while character_index < inner.size()
+												if inner[character_index] == "\n"
+													line += 1
+												end
+												character_index += 1
+											end
+											push_token(state, token_kind_symbol(), ")", line)
+											push_token(state, token_kind_symbol(), "+", line)
+											position[0] = finish + 1
+											chunk_start = position[0]
+											text = ""
+										end
+									end
+								else
+									position[0] += 1
+								end
+							else
+								position[0] += 1
+							end
+						else
+							position[0] += 1
+						end
+					end
+				end
+			end
+		end
+	end
+	if closed
+		push_token(state, token_kind_string(), text, line)
+		if interpolated
+			push_token(state, token_kind_symbol(), ")", line)
+		end
+	else
+		if !has_diagnostic(state)
+			diagnostic(state, "TRBN4001", line, "unterminated String literal")
+		end
+	end
+	return line - start_line
+end
+
+# A quoted Symbol contains literal interpolation spelling. Preserve ambiguous
+# quotes until the expression parser chooses String or Symbol interpretation.
+# Ordinary quotes without interpolation retain the existing literal token.
+def scan_quoted_token(mut state: CompilerState, source: String, source_length: Integer, mut position: Array<Integer>, line: Integer): Integer
+	if source[position[0]] == "'"
+		return scan_string(state, source, source_length, position, line, false)
+	end
+	# The delimiter scan already recognizes unescaped interpolation. Ordinary
+	# quoted strings can go straight to decoding without another scalar scan.
+	mut interpolated := [false]
+	finish := interpolation_quote_end(source, source_length, position[0] + 1, "\"", interpolated)
+	if finish < 0 || !interpolated[0]
+		return scan_string(state, source, source_length, position, line, true)
+	end
+	mut index := position[0] + 1
+	mut lines := 0
+	while index < finish
+		character := source[index]
+		if character == "\\"
+			index += 1
+		elsif character == "\n"
+			lines += 1
+		end
+		index += 1
+	end
+	push_token(state, token_kind_interpolation(), compiler_source_slice(source, position[0], finish + 1), line)
+	position[0] = finish + 1
+	return lines
+end
+
+def two_character_symbol(pair: String): Boolean
+	if pair == "->" || pair == "||" || pair == "&." || pair == "&&" || pair == "::" || pair == ":="
+		return true
+	end
+	if pair == "==" || pair == "!=" || pair == "<=" || pair == ">=" || pair == "=>" || pair == ".."
+		return true
+	end
+	if pair == "+=" || pair == "-=" || pair == "*=" || pair == "/=" || pair == "%=" || pair == "**"
+		return true
+	end
+	if pair == "<<" || pair == ">>" || pair == "=~" || pair == "!~"
+		return true
+	end
+	return false
+end
+
+def scan_symbol(
+		mut state: CompilerState,
+		source: String,
+		source_length: Integer,
+		mut position: Array<Integer>,
+		line: Integer,
+	)
+	character := source[position[0]]
+	mut symbol := character
+	if position[0] + 2 < source_length
+		triple := compiler_source_slice(source, position[0], position[0] + 3)
+		if triple == "..." || triple == "<=>" || triple == "**=" || triple == "&&=" || triple == "||="
+			symbol = triple
+		end
+	end
+	if symbol.size() == 1 && position[0] + 1 < source_length
+		pair := compiler_source_slice(source, position[0], position[0] + 2)
+		if two_character_symbol(pair)
+			symbol = pair
+		end
+	end
+	mut supported := symbol.size() >= 2
+	if !supported
+		supported = character_in(character, "()[]{}:,.+-*/%<>=!|?&^~$\\")
+	end
+	if supported
+		push_token(state, token_kind_symbol(), symbol, line)
+	else
+		diagnostic(state, "TRBN4001", line, "unsupported source character " + character)
+	end
+	position[0] += symbol.size()
+	return
+end
+
+def skip_comment(source: String, source_length: Integer, mut index: Integer): Integer
+	while index < source_length && source[index] != "\n"
+		index += 1
+	end
+	return index
+end
+
+def lex_source(mut state: CompilerState, source: String, terminal_kind: Integer): Boolean
+	mut offsets: Array<Integer> := []
+	return lex_source_offsets(state, source, terminal_kind, offsets, false)
+end
+
+# An editor needs authored scalar offsets to convert the lexer's diagnostic
+# columns to UTF-16. Ordinary compilation retains no offset table.
+def lex_source_offsets(mut state: CompilerState, source: String, terminal_kind: Integer, mut offsets: Array<Integer>, capture: Boolean): Boolean
+	if !compiler_source_is_utf8(source)
+		diagnostic(state, "TRBN4001", 1, "source is not valid UTF-8")
+		push_token(state, terminal_kind, "", 1)
+		return false
+	end
+	source_length := source.size()
+	mut position := [0]
+	mut line := 1
+	mut column := 1
+	mut character := ""
+	while position[0] < source_length
+		start := position[0]
+		start_line := line
+		state.source_tokens.lexer_column[0] = column
+		character = source[position[0]]
+		if character == " "
+			position[0] += 1
+		else
+			if character == "\t"
+				position[0] += 1
+			else
+				if character == "\r"
+					position[0] += 1
+				else
+					if character == "\n" || character == ";"
+						push_token(state, token_kind_newline(), character, line)
+						if character == "\n"
+							line += 1
+						end
+						position[0] += 1
+					else
+						if character == "#"
+							position[0] = skip_comment(source, source_length, position[0])
+						else
+							if character_in(
+									character,
+									"fretnmoidupglsavchbyxkwqzjABCDEFGHIJKLMNOPQRSTUVWXYZ_@",
+								) || unicode_identifier_start(character)
+								scan_identifier(state, source, source_length, position, line)
+							else
+								if character_in(character, "0123456789")
+									scan_number(state, source, source_length, position, line)
+								else
+									if character == "\"" || character == "'"
+										line += scan_quoted_token(state, source, source_length, position, line)
+									else
+										scan_symbol(state, source, source_length, position, line)
+									end
+								end
+							end
+						end
+					end
+				end
+			end
+		end
+		if capture
+			while offsets.size() < state.source_tokens.token_count[0]
+				offsets.push(start)
+			end
+		end
+		mut remaining := start
+		if line != start_line
+			mut scanned := start
+			while scanned < position[0]
+				if source[scanned] == "\n"
+					remaining = scanned + 1
+					column = 1
+				end
+				scanned += 1
+			end
+		end
+		# The pinned lexer advances identifiers by scalar, but quoted tokens and
+		# comments by byte. Preserve that mixed origin contract until it changes.
+		if character == "\"" || character == "'" || character == "#"
+			column += compiler_string_bytes(compiler_source_slice(source, remaining, position[0])).size()
+		else
+			column += position[0] - remaining
+		end
+	end
+	state.source_tokens.lexer_column[0] = column
+	push_token(state, terminal_kind, "", line)
+	return !has_diagnostic(state)
+end
+
+def lex_module(mut state: CompilerState, source: String, module_index: Integer): Boolean
+	state.module_graph.active_module[0] = module_index
+	return lex_source(state, source, token_kind_end_of_module())
+end
+
+def lex(mut state: CompilerState, source: String): Boolean
+	if state.module_graph.module_count[0] == 0
+		add_module(state, "entry", "")
+	end
+	state.module_graph.entry_module[0] = 0
+	state.module_graph.active_module[0] = 0
+	return lex_source(state, source, token_kind_end_of_input())
+end

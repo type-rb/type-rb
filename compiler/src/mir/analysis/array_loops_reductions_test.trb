@@ -1,0 +1,155 @@
+import { check, emit_qbe } from compiler
+import { lex } from frontend/syntax/lexer
+import { mir_function_index } from mir/model/module
+import { verify_mir } from mir/verify/module
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { CompilerState, compiler_new } from state/state
+import { describe, expect, test } from trb/std/test
+import { output_source } from testing/compiler
+
+describe("Native TypeRB frontend") do
+	test("lowers one complete Array induction helper through verified MIR") do
+		source := "def scan(values: Array<Integer>)\n\tmut index := 0\n\twhile index < values.size()\n\t\t_value := values[index]\n\t\tindex += 1\n\tend\n\treturn\nend\n\ndef main()\n\tscan([10, 20])\n\treturn\nend\n"
+		mut state := compiler_new(source.size() + 1)
+		expect(lex(state, source)).to_be_true()
+		expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		function_index := mir_function_index(state.scalar_mir, 0)
+		expect(function_index >= 0).to_be_true()
+		expect(state.scalar_mir.functions[function_index].kind).to_equal(3)
+		expect(state.scalar_mir.array_loops[function_index].size()).to_equal(1)
+		qbe := output_source(emit_qbe(state))
+		expect(qbe.include?("%mir_array_data")).to_be_true()
+		expect(qbe.include?("%mir_array_length")).to_be_true()
+	end
+
+	test("lowers an Integer reduction through general block parameters") do
+		source := "def sum(values: Array<Integer>): Integer\n\tmut index := 0\n\tmut total := 0\n\twhile index < values.size()\n\t\ttotal += values[index]\n\t\tindex += 1\n\tend\n\treturn total\nend\n\ndef main()\n\treturn\nend\n"
+		mut state := compiler_new(source.size() + 1)
+		expect(lex(state, source)).to_be_true()
+		expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		function_index := mir_function_index(state.scalar_mir, 0)
+		expect(function_index >= 0).to_be_true()
+		expect(state.scalar_mir.functions[function_index].kind).to_equal(3)
+		expect(state.scalar_mir.array_loops[function_index].size()).to_equal(1)
+		qbe := output_source(emit_qbe(state))
+		expect(qbe.include?("%mir_array_data")).to_be_true()
+		expect(qbe.include?("%mir_array_length")).to_be_true()
+	end
+
+	test("lowers one complete Array Float reduction through verified MIR") do
+		source := "def sum(values: Array<Float>): Float\n\tmut index := 0\n\tmut total: Float := 0.0\n\twhile index < values.size()\n\t\ttotal += values[index]\n\t\tindex += 1\n\tend\n\treturn total\nend\n\ndef main()\n\treturn\nend\n"
+		mut state := compiler_new(source.size() + 1)
+		expect(lex(state, source)).to_be_true()
+		expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		function_index := mir_function_index(state.scalar_mir, 0)
+		expect(function_index >= 0).to_be_true()
+		expect(state.scalar_mir.functions[function_index].kind).to_equal(3)
+		expect(state.scalar_mir.array_loops[function_index].size()).to_equal(1)
+		qbe := output_source(emit_qbe(state))
+		expect(qbe.include?("%mir_array_data")).to_be_true()
+		expect(qbe.include?("%mir_array_length")).to_be_true()
+	end
+
+	test("admits nonzero and subtracting Float reductions through general MIR") do
+		source := "def nonzero(values: Array<Float>): Float\n\tmut index := 0\n\tmut total := 0.5\n\twhile index < values.size()\n\t\ttotal += values[index]\n\t\tindex += 1\n\tend\n\treturn total\nend\n\ndef subtracting(values: Array<Float>): Float\n\tmut index := 0\n\tmut total := 0.0\n\twhile index < values.size()\n\t\ttotal -= values[index]\n\t\tindex += 1\n\tend\n\treturn total\nend\n\ndef main()\n\treturn\nend\n"
+		mut state := compiler_new(source.size() + 1)
+		expect(lex(state, source)).to_be_true()
+		expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_true()
+		expect(state.scalar_mir.functions[mir_function_index(state.scalar_mir, 0)].kind).to_equal(3)
+		expect(state.scalar_mir.functions[mir_function_index(state.scalar_mir, 1)].kind).to_equal(3)
+	end
+
+	test("retains bounds checks after a loop index changes before its access") do
+		source := "def reordered(input: Array<Integer>, unused: Integer): Integer\n\tmut total := 0\n\tmut index := 0\n\twhile index < input.size()\n\t\tindex += 1\n\t\ttotal += input[index]\n\tend\n\treturn total\nend\n\ndef main()\n\treturn\nend\n"
+		mut state := compiler_new(source.size() + 1)
+		expect(lex(state, source)).to_be_true()
+		expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_true()
+
+		qbe := output_source(emit_qbe(state))
+		expect(state.scalar_mir.functions[mir_function_index(state.scalar_mir, 0)].kind).to_equal(3)
+		expect(qbe.include?("call $trbn_fail(l $trbn_bounds_error, l 30)")).to_be_true()
+	end
+
+	test("retains bounds checks when the loop condition extends the Array length") do
+		source := "def extended(input: Array<Integer>, unused: Integer): Integer\n\tmut total := 0\n\tmut index := 0\n\twhile index < input.size() + 1\n\t\ttotal += input[index]\n\t\tindex += 1\n\tend\n\treturn total\nend\n\ndef main()\n\treturn\nend\n"
+		mut state := compiler_new(source.size() + 1)
+		expect(lex(state, source)).to_be_true()
+		expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_true()
+
+		qbe := output_source(emit_qbe(state))
+		expect(state.scalar_mir.functions[mir_function_index(state.scalar_mir, 0)].kind).to_equal(3)
+		expect(qbe.include?("call $trbn_fail(l $trbn_bounds_error, l 30)")).to_be_true()
+	end
+
+	test("retains bounds checks when a later update invalidates the induction proof") do
+		source := "def reset(input: Array<Integer>, unused: Integer): Integer\n\tmut total := 0\n\tmut index := 0\n\twhile index < input.size()\n\t\ttotal += input[index]\n\t\tindex -= 1\n\tend\n\treturn total\nend\n\ndef main()\n\treturn\nend\n"
+		mut state := compiler_new(source.size() + 1)
+		expect(lex(state, source)).to_be_true()
+		expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_true()
+
+		qbe := output_source(emit_qbe(state))
+		expect(state.scalar_mir.functions[mir_function_index(state.scalar_mir, 0)].kind).to_equal(3)
+		expect(qbe.include?("call $trbn_fail(l $trbn_bounds_error, l 30)")).to_be_true()
+	end
+
+	test("admits varied Integer reductions through general MIR") do
+		source := "def nonzero(values: Array<Integer>): Integer\n\tmut index := 0\n\tmut total := 1\n\twhile index < values.size()\n\t\ttotal += values[index]\n\t\tindex += 1\n\tend\n\treturn total\nend\n\ndef reordered(values: Array<Integer>): Integer\n\tmut total := 0\n\tmut index := 0\n\twhile index < values.size()\n\t\tindex += 1\n\t\ttotal += values[index - 1]\n\tend\n\treturn total\nend\n\ndef subtracting(values: Array<Integer>): Integer\n\tmut index := 0\n\tmut total := 0\n\twhile index < values.size()\n\t\ttotal -= values[index]\n\t\tindex += 1\n\tend\n\treturn total\nend\n\ndef main()\n\treturn\nend\n"
+		mut state := compiler_new(source.size() + 1)
+		expect(lex(state, source)).to_be_true()
+		expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_true()
+		expect(state.scalar_mir.functions[mir_function_index(state.scalar_mir, 0)].kind).to_equal(3)
+		expect(state.scalar_mir.functions[mir_function_index(state.scalar_mir, 1)].kind).to_equal(3)
+		expect(state.scalar_mir.functions[mir_function_index(state.scalar_mir, 2)].kind).to_equal(3)
+	end
+
+	test("admits nonunit and branching Array loops through general MIR") do
+		source := "def non_unit(values: Array<Integer>)\n\tmut index := 0\n\twhile index < values.size()\n\t\t_value := values[index]\n\t\tindex += 2\n\tend\n\treturn\nend\n\ndef nonadjacent(values: Array<Integer>)\n\tmut index := 0\n\t_marker := 0\n\twhile index < values.size()\n\t\t_value := values[index]\n\t\tindex += 1\n\tend\n\treturn\nend\n\ndef nested(values: Array<Integer>)\n\tmut index := 0\n\twhile index < values.size()\n\t\tif true\n\t\t\t_value := values[index]\n\t\tend\n\t\tindex += 1\n\tend\n\treturn\nend\n\ndef main()\n\treturn\nend\n"
+		mut state := compiler_new(source.size() + 1)
+		expect(lex(state, source)).to_be_true()
+		expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_true()
+		expect(state.scalar_mir.functions[mir_function_index(state.scalar_mir, 0)].kind).to_equal(3)
+		expect(state.scalar_mir.functions[mir_function_index(state.scalar_mir, 1)].kind).to_equal(3)
+		expect(state.scalar_mir.functions[mir_function_index(state.scalar_mir, 2)].kind).to_equal(3)
+		# A non-unit loop caches stable headers without proving its indexes.
+		expect(state.scalar_mir.array_loops[0].size()).to_equal(1)
+		expect(state.scalar_mir.array_loops[0][0].accesses.size()).to_equal(0)
+		expect(state.scalar_mir.array_loops[1].size()).to_equal(1)
+		expect(state.scalar_mir.array_loops[2].size()).to_equal(1)
+	end
+
+	test("eliminates scalar loop local stack slots through MIR block arguments") do
+		source := "def main()\n\tmut index := 0\n\twhile index < 2\n\t\trepeated := index\n\t\tindex = repeated + 1\n\tend\n\treturn\nend\n"
+		mut state := compiler_new(source.size() + 1)
+		expect(lex(state, source)).to_be_true()
+		expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_true()
+		qbe := output_source(emit_qbe(state))
+		expect(mir_function_index(state.scalar_mir, 0) >= 0).to_be_true()
+		expect(qbe.include?("function $trbnf0() {\n@start\n\tjmp @mir_0")).to_be_true()
+		expect(qbe.include?("%v0 =l alloc8 8")).to_be_false()
+
+	end
+end

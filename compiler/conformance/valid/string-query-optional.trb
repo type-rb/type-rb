@@ -1,0 +1,33 @@
+def show(value: Integer?)
+	if value == nil
+		puts("nil")
+	else
+		puts(value)
+	end
+end
+
+def probe()
+	mut calls := 0
+	part := fn(): String
+		calls += 1
+		return "😀"
+	end
+	absent: String? := nil
+	missing := absent&.index(part())
+	show(missing)
+	puts(calls)
+	present: String? := "A😀B"
+	show(present&.index(part()))
+	show(present&.rindex("missing"))
+	matched := present&.include?(part())
+	if matched != nil
+		puts(matched)
+	end
+	puts(calls)
+	empty := absent&.empty?()
+	puts(empty == nil)
+end
+
+def main()
+	probe()
+end

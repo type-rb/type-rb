@@ -1,0 +1,112 @@
+import { native_write_text } from support/file_system
+import trb/std/process
+import trb/std/result
+
+record MatchedGoDriverError
+	phase: String
+	message: String
+	status: Integer? = nil
+	stdout: String = ""
+	stderr: String = ""
+end
+
+def matched_go_empty_main_source(): String
+	return "def main()\n\treturn\nend\n"
+end
+
+def matched_go_driver_import(): String
+	return "import trb/std/process\n"
+end
+
+def matched_go_driver_source(): String
+	mut source := "def main()\n"
+	source += "\targuments := Process.argv()\n"
+	source += "\tif arguments.size() != 3 || arguments[0] != \"--source-content\"\n"
+	source += "\t\tputs(\"usage: compiler --source-content MODE SOURCE\")\n"
+	source += "\t\treturn\n"
+	source += "\tend\n"
+	source += "\tcompiler_main(arguments[2], arguments[1], false)\n"
+	source += "\treturn\n"
+	source += "end\n"
+	return source
+end
+
+def matched_go_source(source: String): Result<String, String>
+	empty_main := matched_go_empty_main_source()
+	if !source.end_with?(empty_main)
+		return Result<String, String>::Err(
+			"compiler source must end with the exact empty main() driver",
+		)
+	end
+	core := source.slice(0...(source.size() - empty_main.size()))
+	return Result<String, String>::Ok(
+		matched_go_driver_import() + core + matched_go_driver_source(),
+	)
+end
+
+def matched_go_recover_canonical_source(transformed: String): Result<String, String>
+	import_source := matched_go_driver_import()
+	driver_source := matched_go_driver_source()
+	if !transformed.start_with?(import_source)
+		return Result<String, String>::Err("matched source is missing the argv import")
+	end
+	if !transformed.end_with?(driver_source)
+		return Result<String, String>::Err("matched source is missing the exact argv driver")
+	end
+	core := transformed.slice(import_source.size()...(transformed.size() - driver_source.size()))
+	return Result<String, String>::Ok(core + matched_go_empty_main_source())
+end
+
+def build_matched_go_compiler(
+		reference_trb: String,
+		compiler_source: String,
+		workspace: String,
+	): Result<String, MatchedGoDriverError>
+	matched_source := case matched_go_source(compiler_source)
+	when Result::Ok(source)
+		source
+	when Result::Err(message)
+		return Result<String, MatchedGoDriverError>::Err(
+			MatchedGoDriverError.new(phase: "transform", message: message),
+		)
+	end
+	# Retain the artifact basenames consumed by the historical comparison harness.
+	matched_source_path := workspace + "/matched-go-compiler-compiler.trb"
+	output_path := workspace + "/matched-go-compiler-compiler"
+	case native_write_text(matched_source_path, matched_source)
+	when Result::Ok(_unit)
+	when Result::Err(error)
+		return Result<String, MatchedGoDriverError>::Err(
+			MatchedGoDriverError.new(
+				phase: "write-source",
+				message: error.operation + ": " + error.message,
+			),
+		)
+	end
+	process := case Process.run(
+			reference_trb,
+			["build", "--compile", "--outfile", output_path, matched_source_path],
+		)
+	when Result::Ok(value)
+		value
+	when Result::Err(error)
+		return Result<String, MatchedGoDriverError>::Err(
+			MatchedGoDriverError.new(
+				phase: "launch-build",
+				message: error.operation + ": " + error.message,
+			),
+		)
+	end
+	if !process.success
+		return Result<String, MatchedGoDriverError>::Err(
+			MatchedGoDriverError.new(
+				phase: "build",
+				message: "the optimized Go comparison compiler build failed",
+				status: process.status,
+				stdout: process.stdout,
+				stderr: process.stderr,
+			),
+		)
+	end
+	return Result<String, MatchedGoDriverError>::Ok(output_path)
+end

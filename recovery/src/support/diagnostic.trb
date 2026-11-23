@@ -1,0 +1,14 @@
+record Diagnostic
+	code: String
+	path: String
+	message: String
+	source_id: String? = nil
+	start_line: Integer? = nil
+	start_column: Integer? = nil
+	end_line: Integer? = nil
+	end_column: Integer? = nil
+end
+
+def boundary_diagnostic(code: String, path: String, message: String): Diagnostic
+	return Diagnostic.new(code: code, path: path, message: message)
+end

@@ -1,0 +1,134 @@
+import { package_sorted_indices } from project/package_json
+import { ascii_code } from support/literals
+import { path_basename, path_join, path_normalize, string_starts_with } from support/path
+
+# The host supplies metadata only. Selection never reads a test body, including
+# an unselected malformed test, and preserves each authored path in diagnostics.
+record TestPathSelection
+	authored: String
+	absolute: String
+	directory: Boolean
+	error: String
+end
+
+record TestSelection
+	paths: Array<String>
+	error: String
+end
+
+def test_absolute_path(cwd: String, path: String): String
+	if string_starts_with(path, "/")
+		return path_normalize(path)
+	end
+	return path_normalize(path_join(cwd, path))
+end
+
+def test_path_below(root: String, path: String): Boolean
+	if path == root || root == "/"
+		return true
+	end
+	return string_starts_with(path, root + "/")
+end
+
+def test_source_path(path: String): Boolean
+	name := path_basename(path)
+	suffix := "_test.trb"
+	if name.size() < suffix.size()
+		return false
+	end
+	start := name.size() - suffix.size()
+	mut index := 0
+	while index < suffix.size()
+		mut code := ascii_code(name[start + index])
+		if code >= 65 && code <= 90
+			code += 32
+		end
+		if code != ascii_code(suffix[index])
+			return false
+		end
+		index += 1
+	end
+	return true
+end
+
+def select_test_paths(root: String, source_dir: String, inventory: Array<String>, selections: Array<TestPathSelection>): TestSelection
+	mut selected: Hash<String, Boolean> := {}
+	if selections.size() == 0
+		inventory.each do |path|
+			selected[path] = true
+		end
+	end
+	selections.each do |selection|
+		if !test_path_below(root, selection.absolute)
+			return TestSelection.new(paths: [], error: "test path " + selection.authored + " is outside configured sourceDir " + source_dir)
+		end
+		if selection.error != ""
+			return TestSelection.new(paths: [], error: "test path " + selection.authored + ": " + selection.error)
+		end
+		if !selection.directory
+			if !test_source_path(selection.absolute)
+				return TestSelection.new(paths: [], error: "test path " + selection.authored + " is not a *_test.trb file")
+			end
+			mut known := false
+			inventory.each do |path|
+				if path == selection.absolute
+					selected[path] = true
+					known = true
+				end
+			end
+			if !known
+				return TestSelection.new(paths: [], error: "test file " + selection.authored + " was not found in the configured project")
+			end
+		else
+			mut matched := false
+			inventory.each do |path|
+				if test_path_below(selection.absolute, path)
+					selected[path] = true
+					matched = true
+				end
+			end
+			if !matched
+				return TestSelection.new(paths: [], error: "no *_test.trb files found under " + selection.authored)
+			end
+		end
+	end
+	mut paths: Array<String> := []
+	selected.each do |path, _selected|
+		paths.push(path)
+	end
+	mut ordered: Array<String> := []
+	package_sorted_indices(paths).each do |index|
+		ordered.push(paths[index])
+	end
+	return TestSelection.new(paths: ordered, error: "")
+end
+
+# The complete metadata inventory includes production sources. Keep all of
+# them, but select test paths before any source body is opened.
+def test_project_paths(root: String, source_dir: String, inventory: Array<String>, selections: Array<TestPathSelection>): TestSelection
+	mut tests: Array<String> := []
+	inventory.each do |path|
+		if test_source_path(path)
+			tests.push(path)
+		end
+	end
+	selected := select_test_paths(root, source_dir, tests, selections)
+	if selected.error != ""
+		return selected
+	end
+	mut included: Hash<String, Boolean> := {}
+	selected.paths.each do |path|
+		included[path] = true
+	end
+	mut paths: Array<String> := []
+	inventory.each do |path|
+		if !test_source_path(path) || included.key?(path)
+			paths.push(path)
+		end
+	end
+	mut ordered: Array<String> := []
+	package_sorted_indices(paths).each do |index|
+		ordered.push(paths[index])
+	end
+	return TestSelection.new(paths: ordered, error: "")
+end

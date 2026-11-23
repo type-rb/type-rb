@@ -1,0 +1,99 @@
+import { emit_qbe } from compiler
+import { MirArrayJoin, mir_function_index } from mir/model/module
+import { optimize_verified_mir } from mir/passes/optimize
+import { verify_mir } from mir/verify/module
+import { array_loop_mir_check } from testing/mir/array_loops
+import { control_test_output } from testing/mir/control
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { mir_literal_fragment } from mir/analysis/string_splits
+import { logical_run_qbe } from testing/qbe_runner
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+describe("MIR joined size fragment counts") do
+	test("replaces only a confined final concat and rederives its proof") do
+		mut state := array_loop_mir_check("def measure(text: String): Integer\nlabel := text + \"!\"\nreturn [label, label].join(\"/\").size()\nend\ndef main()\nputs(measure(\"xy\"))\nend\n")
+		index := mir_function_index(state.scalar_mir, 0)
+		plan := state.scalar_mir.array_joins[index][0]
+		expect(plan.size_concats.size() > 0).to_be_true()
+		expect(state.scalar_mir.root_plans[index].instructions.size()).to_equal(0)
+		before := control_test_output(emit_qbe(state))
+		intrinsic_mir_erase(state)
+		optimize_verified_mir(state.scalar_mir)
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, before)
+			when Result::Ok(actual)
+				expect(actual).to_equal("7\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+		state.scalar_mir.array_joins[index][0] = MirArrayJoin.new(construction: plan.construction, array: plan.array, join: plan.join, size: plan.size, separator_literal: plan.separator_literal, size_concats: [], appends: plan.appends, elements: plan.elements, element_literals: plan.element_literals)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR Array join plan differs")
+	end
+
+	test("retains unknown boundaries and escaping values") do
+		[
+			"label := text + other",
+			"label := text + \"!\"\nputs(label)",
+			"label := text + \"\"",
+		].each do |body|
+			state := array_loop_mir_check("def measure(text: String, other: String): Integer\n" + body + "\nreturn [label, label].join(\"/\").size()\nend\ndef main()\nend\n")
+			plan := state.scalar_mir.array_joins[mir_function_index(state.scalar_mir, 0)][0]
+			expect(plan.size_concats.size()).to_equal(0)
+		end
+	end
+
+	test("matches materialized concatenation for arbitrary bytes") do
+		state := array_loop_mir_check("def measure(text: String): Integer\nlabel := \"!\" + text + \"!\"\nreturn [label, label].join(\"/\").size()\nend\ndef main()\nend\n")
+		mut output := control_test_output(emit_qbe(state)).split("export function w $main(").join("function w $join_unused_main(")
+		corpus: Array<Array<Integer>> := [[], [0], [65], [194], [162], [194, 162], [226], [130, 172], [240, 159, 152, 128], [255]]
+		corpus.each.with_index do |bytes, index|
+			points := mir_literal_fragment(bytes, 0, bytes.size()).points
+			output += "data $fragment" + index.to_s() + " = align 8 { l 0, l " + bytes.size().to_s() + ", l " + points.to_s()
+			bytes.each do |byte|
+				output += ", b " + byte.to_s()
+			end
+			output += ", b 0 }\n"
+		end
+		output += "data $suffix = align 8 { l 0, l 1, l 1, b 33, b 0 }\ndata $separator = align 8 { l 0, l 1, l 1, b 47, b 0 }\n"
+		output += "function $probe(l %text) {\n@start\n %head =l call $trbn_string_concat(l $suffix, l %text)\n %label =l call $trbn_string_concat(l %head, l $suffix)\n %storage =l alloc8 16\n storel %label, %storage\n %second =l add %storage, 8\n storel %label, %second\n %joined =l call $trbn_string_join(l %storage, l 2, l $separator)\n %points =l add %joined, 16\n %expected =l loadl %points\n %actual =l call $trbnf0(l %text)\n %same =w ceql %actual, %expected\n jnz %same, @ok, @bad\n@bad\n call $exit(w 3)\n hlt\n@ok\n ret\n}\nexport function w $main() {\n@start\n"
+		corpus.each.with_index do |_bytes, index|
+			output += " call $probe(l $fragment" + index.to_s() + ")\n"
+		end
+		output += " ret 0\n}\n"
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, output)
+			when Result::Ok(actual)
+				expect(actual).to_equal("")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("keeps earlier heap operands rooted across Integer formatting") do
+		state := array_loop_mir_check("def main()\nmut index := 100\nwhile index < 110\nfirst := index.to_s()\nlabel := first + (index + 1).to_s()\nputs([label, label].join(\"/\").size())\nindex += 1\nend\nend\n")
+		output := control_test_output(emit_qbe(state))
+		marker := " %string =l call $trbn_string_alloc(l %size)"
+		parts := output.split(marker)
+		expect(parts.size()).to_equal(2)
+		forced := parts[0] + "\tcall $trbn_gc_collect(w 0)\n" + marker + parts[1]
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, forced)
+			when Result::Ok(actual)
+				expect(actual).to_equal("13\n13\n13\n13\n13\n13\n13\n13\n13\n13\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+end

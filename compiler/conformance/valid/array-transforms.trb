@@ -1,0 +1,32 @@
+def main()
+	values := [1, 2, 3].map { |item| item * 2 }.select { |item| item > 2 }
+	puts(values.size())
+	puts(values[0])
+	result1 := values.reduce(10) { |sum, item| sum + item }
+	puts(result1)
+	result2 := (1..3).map.with_index { |item, index| item + index }[2]
+	puts(result2)
+	result3 := (1...4).select().with_index() { |item, index| item + index > 2 }.size()
+	puts(result3)
+	result4 := (3..1).reduce(42) { |sum, item| sum + item }
+	puts(result4)
+	empty: Array<Integer> := []
+	result5 := empty.map { |item| item.to_s() }.size()
+	puts(result5)
+	result6 := empty.select { |item| item == 0 }.size()
+	puts(result6)
+	result7 := empty.reduce("empty") { |text, item| text + item.to_s() }
+	puts(result7)
+	result8 := [true, false].map { |flag| !flag }[0]
+	puts(result8)
+	result9 := [1.25, 2.5].map { |item| item * 2.0 }[1] == 5.0
+	puts(result9)
+	result10 := [1, 2].map { |item| "item" + item.to_s() }[1]
+	puts(result10)
+	result11 := (9007199254740991..9007199254740991).map.with_index { |item, index| item - index }[0]
+	puts(result11)
+	result12 := (9007199254740991...9007199254740991).select { |item| item > 0 }.size()
+	puts(result12)
+	result13 := [1, 2].map { |item| [3, 4].reduce(item) { |sum, other| sum + other } }[1]
+	puts(result13)
+end

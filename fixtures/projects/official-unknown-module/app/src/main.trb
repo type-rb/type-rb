@@ -1,0 +1,5 @@
+import { Missing } from trb/not_a_package
+
+def main()
+	puts("ok")
+end

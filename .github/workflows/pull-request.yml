@@ -1,0 +1,310 @@
+name: Pull request validation
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  # Issue #439: costs are observed during MIR consolidation.
+  NATIVE_MIR_COST_MODE: mir-migration
+  # Alpha development: ordinary compiler edits merge after the pre-merge lanes;
+  # Main validation runs the complete lanes. Use `complete` to restore them here.
+  NATIVE_CI_GATE: tiered
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.plan.outputs.code }}
+      quick: ${{ steps.plan.outputs.quick }}
+      compiler_units: ${{ steps.plan.outputs.compiler_units }}
+      registry_only: ${{ steps.plan.outputs.registry_only }}
+      documentation: ${{ steps.plan.outputs.documentation }}
+      memory: ${{ steps.plan.outputs.memory }}
+      draft: ${{ steps.plan.outputs.draft }}
+      tooling: ${{ steps.plan.outputs.tooling }}
+      cli: ${{ steps.plan.outputs.cli }}
+      complete: ${{ steps.plan.outputs.complete }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Test routing and fail-closed acceptance
+        run: node --test tools/ci-plan-test.mjs tools/ci-run-suites-test.mjs tools/recovery-workspace-test.mjs
+      - name: Classify every changed path
+        id: plan
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          IS_DRAFT: ${{ github.event.pull_request.draft }}
+        run: |
+          git diff --check "$BASE_SHA...$HEAD_SHA"
+          node tools/ci-plan.mjs "$BASE_SHA" "$HEAD_SHA" "$IS_DRAFT" >> "$GITHUB_OUTPUT"
+
+  quick:
+    needs: plan
+    if: needs.plan.outputs.quick == 'true'
+    runs-on: ubuntu-latest
+    # Reference contracts and focused units share this job; keep the complete
+    # authority bounded without cancelling healthy tests after setup finishes.
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        if: (needs.plan.outputs.code == 'true' || needs.plan.outputs.cli == 'true') && needs.plan.outputs.registry_only != 'true'
+        with:
+          node-version: '24'
+      - name: Check compiler responsibility boundaries
+        if: needs.plan.outputs.registry_only != 'true'
+        run: |
+          python3 tools/compiler_layout_test.py
+          python3 tools/migrate_compiler_layout_test.py
+          python3 tools/compiler_layout.py
+      - name: Check generated recovery import boundaries
+        if: needs.plan.outputs.registry_only != 'true'
+        run: |
+          python3 tools/recovery_layout_sync_test.py
+          python3 tools/recovery_layout_sync.py --check
+      - name: Validate every reference checkout before toolchain setup
+        run: |
+          python3 tools/build-reference-test.py
+          python3 -m unittest tools/compatibility_manifest_test.py
+          python3 tools/compatibility_manifest.py
+      - uses: actions/checkout@v5
+        if: needs.plan.outputs.code == 'true' || needs.plan.outputs.cli == 'true'
+        with:
+          repository: type-rb/type-rb
+          ref: cc8c734f73f5149464838825cdbb2165058ed26d
+          path: .type-rb
+      - name: Verify bundled official sources against the pinned reference
+        if: needs.plan.outputs.code == 'true' || needs.plan.outputs.cli == 'true'
+        run: |
+          python3 tools/official-sources-test.py
+          python3 tools/official-sources.py --reference-checkout .type-rb --check
+      - uses: actions/setup-go@v6
+        if: needs.plan.outputs.code == 'true' || needs.plan.outputs.cli == 'true'
+        with:
+          go-version-file: .type-rb/go.mod
+          cache-dependency-path: .type-rb/go.sum
+      - name: Build the pinned reference compiler
+        if: needs.plan.outputs.code == 'true' || needs.plan.outputs.cli == 'true'
+        run: |
+          test "$(cat TYPE_RB_REVISION)" = "$(git -C .type-rb rev-parse HEAD)"
+          python3 tools/build-reference.py .type-rb "$RUNNER_TEMP/trb"
+      - name: Check canonical compatibility metadata before matrix fan-out
+        if: needs.plan.outputs.code == 'true' || needs.plan.outputs.cli == 'true'
+        run: |
+          python3 -m unittest tools/compatibility_manifest_test.py
+          python3 tools/compatibility_manifest.py --reference-trb "$RUNNER_TEMP/trb"
+      - name: Check formatting and core types
+        if: (needs.plan.outputs.code == 'true' || needs.plan.outputs.cli == 'true') && needs.plan.outputs.registry_only != 'true'
+        run: |
+          python3 tools/unicode-identifier-data.py --check
+          python3 tools/unicode-case-data.py --check
+          python3 tools/json-diagnostic-data.py --check
+          "$RUNNER_TEMP/trb" fmt --check recovery compiler corpus tools benchmarks
+          "$RUNNER_TEMP/trb" check --config recovery/trbconfig.jsonc
+          "$RUNNER_TEMP/trb" check --config compiler/trbconfig.jsonc
+          tools/check-native-cli.sh "$RUNNER_TEMP/trb"
+      - name: Check the Native compiler closure against snapshot v4
+        if: (needs.plan.outputs.code == 'true' || needs.plan.outputs.cli == 'true') && needs.plan.outputs.registry_only != 'true'
+        run: tools/check-bootstrap-snapshot.sh "$RUNNER_TEMP/trb"
+      - name: Verify project and cost tooling on Linux
+        if: needs.plan.outputs.registry_only != 'true'
+        run: |
+          sh tools/compiler-cost-test.sh
+          sh tools/compiler-project-test.sh
+      # Reference validity belongs to this oracle job, not the Go-free CLI chain.
+      - name: Verify browser client generation and browser-target transport
+        if: (needs.plan.outputs.code == 'true' || needs.plan.outputs.cli == 'true') && needs.plan.outputs.registry_only != 'true'
+        run: |
+          python3 tools/native-web-client-test.py "$RUNNER_TEMP/trb" --reference \
+            --browser-check --browser-runtime "$(command -v node)" \
+            --report "$RUNNER_TEMP/reference-browser-client.json"
+      - name: Verify HTTP server and REPL reference contracts
+        if: (needs.plan.outputs.code == 'true' || needs.plan.outputs.cli == 'true') && needs.plan.outputs.registry_only != 'true'
+        run: |
+          python3 tools/native-web-network-test.py "$RUNNER_TEMP/trb" --reference
+          python3 tools/native-web-network-repl-test.py "$RUNNER_TEMP/trb" --reference
+      - name: Verify OIDC reference contracts and trust overrides
+        if: (needs.plan.outputs.code == 'true' || needs.plan.outputs.cli == 'true') && needs.plan.outputs.registry_only != 'true'
+        run: |
+          python3 tools/native-oidc-test.py "$RUNNER_TEMP/trb" --reference --transport --cli-paths --receipt "$RUNNER_TEMP/reference-oidc-http.json"
+          python3 tools/native-oidc-test.py "$RUNNER_TEMP/trb" --reference --tls --transport --receipt "$RUNNER_TEMP/reference-oidc-https.json"
+          python3 tools/native-oidc-test.py "$RUNNER_TEMP/trb" --reference --tls --trust directory --receipt "$RUNNER_TEMP/reference-oidc-directory.json"
+          python3 tools/native-oidc-test.py "$RUNNER_TEMP/trb" --reference --tls --trust untrusted --receipt "$RUNNER_TEMP/reference-oidc-untrusted.json"
+          python3 tools/native-oidc-http2-test.py "$RUNNER_TEMP/trb" --reference --receipt "$RUNNER_TEMP/reference-oidc-http2.json"
+          python3 tools/native-oidc-hostname-test.py "$RUNNER_TEMP/trb" --reference --receipt "$RUNNER_TEMP/reference-oidc-hostnames.json"
+      - name: Verify project test contracts against the exact reference compiler
+        if: (needs.plan.outputs.code == 'true' || needs.plan.outputs.cli == 'true') && needs.plan.outputs.registry_only != 'true'
+        run: |
+          python3 tools/native-test-runner-harness-test.py
+          python3 tools/native-test-runner-test.py --reference "$RUNNER_TEMP/trb" --report "$RUNNER_TEMP/reference-tests.json"
+          python3 tools/native-test-values-test.py --reference "$RUNNER_TEMP/trb" --report "$RUNNER_TEMP/reference-test-values.json"
+      - name: Verify language fixtures against the exact reference compiler
+        if: needs.plan.outputs.code == 'true' || needs.plan.outputs.cli == 'true'
+        run: |
+          python3 tools/native-language-coverage-test.py
+          python3 tools/native-language-coverage.py --reference "$RUNNER_TEMP/trb" \
+            --reference-ast .type-rb/internal/ast/ast.go --jobs 2 \
+            > "$RUNNER_TEMP/reference-language.json"
+      - name: Verify project scenarios against the exact reference compiler
+        if: (needs.plan.outputs.code == 'true' || needs.plan.outputs.cli == 'true') && needs.plan.outputs.registry_only != 'true'
+        run: |
+          python3 tools/project-scenarios-test.py
+          GOCACHE="$(go env GOCACHE)" python3 tools/project-scenarios.py --current-reference \
+            --reference "$RUNNER_TEMP/trb" --jobs 2 > "$RUNNER_TEMP/reference-projects.json"
+      - name: Observe mapped release scenarios with the exact reference candidate
+        if: (needs.plan.outputs.code == 'true' || needs.plan.outputs.cli == 'true') && needs.plan.outputs.registry_only != 'true'
+        run: |
+          python3 tools/release-scenarios-test.py
+          python3 tools/release-scenarios.py --contract-root .type-rb \
+            --compiler "$RUNNER_TEMP/trb" \
+            --compiler-sha256 "$(sha256sum "$RUNNER_TEMP/trb" | cut -d ' ' -f 1)" \
+            --source-revision "$(cat TYPE_RB_REVISION)" --implementation go --mode go \
+            --report "$RUNNER_TEMP/reference-release-scenarios.json"
+      - name: Retain reference language observations
+        if: always() && (needs.plan.outputs.code == 'true' || needs.plan.outputs.cli == 'true')
+        uses: actions/upload-artifact@v6
+        with:
+          name: reference-language
+          path: |
+            ${{ runner.temp }}/reference-language.json
+            ${{ runner.temp }}/reference-projects.json
+            ${{ runner.temp }}/reference-release-scenarios.json
+            ${{ runner.temp }}/reference-browser-client.json
+            ${{ runner.temp }}/reference-oidc-*.json
+            ${{ runner.temp }}/reference-test*.json
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Check that the coverage views match the fixture registry
+        if: needs.plan.outputs.code == 'true' || needs.plan.outputs.cli == 'true'
+        run: |
+          python3 tools/native-language-coverage.py --check-feature-table docs/native-language-feature-inventory.md
+          python3 tools/native-language-coverage.py --check-pages-data docs/capabilities/ordinary-language.js
+      - name: Run root units and focused MIR correctness tests
+        if: (needs.plan.outputs.code == 'true' || needs.plan.outputs.cli == 'true') && needs.plan.outputs.registry_only != 'true'
+        env:
+          TYPE_RB_NATIVE_ROOT: ${{ github.workspace }}
+        run: |
+          "$RUNNER_TEMP/trb" test --config recovery/trbconfig.jsonc
+          "$RUNNER_TEMP/trb" test --config compiler/trbconfig.jsonc \
+            -t 'MIR|Array|Integer|Float|scalar|bounds|allocating|induction|Boolean|syntax|Hash'
+
+  compiler_units:
+    name: Complete compiler units
+    needs: plan
+    if: needs.plan.outputs.compiler_units == 'true'
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: type-rb/type-rb
+          ref: cc8c734f73f5149464838825cdbb2165058ed26d
+          path: .type-rb
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: .type-rb/go.mod
+          cache-dependency-path: .type-rb/go.sum
+      - name: Build the exact reference compiler
+        run: |
+          test "$(cat TYPE_RB_REVISION)" = "$(git -C .type-rb rev-parse HEAD)"
+          python3 tools/build-reference.py .type-rb "$RUNNER_TEMP/trb"
+      - name: Build the pinned Native QBE variant
+        run: |
+          python3 tools/qbe_toolchain.py "$RUNNER_TEMP/qbe-1.3"
+      - name: Run every compiler unit without recovery
+        env:
+          TYPE_RB_NATIVE_ROOT: ${{ github.workspace }}
+          TYPE_RB_NATIVE_QBE: ${{ runner.temp }}/qbe-1.3/qbe
+        run: |
+          set +e
+          started=$(date +%s)
+          "$RUNNER_TEMP/trb" test --config compiler/trbconfig.jsonc --compile \
+            --outfile "$RUNNER_TEMP/compiler-units" > "$RUNNER_TEMP/compiler-units.log" 2>&1
+          result=$?
+          compiled=$(date +%s)
+          if [ "$result" -eq 0 ]; then
+            python3 tools/complete_compiler_units.py \
+              --root "$GITHUB_WORKSPACE" --binary "$RUNNER_TEMP/compiler-units" \
+              --scratch "$RUNNER_TEMP" --jobs 2 >> "$RUNNER_TEMP/compiler-units.log" 2>&1
+            result=$?
+          fi
+          finished=$(date +%s)
+          cat "$RUNNER_TEMP/compiler-units.log"
+          printf 'compile_seconds=%s\nexecution_seconds=%s\nelapsed_seconds=%s\nexit_status=%s\n' \
+            "$((compiled - started))" "$((finished - compiled))" "$((finished - started))" "$result" | tee "$RUNNER_TEMP/compiler-units.status"
+          exit "$result"
+      - name: Retain complete compiler unit output and elapsed time
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: compiler-units-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/qbe-1.3/build-info.json
+            ${{ runner.temp }}/compiler-units.log
+            ${{ runner.temp }}/compiler-units.status
+          if-no-files-found: warn
+          retention-days: 30
+
+  documentation:
+    needs: plan
+    if: needs.plan.outputs.documentation == 'true'
+    uses: ./.github/workflows/documentation.yml
+
+  tooling:
+    needs: plan
+    if: needs.plan.outputs.tooling == 'true'
+    uses: ./.github/workflows/ci-tooling.yml
+
+  cli:
+    needs: plan
+    if: needs.plan.outputs.cli == 'true' && needs.plan.outputs.draft == 'false'
+    uses: ./.github/workflows/native-cli.yml
+    with:
+      scope: ${{ needs.plan.outputs.complete == 'true' && 'complete' || 'pull-request' }}
+
+  native:
+    needs: plan
+    if: >-
+      needs.plan.outputs.code == 'true' && needs.plan.outputs.draft == 'false' &&
+      needs.plan.outputs.complete == 'true'
+    uses: ./.github/workflows/native-validation.yml
+    with:
+      cost_mode: mir-migration
+
+  targets:
+    needs: plan
+    if: needs.plan.outputs.code == 'true' && needs.plan.outputs.draft == 'false'
+    uses: ./.github/workflows/linux-amd64-targets.yml
+    with:
+      cost_mode: mir-migration
+      scope: ${{ needs.plan.outputs.complete == 'true' && 'complete' || 'pull-request' }}
+
+  memory:
+    needs: plan
+    if: needs.plan.outputs.memory == 'true' && needs.plan.outputs.draft == 'false'
+    uses: ./.github/workflows/runtime-worker-memory.yml
+    with:
+      cost_mode: mir-migration
+
+  acceptance:
+    name: Native CI acceptance
+    if: always()
+    needs: [plan, quick, compiler_units, documentation, native, targets, memory, tooling, cli]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Require all applicable authorities, not skipped-job success
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: node tools/ci-plan.mjs accept

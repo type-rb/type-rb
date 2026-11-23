@@ -1,0 +1,323 @@
+import { concurrent_mutation, concurrent_value, concurrent_values } from frontend/checking/body/concurrency
+import { union_type } from frontend/types/union_types
+import { checked_category_value } from frontend/types/value_categories
+import { collection_inference_region, pending_collection_declaration, record_collection_capture, record_collection_witness } from frontend/checking/collections/context_analysis
+import { mir_state_enabled_slot } from state/local_slots
+import { checking_lowering } from state/checking_phases
+import { hash_action_delete, hash_action_empty, hash_action_fetch, hash_action_has_key, hash_action_index_read, hash_action_index_write, hash_action_keys, hash_action_literal, hash_action_merge, hash_action_none, hash_action_size, hash_action_update, hash_action_values } from mir/model/hash_actions
+import { binary_add_assign } from frontend/types/operators
+import { advance, expect, skip_newlines, token_is } from frontend/syntax/syntax_tokens
+import { nullable_element } from frontend/types/nullable_types
+import { mir_checked_hash_index, mir_checked_hash_literal, mir_checked_hash_method } from mir/lowering/hashes
+import { mir_checked_array_literal } from mir/lowering/arrays
+import { check_expected, type_diagnostic } from frontend/checking/body/types
+import { CheckedValue, checked_mir_value, checked_presentation, checked_value, scalar_mir_disable } from frontend/checking/body/values
+import { checked_hash_binding_target, checked_hash_method, checked_hash_publish } from frontend/checking/collections/hashes
+import { mir_hash_operation } from mir/model/hashes
+import { hash_key_type, hash_scalar_key, hash_type, hash_value_type } from frontend/types/hash_types
+import { binary_operator_id } from frontend/syntax/syntax_forms
+import { array_element_type, array_type, common_array_element_type, type_display } from frontend/resolution/type_resolution
+import { CompilerState } from state/state
+import { CheckedLocals } from state/local_state
+import { load_integer, load_string, sparse_string_at, store_integer, store_string } from support/storage
+import { check_expression } from frontend/checking/body/expressions
+
+def checked_hash_literal(mut state: CompilerState, mut position: Array<Integer>, mut locals: CheckedLocals, expected: String): CheckedValue
+	origin := position[0]
+	line := load_integer(state.source_tokens.token_lines, origin)
+	mut context := expected
+	if nullable_element(context) != ""
+		context = nullable_element(context)
+	end
+	mut key_type := hash_key_type(context)
+	mut value_type := hash_value_type(context)
+	if state.callables.lambda_phase[0] == checking_lowering() && expected == ""
+		analyzed := sparse_string_at(state.callables.checked[0].hash_initial_types, origin)
+		key_type = hash_key_type(analyzed)
+		value_type = hash_value_type(analyzed)
+	end
+	saved_mir := locals.mir_state[mir_state_enabled_slot()]
+	mut diverged := false
+	mut entries := 0
+	mut keys: Array<Integer> := []
+	mut values: Array<CheckedValue> := []
+	advance(position)
+	skip_newlines(state, position)
+	while !token_is(state, position[0], "}")
+		key := check_expression(state, position, locals, 1, "")
+		if key.type_name == "Never"
+			diverged = true
+			scalar_mir_disable(locals)
+		elsif !hash_scalar_key(key.type_name)
+			return type_diagnostic(state, line, "Hash key must be String or Integer")
+		end
+		if key.type_name != "Never"
+			if key_type != "" && key_type != key.type_name
+				return type_diagnostic(state, line, "Hash key type must match exactly")
+			end
+			key_type = key.type_name
+		end
+		keys.push(checked_mir_value(key))
+		if !expect(state, position, "=>")
+			return checked_value("Invalid", checked_category_value(), origin, 0)
+		end
+		value := check_expression(state, position, locals, 1, hash_value_type(context))
+		if hash_value_type(context) == "" && value.binding && value.nullable_field == -1
+			record_collection_capture(state, locals, value.nullable_binding)
+		end
+		if value.type_name == "Never"
+			diverged = true
+			scalar_mir_disable(locals)
+		elsif hash_value_type(context) == ""
+			common := common_array_element_type(value_type, value.type_name)
+			if common == ""
+				return type_diagnostic(state, line, "incompatible Hash value types")
+			end
+			value_type = common
+		end
+		values.push(value)
+		entries += 1
+		skip_newlines(state, position)
+		if !token_is(state, position[0], ",")
+			break
+		end
+		advance(position)
+		skip_newlines(state, position)
+	end
+	finish := position[0]
+	expect(state, position, "}")
+	if diverged
+		store_integer(state.callables.checked[0].diverging_hashes, origin, 1)
+		locals.mir_state[mir_state_enabled_slot()] = saved_mir
+		return checked_value("Never", checked_category_value(), 9007199254740991, 0)
+	end
+	mut type_name := "Hash"
+	if key_type != "" && value_type != ""
+		type_name = hash_type(key_type, value_type)
+	end
+	checked_hash_publish(state, mir_hash_operation(hash_action_literal(), origin, finish, origin, type_name, true, entries))
+	mut presentation := ""
+	element_presentation := checked_collection_presentation(state, values)
+	if context == "" && element_presentation != ""
+		presentation = "Hash<" + type_display(state, key_type) + ", " + element_presentation + ">"
+	end
+	return concurrent_values(state, checked_presentation(mir_checked_hash_literal(state, locals, type_name, value_type, origin, keys, values), presentation), values)
+end
+
+def checked_hash_index(mut state: CompilerState, mut position: Array<Integer>, mut locals: CheckedLocals, receiver: CheckedValue): CheckedValue
+	origin := position[0]
+	line := load_integer(state.source_tokens.token_lines, origin)
+	advance(position)
+	key := check_expression(state, position, locals, 1, "")
+	if key.type_name == "Never"
+		finish := position[0]
+		expect(state, position, "]")
+		checked_hash_publish(state, mir_hash_operation(hash_action_index_read(), origin, finish, receiver.origin, receiver.type_name, receiver.mutable != 0, 0))
+		return key
+	end
+	if !hash_scalar_key(key.type_name)
+		return type_diagnostic(state, line, "Hash key must be String or Integer")
+	end
+	if hash_key_type(receiver.type_name) != "" && hash_key_type(receiver.type_name) != key.type_name
+		return type_diagnostic(state, line, "Hash key type must match exactly")
+	end
+	finish := position[0]
+	expect(state, position, "]")
+	mut kind := hash_action_index_read()
+	if token_is(state, position[0], "=")
+		kind = hash_action_index_write()
+	end
+	if binary_operator_id(load_string(state.source_tokens.token_texts, position[0])) >= binary_add_assign()
+		return type_diagnostic(state, line, "compound assignment to Hash entries is unsupported")
+	end
+	mut type_name := receiver.type_name
+	if type_name == "Hash"
+		if kind != hash_action_index_write()
+			return type_diagnostic(state, line, "cannot index an untyped Hash; add Hash<K, V> annotation")
+		end
+		type_name = hash_type(key.type_name, "")
+	end
+	if kind == hash_action_index_write()
+		concurrent_mutation(state, locals, receiver, origin)
+	end
+	if kind == hash_action_index_write() && !checked_hash_binding_target(state, receiver.origin)
+		return type_diagnostic(state, line, "assignment requires a mutable binding")
+	end
+	checked_hash_publish(state, mir_hash_operation(kind, origin, finish, receiver.origin, type_name, receiver.mutable != 0, 0))
+	return concurrent_value(state, mir_checked_hash_index(state, locals, receiver, key, hash_value_type(type_name), origin, kind == hash_action_index_write()), receiver.concurrent_borrowed)
+end
+
+def checked_hash_call(mut state: CompilerState, mut position: Array<Integer>, mut locals: CheckedLocals, receiver: CheckedValue, method: String): CheckedValue
+	origin := position[0]
+	line := load_integer(state.source_tokens.token_lines, origin)
+	kind := checked_hash_method(method)
+	if kind == hash_action_none()
+		return type_diagnostic(state, line, "unsupported Hash method " + method)
+	end
+	mut inference_update := false
+	if kind == hash_action_update() && pending_collection_declaration(state, locals, receiver) >= 0
+		inference_update = true
+	end
+	if receiver.type_name == "Hash" && kind != hash_action_size() && kind != hash_action_empty() && !inference_update
+		return type_diagnostic(state, line, "Hash method requires a concrete Hash<K, V> type")
+	end
+	if kind == hash_action_delete() || kind == hash_action_update()
+		concurrent_mutation(state, locals, receiver, origin)
+		if receiver.mutable == 0 || !receiver.binding || !checked_hash_binding_target(state, receiver.origin)
+			return type_diagnostic(state, line, "Hash mutation requires a mutable binding")
+		end
+	end
+	advance(position)
+	mut result_type := receiver.type_name
+	mut concurrent_borrowed := receiver.concurrent_borrowed
+	mut argument := -1
+	mut diverged := false
+	if kind == hash_action_has_key() || kind == hash_action_delete() || kind == hash_action_fetch()
+		value := check_expression(state, position, locals, 1, hash_key_type(receiver.type_name))
+		if value.concurrent_borrowed
+			concurrent_borrowed = true
+		end
+		argument = checked_mir_value(value)
+		diverged = value.type_name == "Never"
+		result_type = hash_value_type(receiver.type_name)
+	end
+	if kind == hash_action_merge() || kind == hash_action_update()
+		mut expected := receiver.type_name
+		if inference_update
+			expected = ""
+		end
+		value := check_expression(state, position, locals, 1, expected)
+		if value.concurrent_borrowed
+			concurrent_borrowed = true
+		end
+		argument = checked_mir_value(value)
+		diverged = value.type_name == "Never"
+		if inference_update && hash_key_type(value.type_name) != ""
+			binding := receiver.nullable_binding
+			inferred := record_collection_witness(state, locals, binding, value.type_name)
+			store_string(locals.types, binding, inferred)
+			store_integer(locals.hash_inference_regions, binding, collection_inference_region(state, locals, binding))
+		end
+	end
+	if kind == hash_action_size()
+		result_type = "Integer"
+	elsif kind == hash_action_has_key() || kind == hash_action_empty()
+		result_type = "Boolean"
+	elsif kind == hash_action_update()
+		result_type = "Void"
+	elsif kind == hash_action_keys()
+		result_type = array_type(hash_key_type(receiver.type_name))
+	elsif kind == hash_action_values()
+		result_type = array_type(hash_value_type(receiver.type_name))
+	end
+	if result_type == ""
+		return type_diagnostic(state, line, "unsupported Hash result representation")
+	end
+	skip_newlines(state, position)
+	finish := position[0]
+	expect(state, position, ")")
+	checked_hash_publish(state, mir_hash_operation(kind, origin, finish, receiver.origin, receiver.type_name, receiver.mutable != 0, 0))
+	if diverged
+		return checked_value("Never", checked_category_value(), 9007199254740991, 0)
+	end
+	value := mir_checked_hash_method(state, locals, receiver, argument, kind, result_type, origin)
+	return concurrent_value(state, checked_value(result_type, value.category, 9007199254740991, 0), concurrent_borrowed)
+end
+
+def check_array_literal(
+		mut state: CompilerState,
+		mut position: Array<Integer>,
+		mut locals: CheckedLocals,
+		expected: String,
+	): CheckedValue
+	origin := position[0]
+	mut values: Array<CheckedValue> := []
+	line := load_integer(state.source_tokens.token_lines, origin)
+	advance(position)
+	skip_newlines(state, position)
+	mut context := expected
+	if nullable_element(context) != ""
+		context = nullable_element(context)
+	end
+	contextual_element_type := array_element_type(context)
+	mut element_type := contextual_element_type
+	saved_mir := locals.mir_state[mir_state_enabled_slot()]
+	mut diverged := false
+	mut finished := false
+	while !finished
+		if token_is(state, position[0], "]")
+			finished = true
+		else
+			value := check_expression(state, position, locals, 1, contextual_element_type)
+			if contextual_element_type == "" && value.binding && value.nullable_field == -1
+				record_collection_capture(state, locals, value.nullable_binding)
+			end
+			if value.type_name == "Never"
+				diverged = true
+				scalar_mir_disable(locals)
+			end
+			values.push(value)
+			if contextual_element_type == "" && value.type_name != "Never"
+				common_type := common_array_element_type(element_type, value.type_name)
+				if common_type == ""
+					check_expected(
+						state,
+						value.type_name,
+						element_type,
+						load_integer(state.source_tokens.token_lines, position[0]),
+					)
+				else
+					element_type = common_type
+				end
+			end
+			if token_is(state, position[0], ",")
+				advance(position)
+				skip_newlines(state, position)
+			else
+				finished = true
+			end
+		end
+	end
+	if !expect(state, position, "]")
+		return checked_value("Invalid", checked_category_value(), 9007199254740991, 0)
+	end
+	if diverged
+		locals.mir_state[mir_state_enabled_slot()] = saved_mir
+		store_string(state.callables.checked[0].array_literal_types, origin, "Never")
+		return checked_value("Never", checked_category_value(), 9007199254740991, 0)
+	end
+	mut result_type := "Array"
+	if element_type != ""
+		result_type = array_type(element_type)
+	end
+	if result_type == ""
+		return type_diagnostic(state, line, "unsupported Array element type " + element_type)
+	end
+	store_string(state.callables.checked[0].array_literal_types, origin, result_type)
+	mut presentation := ""
+	element_presentation := checked_collection_presentation(state, values)
+	if context == "" && element_presentation != ""
+		presentation = "Array<" + element_presentation + ">"
+	end
+	return concurrent_values(state, checked_presentation(mir_checked_array_literal(state, locals, result_type, element_type, origin, values), presentation), values)
+end
+
+def checked_collection_presentation(state: CompilerState, values: Array<CheckedValue>): String
+	if state.submissions.size() == 0
+		return ""
+	end
+	mut names: Array<String> := []
+	mut has_alias := false
+	values.each do |value|
+		if value.presentation != ""
+			has_alias = true
+			names.push(value.presentation)
+		else
+			names.push(type_display(state, value.type_name))
+		end
+	end
+	if !has_alias
+		return ""
+	end
+	return type_display(state, union_type(names))
+end

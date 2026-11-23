@@ -1,0 +1,11 @@
+def normalize(value: Integer): Integer
+	return value
+end
+
+def adjust(value: Integer): Integer
+	return normalize(value)
+end
+
+def suffix(): String
+	return "-ok"
+end

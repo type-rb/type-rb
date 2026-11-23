@@ -1,0 +1,165 @@
+import { standard_source_internal_json } from state/standard_source_kinds
+import { builder_append_bytes } from mir/model/string_builder_contract
+import { compiler_new } from state/state
+import { lex } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { standard_string_builder } from frontend/resolution/string_builder_intrinsics
+import { builder_adapter_start, builder_append, builder_from_string } from mir/model/string_builder_contract
+import { mir_type_kind_string_builder } from mir/model/type_kinds
+import { MirCall, MirSignature, MirType } from mir/model/module
+import { CompilerState } from state/state
+import { expect_compiler_phase, logical_checked_source } from testing/pipeline
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { control_test_output } from testing/mir/control
+import { verify_mir } from mir/verify/module
+import { check, emit_qbe } from compiler
+import { load_integer, load_string, store_integer, store_string } from support/storage
+import { describe, expect, test } from trb/std/test
+
+def builder_test_state(): CompilerState
+	mut state := logical_checked_source("import trb/std/string_builder\ndef main()\nmut writer := StringBuilder.from_string(\"A\")\nwriter.append(\"B\")\nwriter.append_codepoint(33)\nputs(writer.to_s())\nputs(writer.size())\nputs(writer.empty?())\nwriter.clear()\nend\n")
+	expect_compiler_phase(state, "check", check(state))
+	expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	return state
+end
+
+describe("StringBuilder ownership and MIR") do
+	test("keeps runtime selection independent of erased source") do
+		mut state := builder_test_state()
+		before := control_test_output(emit_qbe(state))
+		expect(before.include?("$trbn_builder_append")).to_be_true()
+		intrinsic_mir_erase(state)
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+	end
+
+	test("requires the complete loader-owned factory") do
+		["owner", "parameter", "mutable", "body"].each do |damage|
+			mut state := builder_test_state()
+			mut changed := false
+			state.scalar_mir.signatures.each do |row|
+				if standard_string_builder(state, row.id) == builder_from_string()
+					parameter := load_integer(state.declarations.function_parameter_starts, row.id)
+					if damage == "owner"
+						store_integer(state.standard_modules, row.source_id, 0)
+					elsif damage == "parameter"
+						store_string(state.declarations.parameter_types, parameter, "Integer")
+					elsif damage == "mutable"
+						store_integer(state.declarations.parameter_mutable, parameter, 1)
+					else
+						store_integer(state.declarations.function_body_ends, row.id, 99999)
+					end
+					expect(standard_string_builder(state, row.id)).to_equal(-1)
+					changed = true
+				end
+			end
+			expect(changed).to_be_true()
+		end
+	end
+
+	test("rejects forged mutation contracts and effects") do
+		["mutable", "parameter", "effects"].each do |damage|
+			mut state := builder_test_state()
+			mut changed := false
+			state.scalar_mir.signatures.each.with_index do |row, index|
+				if row.adapter == builder_adapter_start() + builder_append() && damage != "effects"
+					mut mutable := row.parameter_mutable
+					mut parameters := row.parameter_types
+					if damage == "mutable"
+						mutable = [0, 0]
+					else
+						parameters = ["String", "String"]
+					end
+					state.scalar_mir.signatures[index] = MirSignature.new(id: row.id, kind: row.kind, name: row.name, adapter: row.adapter, source_id: row.source_id, line: row.line, parameter_types: parameters, parameter_mutable: mutable, result_type: row.result_type)
+					changed = true
+				end
+			end
+			if damage == "effects"
+				state.scalar_mir.calls.each.with_index do |call, index|
+					if state.scalar_mir.signatures[call.callee].adapter == builder_adapter_start() + builder_append()
+						state.scalar_mir.calls[index] = MirCall.new(callee: call.callee, argument_start: call.argument_start, argument_count: call.argument_count, effects: 0)
+						changed = true
+					end
+				end
+			end
+			expect(changed).to_be_true()
+			expect(verify_mir(state.scalar_mir, true) != "").to_be_true()
+		end
+	end
+
+	test("rejects forged managed builder type metadata") do
+		mut state := builder_test_state()
+		mut changed := false
+		state.scalar_mir.types.each.with_index do |row, index|
+			if row.kind == mir_type_kind_string_builder()
+				state.scalar_mir.types[index] = MirType.new(kind: row.kind, name: row.name, element: 1, key: row.key, declaration: row.declaration)
+				changed = true
+			end
+		end
+		expect(changed).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR composite element shape differs")
+	end
+
+	test("does not emit the buffer runtime in unrelated applications") do
+		mut state := logical_checked_source("def main()\nputs(7)\nend\n")
+		expect_compiler_phase(state, "check", check(state))
+		expect(control_test_output(emit_qbe(state)).include?("$trbn_desc_builder")).to_be_false()
+	end
+end
+
+def builder_span_test_state(): CompilerState
+	source := "import trb/std/string_builder\nimport trb/internal/string_builder_storage as Storage\ndef main()\nmut writer := StringBuilder.new()\nStorage.append_bytes(writer, \"abc\".to_bytes(), 1, 3)\nputs(writer.to_s())\nend\n"
+	mut state := compiler_new(1048576)
+	expect_compiler_phase(state, "lex", lex(state, source))
+	store_integer(state.standard_modules, 0, standard_source_internal_json())
+	expect_compiler_phase(state, "parse", parse_module(state, 0, 0))
+	expect_compiler_phase(state, "resolve", resolve(state))
+	expect_compiler_phase(state, "check", check(state))
+	return state
+end
+
+describe("StringBuilder private byte spans") do
+	test("rejects application access to private storage") do
+		mut state := compiler_new(1048576)
+		expect(lex(state, "import trb/internal/string_builder_storage as Storage\ndef main()\nputs(1)\nend\n")).to_be_true()
+		expect(parse_module(state, 0, 0)).to_be_true()
+		expect(resolve(state)).to_be_false()
+		expect(load_string(state.diagnostics.messages, 0).include?("internal builder storage is reserved")).to_be_true()
+	end
+
+	test("retains checked span ownership after erasing source") do
+		mut state := builder_span_test_state()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		before := control_test_output(emit_qbe(state))
+		expect(before.include?("call $trbn_builder_append_bytes")).to_be_true()
+		intrinsic_mir_erase(state)
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+	end
+
+	test("rejects forged span bounds types and mutation contracts") do
+		["parameter", "mutable", "owner"].each do |damage|
+			mut state := builder_span_test_state()
+			mut changed := false
+			state.scalar_mir.signatures.each.with_index do |row, index|
+				if standard_string_builder(state, row.id) == builder_append_bytes()
+					if damage == "owner"
+						store_integer(state.standard_modules, row.source_id, 0)
+						expect(standard_string_builder(state, row.id)).to_equal(-1)
+					else
+						mut parameters := row.parameter_types
+						mut mutable := row.parameter_mutable
+						if damage == "parameter"
+							parameters = ["StringBuilder", "Bytes", "Float", "Integer"]
+						else
+							mutable = [0, 0, 0, 0]
+						end
+						state.scalar_mir.signatures[index] = MirSignature.new(id: row.id, kind: row.kind, name: row.name, adapter: row.adapter, source_id: row.source_id, line: row.line, parameter_types: parameters, parameter_mutable: mutable, result_type: row.result_type)
+						expect(verify_mir(state.scalar_mir, true) != "").to_be_true()
+					end
+					changed = true
+				end
+			end
+			expect(changed).to_be_true()
+		end
+	end
+end

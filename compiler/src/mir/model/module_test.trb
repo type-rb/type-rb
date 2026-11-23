@@ -1,0 +1,16 @@
+import { MirValue, mir_value_index, mir_value_type } from mir/model/module
+import { describe, expect, test } from trb/std/test
+import { mir_test_module } from testing/mir/model
+
+describe("Native MIR model and verifier") do
+	test("looks up sparse values in grouped and interleaved function rows") do
+		mut native_module := mir_test_module(false, false)
+		native_module.values.push(MirValue.new(function_id: 90, id: 700, type_id: 2, source_id: 0, line: 1))
+		expect(mir_value_index(native_module, 90, 700)).to_equal(9)
+		expect(mir_value_type(native_module, 90, 700)).to_equal(2)
+		native_module.values.push(MirValue.new(function_id: 1, id: 999, type_id: 3, source_id: 0, line: 1))
+		expect(mir_value_index(native_module, 1, 999)).to_equal(10)
+		expect(mir_value_type(native_module, 1, 999)).to_equal(3)
+		expect(mir_value_index(native_module, 90, 701)).to_equal(-1)
+	end
+end

@@ -1,0 +1,210 @@
+import { check, emit_qbe } from compiler
+import { lex } from frontend/syntax/lexer
+import { mir_function_index } from mir/model/module
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { CompilerState, compiler_new } from state/state
+import { describe, expect, test } from trb/std/test
+import { occurrence_count, output_source } from testing/compiler
+
+describe("Native TypeRB frontend") do
+	test("shares validated temporary-root append with fresh allocation") do
+		source := "def keep(value: String): String\n\treturn value\nend\n\ndef main()\n\tputs(keep(\"kept\"))\n\treturn\nend\n"
+		mut state := compiler_new(source.size() + 1)
+		expect(lex(state, source)).to_be_true()
+		expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_true()
+		qbe := output_source(emit_qbe(state))
+		expect(qbe.include?("function $trbn_gc_temp_push(l %value) {")).to_be_true()
+		expect(
+			qbe.include?(
+				"%root_full =w ceql %root_count, %root_capacity\n\tjnz %root_full, @root_grow, @root_store\n@root_grow\n\tcall $trbn_gc_temp_grow(l %value, l %root_count, l %root_capacity)",
+			),
+		).to_be_true()
+		expect(qbe.include?("function $trbn_gc_temp_grow(l %value, l %count, l %capacity) {")).to_be_true()
+		expect(occurrence_count(qbe, "%root_count =l loadl $trbn_gc_temp_count")).to_equal(2)
+		expect(qbe.include?("storel %base, $trbn_gc_heap\n\n\t%root_count =l loadl $trbn_gc_temp_count")).to_be_true()
+		expect(qbe.include?("call $trbn_gc_temp_grow(l %object, l %root_count, l %root_capacity)")).to_be_true()
+		expect(qbe.include?("%new_data =l call $realloc(l %data, l %bytes)")).to_be_true()
+		expect(qbe.include?("%nil =w ceql %value, 0\n\tjnz %nil, @root_finish, @descriptor")).to_be_true()
+		expect(qbe.include?("%descriptor_mark =l loadl %value\n\t%static =w ceql %descriptor_mark, 0")).to_be_true()
+		expect(qbe.include?("%root_offset =l shl %root_count, 3")).to_be_true()
+		expect(qbe.include?("storel %value, %root_slot\n\t%root_next =l add %root_count, 1")).to_be_true()
+	end
+
+	test("reserves the exact peak of live nested Array and String operands") do
+		source := "def nested(limit: Integer): String\n\tmut outer: Array<String> := []\n\tmut index := 0\n\twhile index < limit\n\t\tmut inner: Array<String> := []\n\t\twhile inner.size() < 1\n\t\t\tinner.push(index.to_s())\n\t\tend\n\t\touter.push(inner[0])\n\t\tindex += 1\n\tend\n\treturn outer[0]\nend\n\ndef main()\n\tvalue := nested(1)\n\tputs(value)\n\treturn\nend\n"
+		mut state := compiler_new(source.size() + 1)
+		expect(lex(state, source)).to_be_true()
+		expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_true()
+		qbe := output_source(emit_qbe(state))
+		expect(qbe.include?("function $trbn_gc_temp_reserve(l %required)")).to_be_true()
+		expect(qbe.include?("\t%root_capacity =l add %temporary_roots, 3")).to_be_true()
+		expect(qbe.include?("\tcall $trbn_gc_temp_reserve(l %root_capacity)")).to_be_true()
+		expect(qbe.include?("=l loadl $trbn_gc_temp_data")).to_be_true()
+		expect(qbe.include?("=l mul %temporary_roots, 8")).to_be_true()
+		expect(qbe.include?("\tcall $trbn_gc_temp_reset(l %temporary_roots)")).to_be_false()
+	end
+
+	test("emits exact logical root segments and one managed-return epilogue") do
+		source := "record Bundle\n\tlabel: String\n\tlabels: Array<String>\nend\n\ndef select(mut bundle: Bundle, mut current: String): String\n\twhile current != \"done\"\n\t\tcurrent = bundle.label\n\t\tbundle = Bundle.new(label: current + \"done\", labels: bundle.labels)\n\t\treturn bundle.labels[0]\n\tend\n\treturn current\nend\n\ndef grow(mut current: String): String\n\tmut index := 0\n\twhile index < 2\n\t\tcurrent += \"x\"\n\t\tindex += 1\n\tend\n\treturn current\nend\n\ndef main()\n\tmut labels: Array<String> := []\n\tlabels.push(\"kept\")\n\tbundle := Bundle.new(label: \"next\", labels: labels)\n\tresult := grow(select(bundle, \"start\"))\n\tputs(result)\n\treturn\nend\n"
+		mut state := compiler_new(source.size() + 1)
+		expect(lex(state, source)).to_be_true()
+		expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_true()
+		qbe := output_source(emit_qbe(state))
+		expect(qbe.include?("\t%temporary_roots =l loadl $trbn_gc_temp_count")).to_be_true()
+		expect(qbe.include?("\tstorel %temporary_roots, $trbn_gc_temp_count")).to_be_true()
+		expect(qbe.include?("\tcall $trbn_gc_temp_reset(l %temporary_roots)")).to_be_false()
+		# The replacement's two fields survive allocation; the old owner and
+		# overwritten current binding are dead and need no roots of their own.
+		plan := state.scalar_mir.root_plans[mir_function_index(state.scalar_mir, 0)]
+		mut point := 0
+		mut constructions := 0
+		while point < plan.instructions.size()
+			instruction := state.scalar_mir.instructions[plan.instructions[point]]
+			if instruction.kind == 25
+				expect(plan.roots[point]).to_equal([state.scalar_mir.arguments[instruction.first], state.scalar_mir.arguments[instruction.first + 1]])
+				constructions += 1
+			end
+			point += 1
+		end
+		expect(constructions).to_equal(1)
+		expect(qbe.include?("\tcall $trbn_gc_temp_push(l %t")).to_be_false()
+		expect(
+			qbe.include?(
+				"\tstorel %temporary_roots, $trbn_gc_temp_count\n\t%return_result =l loadl %return_value\n\tcall $trbn_gc_temp_push(l %return_result)\n\tret %return_result\n",
+			),
+		).to_be_true()
+		expect(qbe.include?("$trbn_gc_roots")).to_be_false()
+		expect(qbe.include?("$trbn_gc_frame_enter")).to_be_false()
+		expect(qbe.include?("$trbn_gc_frame_leave")).to_be_false()
+	end
+
+	test("omits alias root publication when the function cannot allocate") do
+		source := "record Box\n\tvalues: Array<String>\nend\n\ndef first(box: Box): String\n\treturn box.values[0]\nend\n\ndef main()\n\tvalues := [\"kept\"]\n\tbox := Box.new(values: values)\n\tputs(first(box))\n\treturn\nend\n"
+		mut state := compiler_new(source.size() + 1)
+		expect(lex(state, source)).to_be_true()
+		expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_true()
+		qbe := output_source(emit_qbe(state))
+		# Failure reporting roots its message independently of authored functions.
+		expect(occurrence_count(qbe, "call $trbn_gc_temp_push(l %message)")).to_equal(1)
+		expect(occurrence_count(qbe, "call $trbn_gc_temp_push(l %return_result)")).to_equal(1)
+		expect(occurrence_count(qbe, "call $trbn_gc_temp_push")).to_equal(2)
+		expect(qbe.include?("\tcall $trbn_gc_temp_push(l %t")).to_be_false()
+		expect(qbe.include?("\tcall $trbn_gc_temp_push(l %object)")).to_be_false()
+		expect(qbe.include?("\tcall $trbn_gc_temp_push(l %return_result)")).to_be_true()
+	end
+
+	test("omits managed root publication only without GC safe points") do
+		prefix := "record FloatBucket\n\tvalues: Array<Float>\nend\n\n"
+		no_safe_point := prefix + "def sum(bucket: FloatBucket): Float\n\tmut values := bucket.values\n\tmut total: Float := 0\n\tmut index := 0\n\twhile index < values.size()\n\t\ttotal += values[index]\n\t\tindex += 1\n\tend\n\treturn total\nend\n\ndef main()\n\treturn\nend\n"
+		mut no_safe_point_state := compiler_new(no_safe_point.size() + 1)
+		expect(lex(no_safe_point_state, no_safe_point)).to_be_true()
+		expect(parse_module(no_safe_point_state, 0, no_safe_point_state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(no_safe_point_state)).to_be_true()
+		expect(check(no_safe_point_state)).to_be_true()
+		no_safe_point_qbe := output_source(emit_qbe(no_safe_point_state))
+		expect(no_safe_point_qbe.include?("%temporary_roots =l loadl $trbn_gc_temp_count")).to_be_false()
+		expect(no_safe_point_qbe.include?("%root_capacity =l add %temporary_roots, 1")).to_be_false()
+
+		allocation := prefix + "def append(bucket: FloatBucket)\n\tmut values := bucket.values\n\tmut index := 0\n\twhile index < 1\n\t\tvalues.push(1.0)\n\t\tindex += 1\n\tend\n\treturn\nend\n\ndef main()\n\treturn\nend\n"
+		mut allocation_state := compiler_new(allocation.size() + 1)
+		expect(lex(allocation_state, allocation)).to_be_true()
+		expect(parse_module(allocation_state, 0, allocation_state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(allocation_state)).to_be_true()
+		expect(check(allocation_state)).to_be_true()
+		allocation_qbe := output_source(emit_qbe(allocation_state))
+		expect(allocation_qbe.include?("%temporary_roots =l loadl $trbn_gc_temp_count")).to_be_true()
+		expect(allocation_qbe.include?("%root_capacity =l add %temporary_roots, 1")).to_be_true()
+
+		call := prefix + "def observe(_value: Float)\n\treturn\nend\n\ndef visit(bucket: FloatBucket)\n\tmut values := bucket.values\n\tmut index := 0\n\twhile index < values.size()\n\t\tobserve(values[index])\n\t\tindex += 1\n\tend\n\treturn\nend\n\ndef main()\n\treturn\nend\n"
+		mut call_state := compiler_new(call.size() + 1)
+		expect(lex(call_state, call)).to_be_true()
+		expect(parse_module(call_state, 0, call_state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(call_state)).to_be_true()
+		expect(check(call_state)).to_be_true()
+		call_qbe := output_source(emit_qbe(call_state))
+		expect(call_qbe.include?("%temporary_roots =l loadl $trbn_gc_temp_count")).to_be_false()
+		expect(call_qbe.include?("%root_capacity =l add %temporary_roots, 1")).to_be_false()
+	end
+
+	test("publishes Array roots only at operations that can collect") do
+		source := "def observe(value: Array<String>)\n\treturn\nend\n\ndef carry(limit: Integer): String\n\tmut values: Array<String> := []\n\tvalues.push(\"kept\")\n\tmut index := 0\n\twhile index < limit\n\t\tindex += 1\n\tend\n\tvalues.push(\"after\")\n\treturn values[0]\nend\n\ndef call_in_loop(limit: Integer): String\n\tmut values: Array<String> := [\"kept\"]\n\tmut index := 0\n\twhile index < limit\n\t\tobserve(values)\n\t\tindex += 1\n\tend\n\treturn values[0]\nend\n\ndef main()\n\treturn\nend\n"
+		mut state := compiler_new(source.size() + 1)
+		expect(lex(state, source)).to_be_true()
+		expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_true()
+		# No safe point is invented at the scalar-only loop header/backedge.
+		carry := state.scalar_mir.root_plans[mir_function_index(state.scalar_mir, 1)]
+		expect(carry.instructions.size()).to_equal(3)
+		carry.instructions.each do |point|
+			kind := state.scalar_mir.instructions[point].kind
+			expect(kind == 19 || kind == 24).to_be_true()
+		end
+		called := state.scalar_mir.root_plans[mir_function_index(state.scalar_mir, 2)]
+		expect(called.instructions.size()).to_equal(2)
+		called.instructions.each do |point|
+			expect(state.scalar_mir.instructions[point].kind == 11).to_be_false()
+		end
+		qbe := output_source(emit_qbe(state))
+		expect(qbe.include?("%root_capacity =l add %temporary_roots, 1")).to_be_true()
+	end
+
+	test("retains Array loop values across allocating calls") do
+		source := "def observe_loop_value(value: Array<String>)\n\tmut copy: Array<String> := []\n\tcopy.push(value[0])\n\treturn\nend\n\ndef make_loop_values(): Array<String>\n\treturn [\"made\"]\nend\n\ndef grow_in_loop(limit: Integer): String\n\tmut values: Array<String> := [\"kept\"]\n\tmut index := 0\n\twhile index < limit\n\t\tvalues.push(\"grown\")\n\t\tindex += 1\n\tend\n\treturn values[0]\nend\n\ndef allocate_in_loop(limit: Integer): String\n\tmut values: Array<String> := [\"kept\"]\n\tmut index := 0\n\twhile index < limit\n\t\tmade: Array<String> := []\n\t\tif made.size() > 0\n\t\t\tputs(\"unexpected\")\n\t\tend\n\t\tindex += 1\n\tend\n\treturn values[0]\nend\n\ndef managed_result_in_loop(limit: Integer): String\n\tmut values: Array<String> := [\"kept\"]\n\tmut index := 0\n\twhile index < limit\n\t\tmade := make_loop_values()\n\t\tif made.size() == 0\n\t\t\tputs(\"unexpected\")\n\t\tend\n\t\tindex += 1\n\tend\n\treturn values[0]\nend\n\ndef opaque_call_in_loop(limit: Integer): String\n\tmut values: Array<String> := [\"kept\"]\n\tmut index := 0\n\twhile index < limit\n\t\tobserve_loop_value(values)\n\t\tindex += 1\n\tend\n\treturn values[0]\nend\n\ndef main()\n\treturn\nend\n"
+		mut state := compiler_new(source.size() + 1)
+		expect(lex(state, source)).to_be_true()
+		expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_true()
+		mut function_id := 2
+		while function_id < 6
+			plan := state.scalar_mir.root_plans[mir_function_index(state.scalar_mir, function_id)]
+			mut expected_kind := 11
+			if function_id == 2
+				expected_kind = 24
+			elsif function_id == 3
+				expected_kind = 19
+			end
+			mut selected := -1
+			plan.instructions.each.with_index do |point, index|
+				if state.scalar_mir.instructions[point].kind == expected_kind
+					selected = index
+				end
+			end
+			expect(selected >= 0).to_be_true()
+			expect(plan.roots[selected].size() > 0).to_be_true()
+			function_id += 1
+		end
+		qbe := output_source(emit_qbe(state))
+		expect(qbe.include?("=l loadl $trbn_gc_temp_data")).to_be_true()
+	end
+
+	test("emits an opt-in sampled managed-runtime trace without changing stats v1") do
+		source := "def main()\n\tmut value := \"seed\"\n\tmut index := 0\n\twhile index < 2\n\t\tvalue += \"x\"\n\t\tindex += 1\n\tend\n\tputs(value)\n\treturn\nend\n"
+		mut state := compiler_new(source.size() + 1)
+		expect(lex(state, source)).to_be_true()
+		expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_true()
+		qbe := output_source(emit_qbe(state))
+		expect(qbe.include?("TYPE_RB_NATIVE_RUNTIME_TRACE")).to_be_true()
+		expect(qbe.include?("function $trbn_gc_trace_initialize()")).to_be_true()
+		expect(qbe.include?("function $trbn_gc_trace(w %automatic, l %collection)")).to_be_true()
+		expect(qbe.include?("\t%remainder =l rem %collection, 64")).to_be_true()
+		expect(qbe.include?("type-rb-native-gc-trace-v1,root-capacity,")).to_be_true()
+		expect(qbe.include?("\tcall $trbn_gc_trace(w %automatic, l %next_count)")).to_be_true()
+		expect(qbe.include?("@start\n\tcall $trbn_gc_trace_initialize()\n\tcall $trbn_initialize_globals()\n\tcall $trbnf0()")).to_be_true()
+		expect(qbe.include?("%disabled =w and %stats_disabled, %trace_disabled")).to_be_true()
+		expect(qbe.include?("type-rb-native-gc-stat-v1,collections,")).to_be_true()
+		expect(qbe.include?("type-rb-native-gc-stat-v2")).to_be_false()
+	end
+end

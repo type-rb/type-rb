@@ -1,0 +1,885 @@
+import { ascii_code } from support/literals
+import { project_json_advance, project_json_array, project_json_ascii_character, project_json_boolean, project_json_has_key, project_json_literal_at, project_json_object_after_value, project_json_object_key, project_json_object_open, project_json_set_error, project_json_skip_ignored, project_json_skip_value, project_json_string, project_json_string_map } from project/config_json
+
+record ProjectGoConfig
+	module_name: String
+	version: String
+	sqldef_present: Boolean
+	sqldef_command: String
+	sqldef_database: String
+	sqldef_schema: String
+end
+
+# A TypeRB package requirement: a version or Git source, or a local path.
+record ProjectPackageRequirement
+	name: String
+	source: String
+	version: String
+	path: String
+end
+
+# A localPackages entry that maps an import name to a source directory.
+record ProjectLocalPackage
+	name: String
+	path: String
+end
+
+# The validated parts of a db section. Its other settings belong to the
+# database commands.
+record ProjectDatabaseSection
+	adapter: String
+	schema: String
+	lock: String
+	source_present: Boolean
+	value: String
+	environment: String
+end
+
+record ProjectLintSection
+	preset: String
+	rules: Array<String>
+	levels: Array<String>
+end
+
+record ProjectConfig
+	name: String
+	version: String
+	mode: String
+	source_dir: String
+	out_dir: String
+	copy_files: Boolean
+	jobs_configuration: String
+	orm_options: String
+	package_management: String
+	go_config: ProjectGoConfig
+	packages: Array<ProjectPackageRequirement>
+	local_packages: Array<ProjectLocalPackage>
+	error: String
+	error_line: Integer
+end
+
+def parse_project_go_config(
+		source: String,
+		mut position: Array<Integer>,
+		mut line: Array<Integer>,
+		mut error: Array<String>,
+		mut error_line: Array<Integer>,
+	): ProjectGoConfig
+	mut module_name := ""
+	mut version := "1.27"
+	mut sqldef_present := false
+	mut sqldef_command := ""
+	mut sqldef_database := ""
+	mut sqldef_schema := ""
+	project_json_object_open(source, position, line, error, error_line)
+	mut seen: Array<String> := []
+	mut done := [false]
+	mut key_line := [0]
+	while !done[0]
+		key := project_json_object_key(source, position, line, error, error_line, seen, "go configuration", true, done, key_line)
+		if !done[0]
+			if key == "module"
+				module_name = project_json_string(source, position, line, error, error_line)
+			elsif key == "version"
+				version = project_json_string(source, position, line, error, error_line)
+			elsif key == "indirectDependencies"
+				mut names: Array<String> := []
+				mut versions: Array<String> := []
+				project_json_string_map(source, position, line, error, error_line, "go.indirectDependencies", names, versions)
+			elsif key == "sqldef"
+				sqldef_present = true
+				project_json_object_open(source, position, line, error, error_line)
+				mut sqldef_seen: Array<String> := []
+				mut sqldef_done := [false]
+				mut sqldef_key_line := [0]
+				while !sqldef_done[0]
+					field := project_json_object_key(source, position, line, error, error_line, sqldef_seen, "go.sqldef configuration", true, sqldef_done, sqldef_key_line)
+					if !sqldef_done[0]
+						if field == "command"
+							sqldef_command = project_json_string(source, position, line, error, error_line)
+						elsif field == "database"
+							sqldef_database = project_json_string(source, position, line, error, error_line)
+						elsif field == "schema"
+							sqldef_schema = project_json_string(source, position, line, error, error_line)
+						elsif field == "arguments"
+							project_json_array(source, position, line, error, error_line, true)
+						else
+							project_json_set_error(error, error_line, "unsupported go.sqldef configuration field " + field, sqldef_key_line[0])
+						end
+						project_json_object_after_value(source, position, line, error, error_line, "go.sqldef configuration")
+					end
+				end
+			else
+				project_json_set_error(error, error_line, "unsupported go configuration field " + key, key_line[0])
+			end
+			project_json_object_after_value(source, position, line, error, error_line, "go configuration")
+		end
+	end
+	if version == ""
+		version = "1.27"
+	end
+	return ProjectGoConfig.new(
+		module_name: module_name,
+		version: version,
+		sqldef_present: sqldef_present,
+		sqldef_command: sqldef_command,
+		sqldef_database: sqldef_database,
+		sqldef_schema: sqldef_schema,
+	)
+end
+
+# A requirement is a version String or an object with source, version or path.
+def parse_project_package_requirement(
+		source: String,
+		mut position: Array<Integer>,
+		mut line: Array<Integer>,
+		mut error: Array<String>,
+		mut error_line: Array<Integer>,
+		name: String,
+	): ProjectPackageRequirement
+	mut requirement_source := ""
+	mut version := ""
+	mut path := ""
+	if position[0] < source.size() && source[position[0]] == "\""
+		version = project_json_string(source, position, line, error, error_line)
+	elsif project_json_literal_at(source, position[0], "null")
+		project_json_set_error(error, error_line, "package requirement cannot be null", line[0])
+	else
+		project_json_object_open(source, position, line, error, error_line)
+		mut seen: Array<String> := []
+		mut done := [false]
+		mut key_line := [0]
+		while !done[0]
+			key := project_json_object_key(source, position, line, error, error_line, seen, "package requirement", true, done, key_line)
+			if !done[0]
+				if key == "source"
+					requirement_source = project_json_string(source, position, line, error, error_line)
+				elsif key == "version"
+					version = project_json_string(source, position, line, error, error_line)
+				elsif key == "path"
+					path = project_json_string(source, position, line, error, error_line)
+				else
+					project_json_set_error(error, error_line, "unsupported package requirement field " + key, key_line[0])
+				end
+				project_json_object_after_value(source, position, line, error, error_line, "package requirement")
+			end
+		end
+	end
+	return ProjectPackageRequirement.new(name: name, source: requirement_source, version: version, path: path)
+end
+
+def parse_project_packages(
+		source: String,
+		mut position: Array<Integer>,
+		mut line: Array<Integer>,
+		mut error: Array<String>,
+		mut error_line: Array<Integer>,
+		mut packages: Array<ProjectPackageRequirement>,
+	)
+	project_json_object_open(source, position, line, error, error_line)
+	mut seen: Array<String> := []
+	mut done := [false]
+	mut key_line := [0]
+	while !done[0]
+		name := project_json_object_key(source, position, line, error, error_line, seen, "packages", false, done, key_line)
+		if !done[0]
+			requirement := parse_project_package_requirement(source, position, line, error, error_line, name)
+			mut index := 0
+			mut replaced := false
+			while index < packages.size()
+				if packages[index].name == name
+					packages[index] = requirement
+					replaced = true
+				end
+				index += 1
+			end
+			if !replaced
+				packages.push(requirement)
+			end
+			project_json_object_after_value(source, position, line, error, error_line, "packages")
+		end
+	end
+	return
+end
+
+# Reads a section whose declared fields are all Strings, returning them in
+# the order of fields. Unknown fields are rejected like the reference decoder.
+def parse_project_string_section(
+		source: String,
+		mut position: Array<Integer>,
+		mut line: Array<Integer>,
+		mut error: Array<String>,
+		mut error_line: Array<Integer>,
+		context: String,
+		fields: Array<String>,
+		map_field: String,
+	): Array<String>
+	mut values: Array<String> := []
+	mut initialized := 0
+	while initialized < fields.size()
+		values.push("")
+		initialized += 1
+	end
+	project_json_object_open(source, position, line, error, error_line)
+	mut seen: Array<String> := []
+	mut done := [false]
+	mut key_line := [0]
+	while !done[0]
+		key := project_json_object_key(source, position, line, error, error_line, seen, context + " configuration", true, done, key_line)
+		if !done[0]
+			mut matched := false
+			mut index := 0
+			while index < fields.size()
+				if fields[index] == key
+					values[index] = project_json_string(source, position, line, error, error_line)
+					matched = true
+				end
+				index += 1
+			end
+			if !matched
+				if key == map_field
+					mut names: Array<String> := []
+					mut entries: Array<String> := []
+					project_json_string_map(source, position, line, error, error_line, context + "." + map_field, names, entries)
+				else
+					project_json_set_error(error, error_line, "unsupported " + context + " configuration field " + key, key_line[0])
+				end
+			end
+			project_json_object_after_value(source, position, line, error, error_line, context + " configuration")
+		end
+	end
+	return values
+end
+
+def parse_project_database(
+		source: String,
+		mut position: Array<Integer>,
+		mut line: Array<Integer>,
+		mut error: Array<String>,
+		mut error_line: Array<Integer>,
+		orm: Boolean,
+	): ProjectDatabaseSection
+	mut adapter := ""
+	mut schema := ""
+	mut lock := ""
+	mut source_present := false
+	mut value := ""
+	mut environment := ""
+	project_json_object_open(source, position, line, error, error_line)
+	mut seen: Array<String> := []
+	mut done := [false]
+	mut key_line := [0]
+	while !done[0]
+		key := project_json_object_key(source, position, line, error, error_line, seen, "db configuration", true, done, key_line)
+		if !done[0]
+			if key == "adapter"
+				adapter = project_json_string(source, position, line, error, error_line)
+			elsif !orm && key == "schema"
+				schema = project_json_string(source, position, line, error, error_line)
+			elsif(!orm && key == "lock") || (orm && key == "schemaLock")
+				lock = project_json_string(source, position, line, error, error_line)
+			elsif key == "database"
+				if project_json_literal_at(source, position[0], "null")
+					project_json_advance(position, 4)
+				elsif position[0] < source.size() && source[position[0]] == "\""
+					source_present = true
+					value = project_json_string(source, position, line, error, error_line)
+				else
+					source_present = true
+					project_json_object_open(source, position, line, error, error_line)
+					mut database_seen: Array<String> := []
+					mut database_done := [false]
+					mut database_key_line := [0]
+					while !database_done[0]
+						field := project_json_object_key(source, position, line, error, error_line, database_seen, "db.database", true, database_done, database_key_line)
+						if !database_done[0]
+							if field == "environment"
+								environment = project_json_string(source, position, line, error, error_line)
+							else
+								project_json_set_error(error, error_line, "db.database must be a string or an environment source", database_key_line[0])
+							end
+							project_json_object_after_value(source, position, line, error, error_line, "db.database")
+						end
+					end
+					if orm && project_config_blank(environment)
+						project_json_set_error(error, error_line, "database.environment is required", key_line[0])
+					end
+				end
+			elsif !orm && key == "sqldef"
+				project_json_object_open(source, position, line, error, error_line)
+				mut sqldef_seen: Array<String> := []
+				mut sqldef_done := [false]
+				mut sqldef_key_line := [0]
+				while !sqldef_done[0]
+					field := project_json_object_key(source, position, line, error, error_line, sqldef_seen, "db.sqldef configuration", true, sqldef_done, sqldef_key_line)
+					if !sqldef_done[0]
+						if field == "command" || field == "version"
+							project_json_string(source, position, line, error, error_line)
+						elsif field == "arguments"
+							project_json_array(source, position, line, error, error_line, true)
+						else
+							project_json_set_error(error, error_line, "unsupported db.sqldef configuration field " + field, sqldef_key_line[0])
+						end
+						project_json_object_after_value(source, position, line, error, error_line, "db.sqldef configuration")
+					end
+				end
+			else
+				project_json_set_error(error, error_line, "unsupported db configuration field " + key, key_line[0])
+			end
+			project_json_object_after_value(source, position, line, error, error_line, "db configuration")
+		end
+	end
+	return ProjectDatabaseSection.new(
+		adapter: adapter,
+		schema: schema,
+		lock: lock,
+		source_present: source_present,
+		value: value,
+		environment: environment,
+	)
+end
+
+def parse_project_lint(
+		source: String,
+		mut position: Array<Integer>,
+		mut line: Array<Integer>,
+		mut error: Array<String>,
+		mut error_line: Array<Integer>,
+	): ProjectLintSection
+	mut preset := ""
+	mut rules: Array<String> := []
+	mut levels: Array<String> := []
+	project_json_object_open(source, position, line, error, error_line)
+	mut seen: Array<String> := []
+	mut done := [false]
+	mut key_line := [0]
+	while !done[0]
+		key := project_json_object_key(source, position, line, error, error_line, seen, "lint configuration", true, done, key_line)
+		if !done[0]
+			if key == "preset"
+				preset = project_json_string(source, position, line, error, error_line)
+			elsif key == "rules"
+				project_json_string_map(source, position, line, error, error_line, "lint.rules", rules, levels)
+			else
+				project_json_set_error(error, error_line, "unsupported lint configuration field " + key, key_line[0])
+			end
+			project_json_object_after_value(source, position, line, error, error_line, "lint configuration")
+		end
+	end
+	return ProjectLintSection.new(preset: preset, rules: rules, levels: levels)
+end
+
+def project_config_blank(value: String): Boolean
+	mut index := 0
+	while index < value.size()
+		character := value[index]
+		mut whitespace := character == " "
+		if character == "\t"
+			whitespace = true
+		end
+		if character == "\r"
+			whitespace = true
+		end
+		if character == "\n"
+			whitespace = true
+		end
+		if !whitespace
+			return false
+		end
+		index += 1
+	end
+	return true
+end
+
+def project_config_clean_relative(
+		value: String,
+		field: String,
+		mut error: Array<String>,
+		mut error_line: Array<Integer>,
+	): String
+	if value.size() > 0
+		if value[0] == "/"
+			project_json_set_error(error, error_line, field + " must be relative to the project root", 1)
+			return ""
+		end
+	end
+	mut segments: Array<String> := []
+	mut segment_count := 0
+	mut segment := ""
+	mut index := 0
+	while index <= value.size()
+		mut boundary := index == value.size()
+		if !boundary
+			if value[index] == "/"
+				boundary = true
+			end
+		end
+		if boundary
+			if segment == ".."
+				if segment_count == 0
+					project_json_set_error(error, error_line, field + " cannot escape the project root", 1)
+				else
+					segment_count -= 1
+				end
+			else
+				if segment != ""
+					if segment != "."
+						if segment_count < segments.size()
+							segments[segment_count] = segment
+						else
+							segments.push(segment)
+						end
+						segment_count += 1
+					end
+				end
+			end
+			segment = ""
+		else
+			segment += value[index]
+		end
+		index += 1
+	end
+	mut result := ""
+	index = 0
+	while index < segment_count
+		if result != ""
+			result += "/"
+		end
+		result += segments[index]
+		index += 1
+	end
+	if result == ""
+		return "."
+	end
+	return result
+end
+
+def project_go_version_supported(value: String): Boolean
+	mut components: Array<Integer> := []
+	mut current := 0
+	mut digits := 0
+	mut index := 0
+	while index <= value.size()
+		mut boundary := index == value.size()
+		if !boundary
+			if value[index] == "."
+				boundary = true
+			end
+		end
+		if boundary
+			if digits == 0
+				return false
+			end
+			components.push(current)
+			current = 0
+			digits = 0
+		else
+			code := ascii_code(value[index])
+			if code < 48
+				return false
+			end
+			if code > 57
+				return false
+			end
+			digit := code - 48
+			if current > 900719925474099
+				return false
+			end
+			if current == 900719925474099
+				if digit > 1
+					return false
+				end
+			end
+			current = current * 10 + digit
+			digits += 1
+		end
+		index += 1
+	end
+	if components.size() < 2
+		return false
+	end
+	if components.size() > 3
+		return false
+	end
+	if components[0] > 1
+		return true
+	end
+	if components[0] < 1
+		return false
+	end
+	return components[1] >= 27
+end
+
+def project_config_trimmed(value: String): String
+	mut start := 0
+	mut finish := value.size()
+	while start < finish && project_config_blank(value[start])
+		start += 1
+	end
+	while finish > start && project_config_blank(value[finish - 1])
+		finish -= 1
+	end
+	mut result := ""
+	mut index := start
+	while index < finish
+		result += value[index]
+		index += 1
+	end
+	return result
+end
+
+def project_config_lower_ascii(value: String): String
+	mut result := ""
+	mut index := 0
+	while index < value.size()
+		code := ascii_code(value[index])
+		if code >= 65 && code <= 90
+			result += project_json_ascii_character(code + 32)
+		else
+			result += value[index]
+		end
+		index += 1
+	end
+	return result
+end
+
+def project_config_absolute(path: String): Boolean
+	if path.size() > 0 && path[0] == "/"
+		return true
+	end
+	return false
+end
+
+# Reports whether a relative path leaves its root once cleaned, matching the
+# reference's filepath.Clean check.
+def project_config_escapes_root(path: String): Boolean
+	mut depth := 0
+	mut segment := ""
+	mut index := 0
+	while index <= path.size()
+		if index == path.size() || path[index] == "/"
+			if segment == ".."
+				depth -= 1
+				if depth < 0
+					return true
+				end
+			elsif segment != "" && segment != "."
+				depth += 1
+			end
+			segment = ""
+		else
+			segment += path[index]
+		end
+		index += 1
+	end
+	return false
+end
+
+def project_config_below_root(path: String): Boolean
+	if project_config_absolute(path) || project_config_escapes_root(path)
+		return false
+	end
+	return true
+end
+
+# A package name is a clean relative path outside trb/ without spaces,
+# backslashes or @, like the reference's validPackageName.
+def project_config_valid_package_name(name: String): Boolean
+	if name == "" || project_config_absolute(name)
+		return false
+	end
+	if name.size() >= 4 && name[0] == "t" && name[1] == "r" && name[2] == "b" && name[3] == "/"
+		return false
+	end
+	mut segment := ""
+	mut index := 0
+	while index <= name.size()
+		if index == name.size() || name[index] == "/"
+			if segment == "" || segment == "." || segment == ".."
+				return false
+			end
+			segment = ""
+		else
+			character := name[index]
+			if character == " " || character == "\\" || character == "@"
+				return false
+			end
+			segment += character
+		end
+		index += 1
+	end
+	return true
+end
+
+def project_config_declared_mode(mode: String): Boolean
+	if mode == "go" || mode == "ruby" || mode == "typescript" || mode == "trb"
+		return true
+	end
+	return false
+end
+
+def parse_project_config(source: String): ProjectConfig
+	mut position := [0]
+	mut line := [1]
+	mut error := [""]
+	mut error_line := [1]
+	mut name := ""
+	mut version := "0.1.0"
+	mut mode := ""
+	mut source_dir := "."
+	mut out_dir := "build"
+	mut copy_files := true
+	mut package_management := "managed"
+	mut go_config := ProjectGoConfig.new(
+		module_name: "",
+		version: "1.27",
+		sqldef_present: false,
+		sqldef_command: "",
+		sqldef_database: "",
+		sqldef_schema: "",
+	)
+	mut packages: Array<ProjectPackageRequirement> := []
+	mut local_names: Array<String> := []
+	mut local_paths: Array<String> := []
+	mut dependency_names: Array<String> := []
+	mut dependency_versions: Array<String> := []
+	mut development_names: Array<String> := []
+	mut development_versions: Array<String> := []
+	mut ruby_loader := ""
+	mut typescript_runtime := ""
+	mut database_present := false
+	mut orm_options := ""
+	mut database := ProjectDatabaseSection.new(adapter: "", schema: "", lock: "", source_present: false, value: "", environment: "")
+	mut jobs_present := false
+	mut jobs_configuration := ""
+	mut no_rules: Array<String> := []
+	mut no_levels: Array<String> := []
+	mut lint := ProjectLintSection.new(preset: "", rules: no_rules, levels: no_levels)
+	project_json_skip_ignored(source, position, line, error, error_line)
+	project_json_object_open(source, position, line, error, error_line)
+	mut seen: Array<String> := []
+	mut done := [false]
+	mut key_line := [0]
+	while !done[0]
+		key := project_json_object_key(source, position, line, error, error_line, seen, "project configuration", true, done, key_line)
+		if !done[0]
+			if key == "$schema"
+				project_json_string(source, position, line, error, error_line)
+			elsif key == "name"
+				name = project_json_string(source, position, line, error, error_line)
+			elsif key == "version"
+				version = project_json_string(source, position, line, error, error_line)
+			elsif key == "mode"
+				mode = project_json_string(source, position, line, error, error_line)
+			elsif key == "sourceDir"
+				source_dir = project_json_string(source, position, line, error, error_line)
+			elsif key == "outDir"
+				out_dir = project_json_string(source, position, line, error, error_line)
+			elsif key == "copyFiles"
+				copy_files = project_json_boolean(source, position, line[0], error, error_line)
+			elsif key == "packageManagement"
+				package_management = project_json_string(source, position, line, error, error_line)
+			elsif key == "packages"
+				parse_project_packages(source, position, line, error, error_line, packages)
+			elsif key == "dependencies"
+				project_json_string_map(source, position, line, error, error_line, "dependencies", dependency_names, dependency_versions)
+			elsif key == "devDependencies"
+				project_json_string_map(source, position, line, error, error_line, "devDependencies", development_names, development_versions)
+			elsif key == "localPackages"
+				project_json_string_map(source, position, line, error, error_line, "localPackages", local_names, local_paths)
+			elsif key == "packageOptions"
+				# Package options stay opaque here; the owning package validates them.
+				project_json_object_open(source, position, line, error, error_line)
+				mut option_seen: Array<String> := []
+				mut option_done := [false]
+				mut option_key_line := [0]
+				while !option_done[0]
+					option := project_json_object_key(source, position, line, error, error_line, option_seen, "packageOptions", false, option_done, option_key_line)
+					if !option_done[0]
+						mut start := position[0]
+						project_json_skip_value(source, position, line, error, error_line)
+						if option == "trb/orm"
+							orm_options = ""
+							while start < position[0]
+								orm_options += source[start]
+								start += 1
+							end
+						end
+						project_json_object_after_value(source, position, line, error, error_line, "packageOptions")
+					end
+				end
+			elsif key == "ruby"
+				ruby := parse_project_string_section(source, position, line, error, error_line, "ruby", ["source", "version", "loader"], "")
+				ruby_loader = ruby[2]
+			elsif key == "go"
+				go_config = parse_project_go_config(source, position, line, error, error_line)
+			elsif key == "typescript"
+				typescript := parse_project_string_section(source, position, line, error, error_line, "typescript", ["packageManager", "moduleType", "runtime"], "scripts")
+				typescript_runtime = typescript[2]
+			elsif key == "db"
+				database_present = true
+				database = parse_project_database(source, position, line, error, error_line, false)
+			elsif key == "jobs"
+				jobs_present = true
+				jobs := parse_project_string_section(source, position, line, error, error_line, "jobs", ["configuration"], "")
+				jobs_configuration = jobs[0]
+			elsif key == "lint"
+				lint = parse_project_lint(source, position, line, error, error_line)
+			else
+				project_json_set_error(error, error_line, "unsupported project configuration field " + key, key_line[0])
+			end
+			project_json_object_after_value(source, position, line, error, error_line, "project configuration")
+		end
+	end
+	project_json_skip_ignored(source, position, line, error, error_line)
+	if error[0] == "" && position[0] != source.size()
+		project_json_set_error(error, error_line, "unexpected data after project configuration", line[0])
+	end
+	if error[0] == "" && project_config_blank(name)
+		project_json_set_error(error, error_line, "name is required", 1)
+	end
+	if error[0] == "" && mode != "" && !project_config_declared_mode(mode)
+		project_json_set_error(error, error_line, "mode must be go, ruby, typescript, or trb", 1)
+	end
+	if source_dir == ""
+		source_dir = "."
+	end
+	if out_dir == ""
+		out_dir = "build"
+	end
+	if package_management == ""
+		package_management = "managed"
+	end
+	if error[0] == ""
+		source_dir = project_config_clean_relative(source_dir, "sourceDir", error, error_line)
+	end
+	if error[0] == ""
+		out_dir = project_config_clean_relative(out_dir, "outDir", error, error_line)
+	end
+	if error[0] == "" && package_management != "managed" && package_management != "external"
+		project_json_set_error(error, error_line, "packageManagement must be managed or external", 1)
+	end
+	mut local_packages: Array<ProjectLocalPackage> := []
+	mut local_index := 0
+	while local_index < local_names.size()
+		local_name := local_names[local_index]
+		if error[0] == "" && !project_config_valid_package_name(local_name)
+			project_json_set_error(error, error_line, "invalid local package name " + local_name, 1)
+		end
+		if error[0] == "" && project_config_blank(local_paths[local_index])
+			project_json_set_error(error, error_line, "local package " + local_name + " requires a path", 1)
+		end
+		local_packages.push(ProjectLocalPackage.new(name: local_name, path: local_paths[local_index]))
+		local_index += 1
+	end
+	mut package_index := 0
+	while package_index < packages.size()
+		requirement := packages[package_index]
+		if error[0] == "" && !project_config_valid_package_name(requirement.name)
+			project_json_set_error(error, error_line, "invalid TypeRB package name " + requirement.name, 1)
+		end
+		if error[0] == "" && !project_config_blank(requirement.path)
+			if !project_config_blank(requirement.source) || !project_config_blank(requirement.version)
+				project_json_set_error(error, error_line, "TypeRB package " + requirement.name + " path cannot be combined with source or version", 1)
+			end
+		elsif error[0] == "" && project_config_blank(requirement.version)
+			project_json_set_error(error, error_line, "TypeRB package " + requirement.name + " requires a version or path", 1)
+		end
+		package_index += 1
+	end
+	mut dependency_index := 0
+	while error[0] == "" && mode == "typescript" && dependency_index < dependency_names.size()
+		dependency := dependency_names[dependency_index]
+		mut requirement_index := 0
+		while requirement_index < packages.size()
+			if error[0] == "" && packages[requirement_index].name == dependency
+				project_json_set_error(error, error_line, "dependency " + dependency + " is declared as both a TypeRB package and a native TypeScript package", 1)
+			end
+			requirement_index += 1
+		end
+		if error[0] == "" && project_json_has_key(local_names, dependency)
+			project_json_set_error(error, error_line, "dependency " + dependency + " is declared as both a local TypeRB package and a native TypeScript package", 1)
+		end
+		dependency_index += 1
+	end
+	if error[0] == "" && mode == "go" && project_config_blank(go_config.module_name)
+		project_json_set_error(error, error_line, "go.module is required for mode go", 1)
+	end
+	if error[0] == "" && !project_go_version_supported(go_config.version)
+		project_json_set_error(error, error_line, "go.version must be 1.27 or later", 1)
+	end
+	if error[0] == "" && go_config.sqldef_present
+		if project_config_blank(go_config.sqldef_command) || project_config_blank(go_config.sqldef_database) || project_config_blank(go_config.sqldef_schema)
+			project_json_set_error(error, error_line, "go.sqldef requires command, database, and schema", 1)
+		elsif !project_config_below_root(go_config.sqldef_database) || !project_config_below_root(go_config.sqldef_schema)
+			project_json_set_error(error, error_line, "go.sqldef database and schema must stay below the project root", 1)
+		end
+	end
+	if error[0] == "" && database_present
+		adapter := project_config_lower_ascii(project_config_trimmed(database.adapter))
+		if adapter != "sqlite" && adapter != "postgresql" && adapter != "mysql"
+			project_json_set_error(error, error_line, "db.adapter must be sqlite, postgresql, or mysql", 1)
+		elsif !project_config_below_root(database.schema)
+			project_json_set_error(error, error_line, "db.schema must stay below the project root", 1)
+		elsif !project_config_below_root(database.lock)
+			project_json_set_error(error, error_line, "db.lock must stay below the project root", 1)
+		elsif database.source_present && project_config_blank(database.value) && project_config_blank(database.environment)
+			project_json_set_error(error, error_line, "db.database must be a non-empty string or environment source", 1)
+		end
+	end
+	if error[0] == "" && jobs_present
+		mut configuration := project_config_trimmed(jobs_configuration)
+		if configuration.size() >= 4 && configuration[configuration.size() - 4] == "." && configuration[configuration.size() - 3] == "t" && configuration[configuration.size() - 2] == "r" && configuration[configuration.size() - 1] == "b"
+			mut stem := ""
+			mut stem_index := 0
+			while stem_index < configuration.size() - 4
+				stem += configuration[stem_index]
+				stem_index += 1
+			end
+			configuration = stem
+		end
+		if configuration == ""
+			project_json_set_error(error, error_line, "jobs.configuration is required", 1)
+		elsif !project_config_below_root(configuration)
+			project_json_set_error(error, error_line, "jobs.configuration must stay below sourceDir", 1)
+		else
+			jobs_configuration = configuration
+		end
+	end
+	if error[0] == ""
+		preset := project_config_trimmed(lint.preset)
+		if preset != "" && preset != "recommended" && preset != "none"
+			project_json_set_error(error, error_line, "lint.preset must be recommended or none", 1)
+		end
+	end
+	mut rule_index := 0
+	while error[0] == "" && rule_index < lint.rules.size()
+		level := project_config_trimmed(lint.levels[rule_index])
+		if level != "off" && level != "warning" && level != "error"
+			project_json_set_error(error, error_line, "lint rule " + lint.rules[rule_index] + " level must be off, warning, or error", 1)
+		end
+		rule_index += 1
+	end
+	if error[0] == "" && ruby_loader != "" && ruby_loader != "require_relative" && ruby_loader != "zeitwerk"
+		project_json_set_error(error, error_line, "ruby.loader must be require_relative or zeitwerk", 1)
+	end
+	if error[0] == "" && typescript_runtime != "" && typescript_runtime != "browser" && typescript_runtime != "bun" && typescript_runtime != "node"
+		project_json_set_error(error, error_line, "typescript.runtime must be browser, bun, or node", 1)
+	end
+	return ProjectConfig.new(
+		name: name,
+		version: version,
+		mode: mode,
+		source_dir: source_dir,
+		out_dir: out_dir,
+		copy_files: copy_files,
+		jobs_configuration: jobs_configuration,
+		orm_options: orm_options,
+		package_management: package_management,
+		go_config: go_config,
+		packages: packages,
+		local_packages: local_packages,
+		error: error[0],
+		error_line: error_line[0],
+	)
+end

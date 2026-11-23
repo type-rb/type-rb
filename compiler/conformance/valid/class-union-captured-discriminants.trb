@@ -1,0 +1,30 @@
+class Loaded
+	readonly @kind: "loaded" := "loaded"
+	@value: String
+	def initialize(value: String)
+		@value = value + "!"
+	end
+end
+class Missing
+	readonly @kind: "missing" := "missing"
+	@code: Integer := 404
+end
+alias Response = Loaded | Missing
+def read(value: Response): String
+	return case value.kind
+	when "loaded"
+		value.value
+	when "missing"
+		value.code.to_s()
+	end
+end
+def retain(value: Response): () -> String
+	return fn(): String
+		return read(value)
+	end
+end
+
+def main()
+	reader := retain(Loaded.new("held"))
+	puts(reader())
+end

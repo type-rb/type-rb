@@ -1,0 +1,195 @@
+# Each instruction owns its payload domain. Equal numeric encodings across
+# these families do not make them interchangeable. Empty payloads, SSA operands
+# and table indices remain distinct from modes. Runtime wire values stay fixed.
+
+# conversion
+
+def mir_convert_integer_to_string(): Integer
+	return 1
+end
+
+def mir_convert_string_to_integer(): Integer
+	return 2
+end
+
+def mir_convert_float_to_integer(): Integer
+	return 3
+end
+
+def mir_convert_float_to_string(): Integer
+	return 4
+end
+
+def mir_convert_boolean_to_string(): Integer
+	return 5
+end
+
+def mir_convert_string_to_float(): Integer
+	return 6
+end
+
+def mir_convert_string_integer_status(): Integer
+	return 7
+end
+
+def mir_convert_string_float_status(): Integer
+	return 8
+end
+
+# puts
+
+def mir_puts_scalar_mode(): Integer
+	return 0
+end
+
+def mir_puts_any_mode(): Integer
+	return 1
+end
+
+# compare
+
+def mir_string_compare_equal(): Integer
+	return 0
+end
+
+def mir_string_compare_not_equal(): Integer
+	return 1
+end
+
+def mir_string_compare_before(): Integer
+	return 2
+end
+
+# case
+
+def mir_string_case_upper(): Integer
+	return 0
+end
+
+def mir_string_case_lower(): Integer
+	return 1
+end
+
+# trim
+
+def mir_string_trim_both(): Integer
+	return 0
+end
+
+def mir_string_trim_left(): Integer
+	return 1
+end
+
+def mir_string_trim_right(): Integer
+	return 2
+end
+
+# sequence
+
+def mir_string_sequence_codepoints(): Integer
+	return 0
+end
+
+def mir_string_sequence_chars(): Integer
+	return 1
+end
+
+def mir_string_sequence_reverse(): Integer
+	return 2
+end
+
+# query
+
+def mir_string_query_first(): Integer
+	return 0
+end
+
+def mir_string_query_last(): Integer
+	return 1
+end
+
+def mir_string_query_prefix(): Integer
+	return 2
+end
+
+def mir_string_query_suffix(): Integer
+	return 3
+end
+
+def mir_string_query_contains(): Integer
+	return 4
+end
+
+# copy
+
+def mir_array_copy_duplicate(): Integer
+	return 0
+end
+
+def mir_array_copy_reverse(): Integer
+	return 1
+end
+
+def mir_array_copy_slice(): Integer
+	return 2
+end
+
+# mutate
+
+def mir_array_mutate_unshift(): Integer
+	return 0
+end
+
+def mir_array_mutate_pop(): Integer
+	return 1
+end
+
+def mir_array_mutate_shift(): Integer
+	return 2
+end
+
+# guard
+
+def mir_guard_clamp_bounds(): Integer
+	return 1
+end
+
+def mir_guard_array_not_empty(): Integer
+	return 2
+end
+
+def mir_guard_slice_size(): Integer
+	return 3
+end
+
+def mir_guard_enum_variant(): Integer
+	return 4
+end
+
+def mir_guard_concurrent_limit(): Integer
+	return 5
+end
+
+# range
+
+def mir_range_field_first(): Integer
+	return 0
+end
+
+def mir_range_field_last(): Integer
+	return 1
+end
+
+def mir_range_field_exclusive(): Integer
+	return 2
+end
+
+# nil
+
+def mir_nil_test_equal(): Integer
+	return 0
+end
+
+def mir_nil_test_not_equal(): Integer
+	return 1
+end

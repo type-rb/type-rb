@@ -1,0 +1,728 @@
+import { Diagnostic, boundary_diagnostic } from support/diagnostic
+import { ComparisonOperator, FloatBinaryOperator, IntegerBinaryOperator, RecoveryScalarInstruction, ScalarType } from scalar/mir
+import { RecoveryAggregateBlock, RecoveryAggregateFunction, RecoveryAggregateInstruction, RecoveryAggregateModule, RecoveryAggregateParameter, RecoveryAggregateResultType, RecoveryAggregateTerminator, verify_recovery_aggregate_mir } from aggregate/mir
+import { AggregateField, AggregateTypeDefinition, AggregateValueType, AggregateVariant } from aggregate/layout
+import { NativeSource } from snapshot/mir
+import { object, required_array, required_field, required_integer, required_string, strict_object } from snapshot/json_boundary
+import { decode_origin } from snapshot/schema
+import trb/std/json
+import trb/std/result
+
+AGGREGATE_RECOVERY_MAX_INPUT_BYTES := 4194304
+AGGREGATE_RECOVERY_MAX_SOURCES := 256
+AGGREGATE_RECOVERY_MAX_FUNCTIONS := 512
+AGGREGATE_RECOVERY_SNAPSHOT_MAX_TYPES := 1024
+AGGREGATE_RECOVERY_SNAPSHOT_MAX_FIELDS := 256
+AGGREGATE_RECOVERY_SNAPSHOT_MAX_VARIANTS := 1024
+AGGREGATE_RECOVERY_MAX_PARAMETERS := 256
+AGGREGATE_RECOVERY_MAX_BLOCKS := 1024
+AGGREGATE_RECOVERY_MAX_INSTRUCTIONS := 16384
+AGGREGATE_RECOVERY_MAX_ARGUMENTS := 256
+AGGREGATE_RECOVERY_MAX_STATIC_BYTES := 1048576
+AGGREGATE_RECOVERY_MAX_IDENTIFIER_SIZE := 256
+AGGREGATE_RECOVERY_MAX_SOURCE_PATH_SIZE := 4096
+
+def decode_recovery_aggregate_snapshot(source: String): Result<RecoveryAggregateModule, Diagnostic>
+	if source.to_bytes().size() > AGGREGATE_RECOVERY_MAX_INPUT_BYTES
+		return Result<RecoveryAggregateModule, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0005", "", "snapshot exceeds the Aggregate recovery 4 MiB input limit")
+		)
+	end
+	root := case JSON.parse(source)
+	when Result::Ok(value)
+		value
+	when Result::Err(error)
+		return Result<RecoveryAggregateModule, Diagnostic>::Err(
+			Diagnostic.new(
+				code: "TRBN0001",
+				path: error.path,
+				message: error.message,
+				start_line: error.line,
+				start_column: error.column,
+			)
+		)
+	end
+	fields := try strict_object(
+		root,
+		"",
+		["format", "version", "module", "entryFunction", "sources", "types", "functions"],
+	)
+	format := try required_string(fields, "format", "", false)
+	if format != "type-rb-bootstrap-snapshot"
+		return Result<RecoveryAggregateModule, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0003", "/format", "unsupported snapshot format")
+		)
+	end
+	version := try required_integer(fields, "version", "")
+	if version != 3
+		return Result<RecoveryAggregateModule, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0003", "/version", "unsupported Aggregate recovery snapshot version")
+		)
+	end
+	source_values := try required_array(fields, "sources", "")
+	if source_values.size() > AGGREGATE_RECOVERY_MAX_SOURCES
+		return Result<RecoveryAggregateModule, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0005", "/sources", "source count exceeds the Aggregate recovery limit")
+		)
+	end
+	mut sources: Array<NativeSource> := []
+	mut source_index := 0
+	while source_index < source_values.size()
+		sources.push(try _recovery_aggregate_decode_source(source_values[source_index], "/sources/" + source_index.to_s()))
+		source_index += 1
+	end
+	type_values := try required_array(fields, "types", "")
+	if type_values.size() > AGGREGATE_RECOVERY_SNAPSHOT_MAX_TYPES
+		return Result<RecoveryAggregateModule, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0005", "/types", "type definition count exceeds the Aggregate recovery limit")
+		)
+	end
+	mut types: Array<AggregateTypeDefinition> := []
+	mut type_index := 0
+	while type_index < type_values.size()
+		types.push(try _recovery_aggregate_decode_type_definition(type_values[type_index], "/types/" + type_index.to_s()))
+		type_index += 1
+	end
+	function_values := try required_array(fields, "functions", "")
+	if function_values.size() > AGGREGATE_RECOVERY_MAX_FUNCTIONS
+		return Result<RecoveryAggregateModule, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0005", "/functions", "function count exceeds the Aggregate recovery limit")
+		)
+	end
+	mut functions: Array<RecoveryAggregateFunction> := []
+	mut function_index := 0
+	while function_index < function_values.size()
+		functions.push(try _recovery_aggregate_decode_function(function_values[function_index], "/functions/" + function_index.to_s()))
+		function_index += 1
+	end
+	native_module := RecoveryAggregateModule.new(
+		id: try required_string(fields, "module", "", true),
+		entry_function: try required_string(fields, "entryFunction", "", true),
+		sources: sources,
+		types: types,
+		functions: functions,
+	)
+	try verify_recovery_aggregate_mir(native_module)
+	return Result<RecoveryAggregateModule, Diagnostic>::Ok(native_module)
+end
+
+def _recovery_aggregate_decode_type_definition(value: JSON::Value, path: String): Result<AggregateTypeDefinition, Diagnostic>
+	base_fields := try object(value, path)
+	kind := try required_string(base_fields, "kind", path, false)
+	if kind == "record"
+		fields := try strict_object(value, path, ["kind", "id", "fields"])
+		return Result<AggregateTypeDefinition, Diagnostic>::Ok(
+			AggregateTypeDefinition::Record(
+				try required_string(fields, "id", path, true),
+				try _recovery_aggregate_decode_fields(try required_array(fields, "fields", path), path + "/fields"),
+			)
+		)
+	end
+	if kind == "tagged"
+		fields := try strict_object(value, path, ["kind", "id", "variants"])
+		variant_values := try required_array(fields, "variants", path)
+		if variant_values.size() > AGGREGATE_RECOVERY_SNAPSHOT_MAX_VARIANTS
+			return Result<AggregateTypeDefinition, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0005", path + "/variants", "variant count exceeds the Aggregate recovery limit")
+			)
+		end
+		mut variants: Array<AggregateVariant> := []
+		mut index := 0
+		while index < variant_values.size()
+			variant_path := path + "/variants/" + index.to_s()
+			variant_fields := try strict_object(variant_values[index], variant_path, ["name", "fields"])
+			variants.push(
+				AggregateVariant.new(
+					name: try required_string(variant_fields, "name", variant_path, true),
+					fields: try _recovery_aggregate_decode_fields(
+						try required_array(variant_fields, "fields", variant_path),
+						variant_path + "/fields",
+					),
+				)
+			)
+			index += 1
+		end
+		return Result<AggregateTypeDefinition, Diagnostic>::Ok(
+			AggregateTypeDefinition::Tagged(
+				try required_string(fields, "id", path, true),
+				variants,
+			)
+		)
+	end
+	return Result<AggregateTypeDefinition, Diagnostic>::Err(
+		boundary_diagnostic("TRBN0003", path + "/kind", "unsupported Aggregate recovery type definition")
+	)
+end
+
+def _recovery_aggregate_decode_fields(values: Array<JSON::Value>, path: String): Result<Array<AggregateField>, Diagnostic>
+	if values.size() > AGGREGATE_RECOVERY_SNAPSHOT_MAX_FIELDS
+		return Result<Array<AggregateField>, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0005", path, "field count exceeds the Aggregate recovery limit")
+		)
+	end
+	mut fields: Array<AggregateField> := []
+	mut index := 0
+	while index < values.size()
+		field_path := path + "/" + index.to_s()
+		item := try strict_object(values[index], field_path, ["name", "type"])
+		fields.push(
+			AggregateField.new(
+				name: try required_string(item, "name", field_path, true),
+				value_type: try _recovery_aggregate_decode_value_type(
+					try required_string(item, "type", field_path, false),
+					field_path + "/type",
+				),
+			)
+		)
+		index += 1
+	end
+	return Result<Array<AggregateField>, Diagnostic>::Ok(fields)
+end
+
+def _recovery_aggregate_decode_source(value: JSON::Value, path: String): Result<NativeSource, Diagnostic>
+	fields := try strict_object(value, path, ["id", "path"])
+	source_path := try required_string(fields, "path", path, false)
+	if source_path.empty?()
+		return Result<NativeSource, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0004", path + "/path", "source path must not be empty")
+		)
+	end
+	if source_path.size() > AGGREGATE_RECOVERY_MAX_SOURCE_PATH_SIZE
+		return Result<NativeSource, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0005", path + "/path", "source path exceeds the Aggregate recovery limit")
+		)
+	end
+	return Result<NativeSource, Diagnostic>::Ok(
+		NativeSource.new(
+			id: try required_string(fields, "id", path, true),
+			path: source_path,
+		)
+	)
+end
+
+def _recovery_aggregate_decode_function(value: JSON::Value, path: String): Result<RecoveryAggregateFunction, Diagnostic>
+	fields := try strict_object(value, path, ["id", "name", "parameters", "result", "entry", "origin", "blocks"])
+	parameter_values := try required_array(fields, "parameters", path)
+	if parameter_values.size() > AGGREGATE_RECOVERY_MAX_PARAMETERS
+		return Result<RecoveryAggregateFunction, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0005", path + "/parameters", "parameter count exceeds the Aggregate recovery limit")
+		)
+	end
+	mut parameters: Array<RecoveryAggregateParameter> := []
+	mut parameter_index := 0
+	while parameter_index < parameter_values.size()
+		parameters.push(
+			try _recovery_aggregate_decode_parameter(parameter_values[parameter_index], path + "/parameters/" + parameter_index.to_s())
+		)
+		parameter_index += 1
+	end
+	block_values := try required_array(fields, "blocks", path)
+	if block_values.size() > AGGREGATE_RECOVERY_MAX_BLOCKS
+		return Result<RecoveryAggregateFunction, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0005", path + "/blocks", "block count exceeds the Aggregate recovery limit")
+		)
+	end
+	mut blocks: Array<RecoveryAggregateBlock> := []
+	mut block_index := 0
+	while block_index < block_values.size()
+		blocks.push(try _recovery_aggregate_decode_block(block_values[block_index], path + "/blocks/" + block_index.to_s()))
+		block_index += 1
+	end
+	return Result<RecoveryAggregateFunction, Diagnostic>::Ok(
+		RecoveryAggregateFunction.new(
+			id: try required_string(fields, "id", path, true),
+			name: try required_string(fields, "name", path, true),
+			parameters: parameters,
+			result_type: try _recovery_aggregate_decode_result_type(
+				try required_string(fields, "result", path, false),
+				path + "/result",
+			),
+			entry: try required_string(fields, "entry", path, true),
+			origin: try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+			blocks: blocks,
+		)
+	)
+end
+
+def _recovery_aggregate_decode_parameter(value: JSON::Value, path: String): Result<RecoveryAggregateParameter, Diagnostic>
+	fields := try strict_object(value, path, ["id", "type", "origin"])
+	return Result<RecoveryAggregateParameter, Diagnostic>::Ok(
+		RecoveryAggregateParameter.new(
+			id: try required_string(fields, "id", path, true),
+			value_type: try _recovery_aggregate_decode_value_type(
+				try required_string(fields, "type", path, false),
+				path + "/type",
+			),
+			origin: try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+		)
+	)
+end
+
+def _recovery_aggregate_decode_value_type(name: String, path: String): Result<AggregateValueType, Diagnostic>
+	if name == "Boolean"
+		return Result<AggregateValueType, Diagnostic>::Ok(AggregateValueType::Scalar(ScalarType::Boolean))
+	end
+	if name == "Integer"
+		return Result<AggregateValueType, Diagnostic>::Ok(AggregateValueType::Scalar(ScalarType::Integer))
+	end
+	if name == "Float"
+		return Result<AggregateValueType, Diagnostic>::Ok(AggregateValueType::Scalar(ScalarType::Float))
+	end
+	if name.empty?() || name == "Void"
+		return Result<AggregateValueType, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0003", path, "unsupported Aggregate recovery value type")
+		)
+	end
+	return Result<AggregateValueType, Diagnostic>::Ok(AggregateValueType::Aggregate(name))
+end
+
+def _recovery_aggregate_decode_result_type(name: String, path: String): Result<RecoveryAggregateResultType, Diagnostic>
+	if name == "Void"
+		return Result<RecoveryAggregateResultType, Diagnostic>::Ok(RecoveryAggregateResultType::Void)
+	end
+	return Result<RecoveryAggregateResultType, Diagnostic>::Ok(
+		RecoveryAggregateResultType::Value(try _recovery_aggregate_decode_value_type(name, path))
+	)
+end
+
+def _recovery_aggregate_decode_block(value: JSON::Value, path: String): Result<RecoveryAggregateBlock, Diagnostic>
+	fields := try strict_object(value, path, ["id", "parameters", "origin", "instructions", "terminator"])
+	parameter_values := try required_array(fields, "parameters", path)
+	if parameter_values.size() > AGGREGATE_RECOVERY_MAX_PARAMETERS
+		return Result<RecoveryAggregateBlock, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0005", path + "/parameters", "block parameter count exceeds the Aggregate recovery limit")
+		)
+	end
+	mut parameters: Array<RecoveryAggregateParameter> := []
+	mut parameter_index := 0
+	while parameter_index < parameter_values.size()
+		parameters.push(
+			try _recovery_aggregate_decode_parameter(parameter_values[parameter_index], path + "/parameters/" + parameter_index.to_s())
+		)
+		parameter_index += 1
+	end
+	instruction_values := try required_array(fields, "instructions", path)
+	if instruction_values.size() > AGGREGATE_RECOVERY_MAX_INSTRUCTIONS
+		return Result<RecoveryAggregateBlock, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0005", path + "/instructions", "instruction count exceeds the Aggregate recovery limit")
+		)
+	end
+	mut instructions: Array<RecoveryAggregateInstruction> := []
+	mut instruction_index := 0
+	while instruction_index < instruction_values.size()
+		instructions.push(
+			try _recovery_aggregate_decode_instruction(instruction_values[instruction_index], path + "/instructions/" + instruction_index.to_s())
+		)
+		instruction_index += 1
+	end
+	return Result<RecoveryAggregateBlock, Diagnostic>::Ok(
+		RecoveryAggregateBlock.new(
+			id: try required_string(fields, "id", path, true),
+			parameters: parameters,
+			origin: try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+			instructions: instructions,
+			terminator: try _recovery_aggregate_decode_terminator(try required_field(fields, "terminator", path), path + "/terminator"),
+		)
+	)
+end
+
+def _recovery_aggregate_decode_instruction(value: JSON::Value, path: String): Result<RecoveryAggregateInstruction, Diagnostic>
+	base_fields := try object(value, path)
+	op := try required_string(base_fields, "op", path, false)
+	if op == "boolean_literal"
+		fields := try strict_object(value, path, ["op", "result", "value", "origin"])
+		return Result<RecoveryAggregateInstruction, Diagnostic>::Ok(
+			RecoveryAggregateInstruction::Scalar(
+				RecoveryScalarInstruction::BooleanLiteral(
+					try required_string(fields, "result", path, true),
+					try _recovery_aggregate_required_boolean(fields, "value", path),
+					try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+				)
+			)
+		)
+	end
+	if op == "integer_literal"
+		fields := try strict_object(value, path, ["op", "result", "value", "origin"])
+		return Result<RecoveryAggregateInstruction, Diagnostic>::Ok(
+			RecoveryAggregateInstruction::Scalar(
+				RecoveryScalarInstruction::IntegerLiteral(
+					try required_string(fields, "result", path, true),
+					try required_integer(fields, "value", path),
+					try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+				)
+			)
+		)
+	end
+	if op == "float_literal"
+		fields := try strict_object(value, path, ["op", "result", "value", "origin"])
+		return Result<RecoveryAggregateInstruction, Diagnostic>::Ok(
+			RecoveryAggregateInstruction::Scalar(
+				RecoveryScalarInstruction::FloatLiteral(
+					try required_string(fields, "result", path, true),
+					try _recovery_aggregate_required_float(fields, "value", path),
+					try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+				)
+			)
+		)
+	end
+	if op == "integer_binary"
+		fields := try strict_object(value, path, ["op", "result", "operator", "left", "right", "origin"])
+		return Result<RecoveryAggregateInstruction, Diagnostic>::Ok(
+			RecoveryAggregateInstruction::Scalar(
+				RecoveryScalarInstruction::IntegerBinary(
+					try required_string(fields, "result", path, true),
+					try _recovery_aggregate_integer_operator(try required_string(fields, "operator", path, false), path + "/operator"),
+					try required_string(fields, "left", path, true),
+					try required_string(fields, "right", path, true),
+					try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+				)
+			)
+		)
+	end
+	if op == "float_binary"
+		fields := try strict_object(value, path, ["op", "result", "operator", "left", "right", "origin"])
+		return Result<RecoveryAggregateInstruction, Diagnostic>::Ok(
+			RecoveryAggregateInstruction::Scalar(
+				RecoveryScalarInstruction::FloatBinary(
+					try required_string(fields, "result", path, true),
+					try _recovery_aggregate_float_operator(try required_string(fields, "operator", path, false), path + "/operator"),
+					try required_string(fields, "left", path, true),
+					try required_string(fields, "right", path, true),
+					try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+				)
+			)
+		)
+	end
+	if op == "integer_compare" || op == "float_compare"
+		fields := try strict_object(value, path, ["op", "result", "operator", "left", "right", "origin"])
+		result := try required_string(fields, "result", path, true)
+		operator := try _recovery_aggregate_comparison_operator(try required_string(fields, "operator", path, false), path + "/operator")
+		left := try required_string(fields, "left", path, true)
+		right := try required_string(fields, "right", path, true)
+		origin := try decode_origin(try required_field(fields, "origin", path), path + "/origin")
+		if op == "integer_compare"
+			return Result<RecoveryAggregateInstruction, Diagnostic>::Ok(
+				RecoveryAggregateInstruction::Scalar(RecoveryScalarInstruction::IntegerCompare(result, operator, left, right, origin))
+			)
+		end
+		return Result<RecoveryAggregateInstruction, Diagnostic>::Ok(
+			RecoveryAggregateInstruction::Scalar(RecoveryScalarInstruction::FloatCompare(result, operator, left, right, origin))
+		)
+	end
+	if op == "boolean_not"
+		fields := try strict_object(value, path, ["op", "result", "value", "origin"])
+		return Result<RecoveryAggregateInstruction, Diagnostic>::Ok(
+			RecoveryAggregateInstruction::Scalar(
+				RecoveryScalarInstruction::BooleanNot(
+					try required_string(fields, "result", path, true),
+					try required_string(fields, "value", path, true),
+					try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+				)
+			)
+		)
+	end
+	if op == "record_construct"
+		fields := try strict_object(value, path, ["op", "result", "type", "arguments", "origin"])
+		return Result<RecoveryAggregateInstruction, Diagnostic>::Ok(
+			RecoveryAggregateInstruction::RecordConstruct(
+				try required_string(fields, "result", path, true),
+				try required_string(fields, "type", path, true),
+				try _recovery_aggregate_required_string_array(fields, "arguments", path),
+				try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+			)
+		)
+	end
+	if op == "record_project"
+		fields := try strict_object(value, path, ["op", "result", "type", "record", "field", "origin"])
+		return Result<RecoveryAggregateInstruction, Diagnostic>::Ok(
+			RecoveryAggregateInstruction::RecordProject(
+				try required_string(fields, "result", path, true),
+				try required_string(fields, "type", path, true),
+				try required_string(fields, "record", path, true),
+				try required_string(fields, "field", path, true),
+				try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+			)
+		)
+	end
+	if op == "variant_construct"
+		fields := try strict_object(value, path, ["op", "result", "type", "variant", "arguments", "origin"])
+		return Result<RecoveryAggregateInstruction, Diagnostic>::Ok(
+			RecoveryAggregateInstruction::VariantConstruct(
+				try required_string(fields, "result", path, true),
+				try required_string(fields, "type", path, true),
+				try required_string(fields, "variant", path, true),
+				try _recovery_aggregate_required_string_array(fields, "arguments", path),
+				try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+			)
+		)
+	end
+	if op == "variant_test"
+		fields := try strict_object(value, path, ["op", "result", "type", "value", "variant", "origin"])
+		return Result<RecoveryAggregateInstruction, Diagnostic>::Ok(
+			RecoveryAggregateInstruction::VariantTest(
+				try required_string(fields, "result", path, true),
+				try required_string(fields, "type", path, true),
+				try required_string(fields, "value", path, true),
+				try required_string(fields, "variant", path, true),
+				try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+			)
+		)
+	end
+	if op == "variant_project"
+		fields := try strict_object(value, path, ["op", "result", "type", "value", "variant", "field", "origin"])
+		return Result<RecoveryAggregateInstruction, Diagnostic>::Ok(
+			RecoveryAggregateInstruction::VariantProject(
+				try required_string(fields, "result", path, true),
+				try required_string(fields, "type", path, true),
+				try required_string(fields, "value", path, true),
+				try required_string(fields, "variant", path, true),
+				try required_string(fields, "field", path, true),
+				try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+			)
+		)
+	end
+	if op == "call"
+		fields := try strict_object(value, path, ["op", "result", "function", "arguments", "origin"])
+		return Result<RecoveryAggregateInstruction, Diagnostic>::Ok(
+			RecoveryAggregateInstruction::Call(
+				try _recovery_aggregate_required_nullable_string(fields, "result", path),
+				try required_string(fields, "function", path, true),
+				try _recovery_aggregate_required_string_array(fields, "arguments", path),
+				try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+			)
+		)
+	end
+	if op == "write_static"
+		fields := try strict_object(value, path, ["op", "value", "origin"])
+		static_value := try required_string(fields, "value", path, false)
+		if static_value.to_bytes().size() > AGGREGATE_RECOVERY_MAX_STATIC_BYTES
+			return Result<RecoveryAggregateInstruction, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0005", path + "/value", "static output exceeds the Aggregate recovery limit")
+			)
+		end
+		return Result<RecoveryAggregateInstruction, Diagnostic>::Ok(
+			RecoveryAggregateInstruction::Scalar(
+				RecoveryScalarInstruction::WriteStatic(
+					static_value,
+					try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+				)
+			)
+		)
+	end
+	return Result<RecoveryAggregateInstruction, Diagnostic>::Err(
+		boundary_diagnostic("TRBN0003", path + "/op", "unsupported Aggregate recovery instruction")
+	)
+end
+
+def _recovery_aggregate_decode_terminator(value: JSON::Value, path: String): Result<RecoveryAggregateTerminator, Diagnostic>
+	base_fields := try object(value, path)
+	op := try required_string(base_fields, "op", path, false)
+	if op == "jump"
+		fields := try strict_object(value, path, ["op", "target", "arguments", "origin"])
+		return Result<RecoveryAggregateTerminator, Diagnostic>::Ok(
+			RecoveryAggregateTerminator::Jump(
+				try required_string(fields, "target", path, true),
+				try _recovery_aggregate_required_string_array(fields, "arguments", path),
+				try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+			)
+		)
+	end
+	if op == "branch"
+		fields := try strict_object(
+			value,
+			path,
+			["op", "condition", "whenTrue", "trueArguments", "whenFalse", "falseArguments", "origin"],
+		)
+		return Result<RecoveryAggregateTerminator, Diagnostic>::Ok(
+			RecoveryAggregateTerminator::Branch(
+				try required_string(fields, "condition", path, true),
+				try required_string(fields, "whenTrue", path, true),
+				try _recovery_aggregate_required_string_array(fields, "trueArguments", path),
+				try required_string(fields, "whenFalse", path, true),
+				try _recovery_aggregate_required_string_array(fields, "falseArguments", path),
+				try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+			)
+		)
+	end
+	if op == "return"
+		fields := try strict_object(value, path, ["op", "value", "origin"])
+		return Result<RecoveryAggregateTerminator, Diagnostic>::Ok(
+			RecoveryAggregateTerminator::Return(
+				try _recovery_aggregate_required_nullable_string(fields, "value", path),
+				try decode_origin(try required_field(fields, "origin", path), path + "/origin"),
+			)
+		)
+	end
+	return Result<RecoveryAggregateTerminator, Diagnostic>::Err(
+		boundary_diagnostic("TRBN0003", path + "/op", "unsupported Aggregate recovery terminator")
+	)
+end
+
+def _recovery_aggregate_integer_operator(name: String, path: String): Result<IntegerBinaryOperator, Diagnostic>
+	if name == "add"
+		return Result<IntegerBinaryOperator, Diagnostic>::Ok(IntegerBinaryOperator::Add)
+	end
+	if name == "subtract"
+		return Result<IntegerBinaryOperator, Diagnostic>::Ok(IntegerBinaryOperator::Subtract)
+	end
+	if name == "multiply"
+		return Result<IntegerBinaryOperator, Diagnostic>::Ok(IntegerBinaryOperator::Multiply)
+	end
+	if name == "divide"
+		return Result<IntegerBinaryOperator, Diagnostic>::Ok(IntegerBinaryOperator::Divide)
+	end
+	if name == "remainder"
+		return Result<IntegerBinaryOperator, Diagnostic>::Ok(IntegerBinaryOperator::Remainder)
+	end
+	if name == "power"
+		return Result<IntegerBinaryOperator, Diagnostic>::Ok(IntegerBinaryOperator::Power)
+	end
+	return Result<IntegerBinaryOperator, Diagnostic>::Err(
+		boundary_diagnostic("TRBN0003", path, "unsupported Aggregate recovery Integer operator")
+	)
+end
+
+def _recovery_aggregate_float_operator(name: String, path: String): Result<FloatBinaryOperator, Diagnostic>
+	if name == "add"
+		return Result<FloatBinaryOperator, Diagnostic>::Ok(FloatBinaryOperator::Add)
+	end
+	if name == "subtract"
+		return Result<FloatBinaryOperator, Diagnostic>::Ok(FloatBinaryOperator::Subtract)
+	end
+	if name == "multiply"
+		return Result<FloatBinaryOperator, Diagnostic>::Ok(FloatBinaryOperator::Multiply)
+	end
+	if name == "divide"
+		return Result<FloatBinaryOperator, Diagnostic>::Ok(FloatBinaryOperator::Divide)
+	end
+	return Result<FloatBinaryOperator, Diagnostic>::Err(
+		boundary_diagnostic("TRBN0003", path, "unsupported Aggregate recovery Float operator")
+	)
+end
+
+def _recovery_aggregate_comparison_operator(name: String, path: String): Result<ComparisonOperator, Diagnostic>
+	if name == "equal"
+		return Result<ComparisonOperator, Diagnostic>::Ok(ComparisonOperator::Equal)
+	end
+	if name == "not_equal"
+		return Result<ComparisonOperator, Diagnostic>::Ok(ComparisonOperator::NotEqual)
+	end
+	if name == "less_than"
+		return Result<ComparisonOperator, Diagnostic>::Ok(ComparisonOperator::LessThan)
+	end
+	if name == "less_than_or_equal"
+		return Result<ComparisonOperator, Diagnostic>::Ok(ComparisonOperator::LessThanOrEqual)
+	end
+	if name == "greater_than"
+		return Result<ComparisonOperator, Diagnostic>::Ok(ComparisonOperator::GreaterThan)
+	end
+	if name == "greater_than_or_equal"
+		return Result<ComparisonOperator, Diagnostic>::Ok(ComparisonOperator::GreaterThanOrEqual)
+	end
+	return Result<ComparisonOperator, Diagnostic>::Err(
+		boundary_diagnostic("TRBN0003", path, "unsupported Aggregate recovery comparison operator")
+	)
+end
+
+def _recovery_aggregate_required_boolean(
+		fields: Hash<String, JSON::Value>,
+		name: String,
+		path: String,
+	): Result<Boolean, Diagnostic>
+	value := try required_field(fields, name, path)
+	case value
+	when JSON::Value::Boolean(result)
+		return Result<Boolean, Diagnostic>::Ok(result)
+	else
+		return Result<Boolean, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0002", path + "/" + name, "expected a boolean")
+		)
+	end
+end
+
+def _recovery_aggregate_required_float(
+		fields: Hash<String, JSON::Value>,
+		name: String,
+		path: String,
+	): Result<Float, Diagnostic>
+	value := try required_field(fields, name, path)
+	case value
+	when JSON::Value::Float(result)
+		return Result<Float, Diagnostic>::Ok(result)
+	when JSON::Value::Integer(result)
+		return Result<Float, Diagnostic>::Ok(result.to_f())
+	else
+		return Result<Float, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0002", path + "/" + name, "expected a number")
+		)
+	end
+end
+
+def _recovery_aggregate_required_nullable_string(
+		fields: Hash<String, JSON::Value>,
+		name: String,
+		path: String,
+	): Result<String?, Diagnostic>
+	value := try required_field(fields, name, path)
+	case value
+	when JSON::Value::Null
+		return Result<String?, Diagnostic>::Ok(nil)
+	when JSON::Value::String(result)
+		if result.empty?()
+			return Result<String?, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0004", path + "/" + name, "identifier must not be empty")
+			)
+		end
+		if result.size() > AGGREGATE_RECOVERY_MAX_IDENTIFIER_SIZE
+			return Result<String?, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0005", path + "/" + name, "identifier exceeds the Aggregate recovery limit")
+			)
+		end
+		return Result<String?, Diagnostic>::Ok(result)
+	else
+		return Result<String?, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0002", path + "/" + name, "expected a string or null")
+		)
+	end
+end
+
+def _recovery_aggregate_required_string_array(
+		fields: Hash<String, JSON::Value>,
+		name: String,
+		path: String,
+	): Result<Array<String>, Diagnostic>
+	values := try required_array(fields, name, path)
+	if values.size() > AGGREGATE_RECOVERY_MAX_ARGUMENTS
+		return Result<Array<String>, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0005", path + "/" + name, "argument count exceeds the Aggregate recovery limit")
+		)
+	end
+	mut result: Array<String> := []
+	mut index := 0
+	while index < values.size()
+		case values[index]
+		when JSON::Value::String(item)
+			if item.empty?()
+				return Result<Array<String>, Diagnostic>::Err(
+					boundary_diagnostic("TRBN0004", path + "/" + name + "/" + index.to_s(), "identifier must not be empty")
+				)
+			end
+			if item.size() > AGGREGATE_RECOVERY_MAX_IDENTIFIER_SIZE
+				return Result<Array<String>, Diagnostic>::Err(
+					boundary_diagnostic(
+						"TRBN0005",
+						path + "/" + name + "/" + index.to_s(),
+						"identifier exceeds the Aggregate recovery limit",
+					)
+				)
+			end
+			result.push(item)
+		else
+			return Result<Array<String>, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0002", path + "/" + name + "/" + index.to_s(), "expected a string")
+			)
+		end
+		index += 1
+	end
+	return Result<Array<String>, Diagnostic>::Ok(result)
+end

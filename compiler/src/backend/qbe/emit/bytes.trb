@@ -1,0 +1,124 @@
+import { mir_file_scope_needed } from backend/qbe/emit/file_scopes
+import { mir_type_kind_bytes } from mir/model/type_kinds
+import { mir_op_bytes_at, mir_op_bytes_concat, mir_op_bytes_size, mir_op_bytes_to_string, mir_op_string_to_bytes } from mir/model/instructions
+import { MirInstruction, MirModule } from mir/model/module
+import { mir_operand_type, mir_storage_type_name } from mir/model/types
+import { QbeEmitContext, QbeValue, emit_label, emit_temporary, emitted_value } from backend/qbe/context
+import { QbeOutput, qbe_output_branch, qbe_output_line } from backend/qbe/output
+import { CompilerState } from state/state
+
+# Bytes rejects negative indexes. Its nonnegative length makes one unsigned
+# comparison reject both negative and past-end indexes without changing MIR
+# failure ordering. The adapter consumes the checked operation, not range facts.
+def emit_checked_bytes_at(owner: String, index: String, result: String, mut context: QbeEmitContext, mut output: QbeOutput)
+	length_slot := emit_temporary(context)
+	length := emit_temporary(context)
+	valid := emit_temporary(context)
+	accepted := emit_label(context)
+	rejected := emit_label(context)
+	data := emit_temporary(context)
+	address := emit_temporary(context)
+	byte := emit_temporary(context)
+	qbe_output_line(output, "\t" + length_slot + " =l add " + owner + ", 8")
+	qbe_output_line(output, "\t" + length + " =l loadl " + length_slot)
+	qbe_output_line(output, "\t" + valid + " =w cultl " + index + ", " + length)
+	qbe_output_branch(output, valid, accepted, rejected)
+	qbe_output_line(output, rejected)
+	qbe_output_line(output, "\tcall $trbn_fail(l $trbn_bytes_bounds_error, l 36)")
+	qbe_output_line(output, "\thlt")
+	qbe_output_line(output, accepted)
+	qbe_output_line(output, "\t" + data + " =l add " + owner + ", 24")
+	qbe_output_line(output, "\t" + address + " =l add " + data + ", " + index)
+	qbe_output_line(output, "\t" + byte + " =w loadub " + address)
+	qbe_output_line(output, "\t" + result + " =l extuw " + byte)
+end
+
+# Immutable Bytes can share raw String backing. Their semantic type stays
+# distinct; decoding recomputes valid UTF-8 and its code-point count.
+def emit_mir_bytes_instruction(state: CompilerState, value_types: Array<Integer>, instruction: MirInstruction, operands: Array<String>, mut context: QbeEmitContext, mut output: QbeOutput): QbeValue
+	first := operands[instruction.first]
+	result_type := mir_storage_type_name(state.scalar_mir, mir_operand_type(value_types, instruction.result))
+	if instruction.kind == mir_op_string_to_bytes()
+		return emitted_value(first, result_type)
+	end
+	result := emit_temporary(context)
+	if instruction.kind == mir_op_bytes_size()
+		address := emit_temporary(context)
+		qbe_output_line(output, "\t" + address + " =l add " + first + ", 8")
+		qbe_output_line(output, "\t" + result + " =l loadl " + address)
+	elsif instruction.kind == mir_op_bytes_at()
+		emit_checked_bytes_at(first, operands[instruction.second], result, context, output)
+	elsif instruction.kind == mir_op_bytes_concat()
+		qbe_output_line(output, "\t" + result + " =l call $trbn_string_concat(l " + first + ", l " + operands[instruction.second] + ")")
+	elsif instruction.kind == mir_op_bytes_to_string()
+		qbe_output_line(output, "\t" + result + " =l call $trbn_bytes_to_string(l " + first + ")")
+	else
+		qbe_output_line(output, "\t" + result + " =l call $trbn_bytes_valid_utf8(l " + first + ")")
+	end
+	return emitted_value(result, result_type)
+end
+
+# A negative span consumes one maximal ill-formed UTF-8 subpart.
+# Bounds and validity belong to these explicit runtime operations.
+def emit_bytes_runtime(native_module: MirModule, mut output: QbeOutput)
+	# The filesystem runtime shares UTF-8 validation even when its caller has no
+	# public Bytes value, including the CLI host boundary.
+	mut needed := mir_file_scope_needed(native_module)
+	native_module.types.each do |row|
+		if row.kind == mir_type_kind_bytes()
+			needed = true
+		end
+	end
+	if !needed
+		return
+	end
+	qbe_output_line(output, "data $trbn_bytes_bounds_error = { b \"panic: Bytes index is out of bounds\", b 10 }\n")
+	qbe_output_line(output, "function l $trbn_bytes_utf8_span(l %data, l %remaining) {\n@start\n %lead =w loadub %data\n %ascii =w cultw %lead, 128\n jnz %ascii, @ascii, @two_test\n@ascii\n ret 1\n@two_test\n %two_low =w cugew %lead, 194\n %two_high =w culew %lead, 223\n %two =w and %two_low, %two_high\n jnz %two, @two, @three_test\n@two\n jmp @second_bounds\n@three_test\n %three_low =w cugew %lead, 224\n %three_high =w culew %lead, 239\n %three =w and %three_low, %three_high\n jnz %three, @three, @four_test\n@three\n jmp @second_bounds\n@four_test\n %four_low =w cugew %lead, 240\n %four_high =w culew %lead, 244\n %four =w and %four_low, %four_high\n jnz %four, @four, @invalid_lead\n@four\n jmp @second_bounds\n@invalid_lead\n ret -1\n@second_bounds\n %width =l phi @two 2, @three 3, @four 4\n %missing =w cultl %remaining, 2\n jnz %missing, @invalid_lead, @second\n@second\n %secondp =l add %data, 1\n %second =w loadub %secondp\n %below =w cultw %second, 128\n %above =w cugtw %second, 191\n %not_continuation =w or %below, %above\n %e0 =w ceqw %lead, 224\n %short3 =w cultw %second, 160\n %overlong3 =w and %e0, %short3\n %ed =w ceqw %lead, 237\n %surrogate =w cugew %second, 160\n %surrogate3 =w and %ed, %surrogate\n %f0 =w ceqw %lead, 240\n %short4 =w cultw %second, 144\n %overlong4 =w and %f0, %short4\n %f4 =w ceqw %lead, 244\n %high4 =w cugew %second, 144\n %outside =w and %f4, %high4\n %bad1 =w or %not_continuation, %overlong3\n %bad2 =w or %surrogate3, %overlong4\n %bad3 =w or %bad1, %bad2\n %bad =w or %bad3, %outside\n jnz %bad, @invalid_lead, @second_valid\n@second_valid\n jmp @scan\n@scan\n %index =l phi @second_valid 2, @more %next\n %complete =w ceql %index, %width\n jnz %complete, @valid, @bounds\n@bounds\n %truncated =w cugel %index, %remaining\n jnz %truncated, @invalid_prefix, @continuation\n@continuation\n %address =l add %data, %index\n %byte =w loadub %address\n %low =w cultw %byte, 128\n %high =w cugtw %byte, 191\n %invalid =w or %low, %high\n jnz %invalid, @invalid_prefix, @more\n@more\n %next =l add %index, 1\n jmp @scan\n@invalid_prefix\n %negative =l sub 0, %index\n ret %negative\n@valid\n ret %width\n}\n")
+	# ASCII word loads require eight remaining bytes; other bytes retain the
+	# maximal-subpart decoder. The mask tests the high bit in every byte.
+	qbe_output_line(output, "function l $trbn_bytes_valid_utf8(l %value) {\n")
+	qbe_output_line(output, "@start\n %lenp =l add %value, 8\n %length =l loadl %lenp\n %data =l add %value, 24\n jmp @scan\n")
+	qbe_output_line(output, "@scan\n %offset =l phi @start 0, @advance %next, @ascii_step %ascii_next\n %done =w ceql %offset, %length\n jnz %done, @valid, @read\n")
+	qbe_output_line(output, "@read\n %address =l add %data, %offset\n %remaining =l sub %length, %offset\n %first =w loadub %address\n %ascii =w cultw %first, 128\n jnz %ascii, @ascii, @decode\n")
+	qbe_output_line(output, "@ascii\n %wide =w csgel %remaining, 8\n jnz %wide, @word, @ascii_byte\n")
+	qbe_output_line(output, "@word\n %word =l loadl %address\n %high =l and %word, -9187201950435737472\n %nonascii =w cnel %high, 0\n jnz %nonascii, @ascii_byte, @ascii_word\n")
+	qbe_output_line(output, "@ascii_byte\n jmp @ascii_step\n")
+	qbe_output_line(output, "@ascii_word\n jmp @ascii_step\n")
+	qbe_output_line(output, "@ascii_step\n %ascii_width =l phi @ascii_byte 1, @ascii_word 8\n %ascii_next =l add %offset, %ascii_width\n jmp @scan\n")
+	qbe_output_line(output, "@decode\n %span =l call $trbn_bytes_utf8_span(l %address, l %remaining)\n %bad =w csltl %span, 0\n jnz %bad, @invalid, @advance\n")
+	qbe_output_line(output, "@advance\n %next =l add %offset, %span\n jmp @scan\n")
+	qbe_output_line(output, "@invalid\n ret 0\n")
+	qbe_output_line(output, "@valid\n ret 1\n}\n")
+	# Measure the exact decoded size: GC derives allocation size from the final
+	# String length, so a maximum-sized reservation cannot share its descriptor.
+	# ASCII word loads require eight remaining bytes; other bytes retain the
+	# maximal-subpart decoder. The mask tests the high bit in every byte.
+	qbe_output_line(output, "function l $trbn_bytes_to_string(l %value) {\n")
+	qbe_output_line(output, "@start\n %lenp =l add %value, 8\n %length =l loadl %lenp\n %too_large =w cugtl %length, 3002399751580325\n jnz %too_large, @fail, @measure_start\n")
+	qbe_output_line(output, "@fail\n call $trbn_fatal(l $trbn_allocation_error, l 26)\n hlt\n")
+	qbe_output_line(output, "@measure_start\n %data =l add %value, 24\n jmp @measure\n")
+	qbe_output_line(output, "@measure\n %measure_offset =l phi @measure_start 0, @measured %measure_next\n %measured_size =l phi @measure_start 0, @measured %measure_size\n %measure_done =w ceql %measure_offset, %length\n jnz %measure_done, @allocate, @measure_read\n")
+	qbe_output_line(output, "@measure_read\n %measure_address =l add %data, %measure_offset\n %measure_remaining =l sub %length, %measure_offset\n %measure_first =w loadub %measure_address\n %measure_ascii =w cultw %measure_first, 128\n jnz %measure_ascii, @measure_ascii, @measure_decode\n")
+	qbe_output_line(output, "@measure_ascii\n %measure_wide =w csgel %measure_remaining, 8\n jnz %measure_wide, @measure_word, @measure_byte\n")
+	qbe_output_line(output, "@measure_word\n %measure_word =l loadl %measure_address\n %measure_high =l and %measure_word, -9187201950435737472\n %measure_nonascii =w cnel %measure_high, 0\n jnz %measure_nonascii, @measure_byte, @measure_ascii_word\n")
+	qbe_output_line(output, "@measure_byte\n jmp @measure_classify\n")
+	qbe_output_line(output, "@measure_ascii_word\n jmp @measure_classify\n")
+	qbe_output_line(output, "@measure_decode\n %measure_decoded =l call $trbn_bytes_utf8_span(l %measure_address, l %measure_remaining)\n jmp @measure_classify\n")
+	qbe_output_line(output, "@measure_classify\n %measure_span =l phi @measure_byte 1, @measure_ascii_word 8, @measure_decode %measure_decoded\n %measure_valid =w csgtl %measure_span, 0\n jnz %measure_valid, @measure_copy, @measure_replace\n")
+	qbe_output_line(output, "@measure_copy\n jmp @measured\n")
+	qbe_output_line(output, "@measure_replace\n %consumed =l sub 0, %measure_span\n jmp @measured\n")
+	qbe_output_line(output, "@measured\n %input_width =l phi @measure_copy %measure_span, @measure_replace %consumed\n %output_width =l phi @measure_copy %measure_span, @measure_replace 3\n %measure_next =l add %measure_offset, %input_width\n %measure_size =l add %measured_size, %output_width\n jmp @measure\n")
+	qbe_output_line(output, "@allocate\n %roots =l loadl $trbn_gc_temp_count\n call $trbn_gc_temp_push(l %value)\n %size =l add %measured_size, 17\n %result =l call $trbn_string_alloc(l %size)\n %target =l add %result, 24\n jmp @scan\n")
+	qbe_output_line(output, "@scan\n %offset =l phi @allocate 0, @advance %next_input\n %written =l phi @allocate 0, @advance %next_output\n %points =l phi @allocate 0, @advance %next_points\n %done =w ceql %offset, %length\n jnz %done, @finish, @read\n")
+	qbe_output_line(output, "@read\n %address =l add %data, %offset\n %remaining =l sub %length, %offset\n %out =l add %target, %written\n %first =w loadub %address\n %ascii =w cultw %first, 128\n jnz %ascii, @ascii, @decode\n")
+	qbe_output_line(output, "@ascii\n %wide =w csgel %remaining, 8\n jnz %wide, @word, @ascii_byte\n")
+	qbe_output_line(output, "@word\n %word =l loadl %address\n %high =l and %word, -9187201950435737472\n %nonascii =w cnel %high, 0\n jnz %nonascii, @ascii_byte, @ascii_word\n")
+	qbe_output_line(output, "@ascii_byte\n storeb %first, %out\n jmp @ascii_copied\n")
+	qbe_output_line(output, "@ascii_word\n storel %word, %out\n jmp @ascii_copied\n")
+	qbe_output_line(output, "@ascii_copied\n %ascii_width =l phi @ascii_byte 1, @ascii_word 8\n %ascii_input =l add %offset, %ascii_width\n %ascii_output =l add %written, %ascii_width\n jmp @advance\n")
+	qbe_output_line(output, "@decode\n %span =l call $trbn_bytes_utf8_span(l %address, l %remaining)\n %valid =w csgtl %span, 0\n jnz %valid, @copy, @replace\n")
+	qbe_output_line(output, "@copy\n call $memcpy(l %out, l %address, l %span)\n %copied_input =l add %offset, %span\n %copied_output =l add %written, %span\n jmp @advance\n")
+	qbe_output_line(output, "@replace\n storeb 239, %out\n %second =l add %out, 1\n storeb 191, %second\n %third =l add %out, 2\n storeb 189, %third\n %replaced_input =l sub %offset, %span\n %replaced_output =l add %written, 3\n jmp @advance\n")
+	qbe_output_line(output, "@advance\n %next_input =l phi @copy %copied_input, @replace %replaced_input, @ascii_copied %ascii_input\n %next_output =l phi @copy %copied_output, @replace %replaced_output, @ascii_copied %ascii_output\n %point_width =l phi @copy 1, @replace 1, @ascii_copied %ascii_width\n %next_points =l add %points, %point_width\n jmp @scan\n")
+	qbe_output_line(output, "@finish\n %result_len =l add %result, 8\n storel %written, %result_len\n %result_points =l add %result, 16\n storel %points, %result_points\n %end =l add %target, %written\n storeb 0, %end\n storel %roots, $trbn_gc_temp_count\n ret %result\n}\n")
+end

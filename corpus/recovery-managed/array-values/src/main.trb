@@ -1,0 +1,53 @@
+def write_pair(mut values: Array<Integer>, first: Integer, second: Integer)
+	values[-2] = first
+	values[-1] = second
+	return
+end
+
+def sum(values: Array<Integer>): Integer
+	mut total := 0
+	mut index := 0
+	while index < values.size()
+		total += values[index]
+		index += 1
+	end
+	return total
+end
+
+def main()
+	mut values: Array<Integer> := []
+	mut index := 0
+	while index < 500000
+		values.push(index % 97)
+		index += 1
+	end
+	values.push(0)
+	values.push(0)
+	mut alias_values := values
+	write_pair(values, 20, 22)
+	alias_values[0] = 41
+	mut labels: Array<String> := []
+	labels.push("managed" + "-array")
+	labels.push("")
+	labels[-1] = "ok"
+	if values.size() == 500002
+		if alias_values[0] == 41
+			if values[-2] == 20
+				if values[-1] == 22
+					if sum(values) > 0
+						if labels.size() == 2
+							if labels[0] == "managed-array"
+								if labels[-1] == "ok"
+									puts("recovery-managed-array-values")
+									return
+								end
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+	puts("recovery-managed-array-values-failed")
+	return
+end

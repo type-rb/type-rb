@@ -1,0 +1,207 @@
+# Derived from the Computer Language Benchmarks Game n-body specification and
+# its portable single-threaded C implementation.
+# See ../../licenses/fannkuch-nbody.txt.
+
+import trb/std/math
+import trb/std/process
+
+record Bodies
+	x: Array<Float>
+	y: Array<Float>
+	z: Array<Float>
+	vx: Array<Float>
+	vy: Array<Float>
+	vz: Array<Float>
+	mass: Array<Float>
+end
+
+def fixed_nine(value: Float): String
+	mut magnitude := value
+	mut sign := ""
+	if magnitude < 0.0
+		sign = "-"
+		magnitude = -magnitude
+	end
+	scaled := (magnitude * 1000000000.0 + 0.5).to_i()
+	whole := scaled / 1000000000
+	mut fractional := (scaled % 1000000000).to_s()
+	while fractional.size() < 9
+		fractional = "0" + fractional
+	end
+	return sign + whole.to_s() + "." + fractional
+end
+
+def append_body(
+		mut bodies: Bodies,
+		x: Float,
+		y: Float,
+		z: Float,
+		vx: Float,
+		vy: Float,
+		vz: Float,
+		mass: Float,
+	)
+	bodies.x.push(x)
+	bodies.y.push(y)
+	bodies.z.push(z)
+	bodies.vx.push(vx)
+	bodies.vy.push(vy)
+	bodies.vz.push(vz)
+	bodies.mass.push(mass)
+	return
+end
+
+def make_bodies(): Bodies
+	pi := 3.141592653589793
+	solar_mass := 4.0 * pi * pi
+	days_per_year := 365.24
+	mut bodies := Bodies.new(x: [], y: [], z: [], vx: [], vy: [], vz: [], mass: [])
+	append_body(bodies, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, solar_mass)
+	append_body(
+		bodies,
+		4.84143144246472090,
+		-1.16032004402742839,
+		-0.103622044471123109,
+		0.00166007664274403694 * days_per_year,
+		0.00769901118419740425 * days_per_year,
+		-0.0000690460016972063023 * days_per_year,
+		0.000954791938424326609 * solar_mass,
+	)
+	append_body(
+		bodies,
+		8.34336671824457987,
+		4.12479856412430479,
+		-0.403523417114321381,
+		-0.00276742510726862411 * days_per_year,
+		0.00499852801234917238 * days_per_year,
+		0.0000230417297573962925 * days_per_year,
+		0.000285885980666130812 * solar_mass,
+	)
+	append_body(
+		bodies,
+		12.8943695621391310,
+		-15.1111514016986312,
+		-0.223307578892655734,
+		0.00296460137564761618 * days_per_year,
+		0.00237847173959480950 * days_per_year,
+		-0.0000296589568540237556 * days_per_year,
+		0.0000436624404335156298 * solar_mass,
+	)
+	append_body(
+		bodies,
+		15.3796971148509165,
+		-25.9193146099879641,
+		0.179258772950371181,
+		0.00268067772490389322 * days_per_year,
+		0.00162824170038242295 * days_per_year,
+		-0.0000951592254519715870 * days_per_year,
+		0.0000515138902046611451 * solar_mass,
+	)
+	return bodies
+end
+
+def offset_momentum(bodies: Bodies)
+	mut vx := bodies.vx
+	mut vy := bodies.vy
+	mut vz := bodies.vz
+	mass := bodies.mass
+	mut px: Float := 0
+	mut py: Float := 0
+	mut pz: Float := 0
+	mut index := 0
+	while index < mass.size()
+		px += vx[index] * mass[index]
+		py += vy[index] * mass[index]
+		pz += vz[index] * mass[index]
+		index += 1
+	end
+	pi := 3.141592653589793
+	solar_mass := 4.0 * pi * pi
+	vx[0] = -px / solar_mass
+	vy[0] = -py / solar_mass
+	vz[0] = -pz / solar_mass
+	return
+end
+
+def advance(bodies: Bodies, dt: Float)
+	mut x := bodies.x
+	mut y := bodies.y
+	mut z := bodies.z
+	mut vx := bodies.vx
+	mut vy := bodies.vy
+	mut vz := bodies.vz
+	mass := bodies.mass
+	mut index := 0
+	while index < mass.size()
+		mut other := index + 1
+		while other < mass.size()
+			dx := x[index] - x[other]
+			dy := y[index] - y[other]
+			dz := z[index] - z[other]
+			distance_squared := dx * dx + dy * dy + dz * dz
+			distance := Math.sqrt(distance_squared)
+			magnitude := dt / (distance_squared * distance)
+			vx[index] -= dx * mass[other] * magnitude
+			vy[index] -= dy * mass[other] * magnitude
+			vz[index] -= dz * mass[other] * magnitude
+			vx[other] += dx * mass[index] * magnitude
+			vy[other] += dy * mass[index] * magnitude
+			vz[other] += dz * mass[index] * magnitude
+			other += 1
+		end
+		index += 1
+	end
+
+	index = 0
+	while index < mass.size()
+		x[index] += dt * vx[index]
+		y[index] += dt * vy[index]
+		z[index] += dt * vz[index]
+		index += 1
+	end
+	return
+end
+
+def energy(bodies: Bodies): Float
+	x := bodies.x
+	y := bodies.y
+	z := bodies.z
+	vx := bodies.vx
+	vy := bodies.vy
+	vz := bodies.vz
+	mass := bodies.mass
+	mut total: Float := 0
+	mut index := 0
+	while index < mass.size()
+		total += 0.5 * mass[index] * (vx[index] * vx[index] + vy[index] * vy[index] + vz[index] * vz[index])
+		mut other := index + 1
+		while other < mass.size()
+			dx := x[index] - x[other]
+			dy := y[index] - y[other]
+			dz := z[index] - z[other]
+			distance := Math.sqrt(dx * dx + dy * dy + dz * dz)
+			total -= mass[index] * mass[other] / distance
+			other += 1
+		end
+		index += 1
+	end
+	return total
+end
+
+def main()
+	arguments := Process.argv()
+	mut iterations := 1000
+	if arguments.size() > 0
+		iterations = arguments[0].to_i()
+	end
+	bodies := make_bodies()
+	offset_momentum(bodies)
+	puts(fixed_nine(energy(bodies)))
+	mut index := 0
+	while index < iterations
+		advance(bodies, 0.01)
+		index += 1
+	end
+	puts(fixed_nine(energy(bodies)))
+	return
+end

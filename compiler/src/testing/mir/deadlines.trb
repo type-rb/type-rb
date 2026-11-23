@@ -1,0 +1,20 @@
+import { check } from compiler
+import { lex } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { CompilerState, compiler_new } from state/state
+import { standard_source_web_timeout } from state/standard_source_kinds
+import { store_integer } from support/storage
+import { expect_compiler_phase } from testing/pipeline
+
+# Exercise loader-owned runtime declarations separately from full Web imports.
+def deadline_intrinsic_test_state(): CompilerState
+	source := "import trb/internal/runtime\ndef main()\nslow := fn(): Integer\nmut index := 0\nwhile index < 1000000000\nindex += 1\nend\nreturn index\nend\nputs(Runtime.deadline<Integer>(slow, 10, 7))\nfast := fn(): Float\nreturn 2.5\nend\nputs(Runtime.deadline<Float>(fast, 1000, 9.5))\nputs(Runtime.deadline<Float>(fast, 0, 9.5))\nputs(123)\nend\n"
+	mut state := compiler_new(1048576)
+	expect_compiler_phase(state, "lex", lex(state, source))
+	store_integer(state.standard_modules, state.module_graph.entry_module[0], standard_source_web_timeout())
+	expect_compiler_phase(state, "parse", parse_module(state, 0, state.module_graph.entry_module[0]))
+	expect_compiler_phase(state, "resolve", resolve(state))
+	expect_compiler_phase(state, "check", check(state))
+	return state
+end

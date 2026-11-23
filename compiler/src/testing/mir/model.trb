@@ -1,0 +1,58 @@
+import { MirBlock, MirFunction, MirInstruction, MirModule, MirValue } from mir/model/module
+
+def mir_test_instruction_with_cell(instruction: MirInstruction, field: Integer, value: Integer): MirInstruction
+	mut row := [instruction.kind, instruction.result, instruction.first, instruction.second, instruction.payload, instruction.failure, instruction.source_id, instruction.line]
+	row[field] = value
+	return MirInstruction.new(kind: row[0], result: row[1], first: row[2], second: row[3], payload: row[4], failure: row[5], source_id: row[6], line: row[7])
+end
+
+def mir_test_module(
+		_supplied_fact: Boolean,
+		invalid_index: Boolean,
+	): MirModule
+	mut array_index := 5
+	if invalid_index
+		array_index = 99
+	end
+	return MirModule.new(enum_scalars: [], source_names: [], program: [], object_methods: [], object_witnesses: [], objects: [], newtypes: [], unions: [], globals: [], global_initialization: [], callables: [], callable_plans: [[]], enums: [], enum_variants: [], enum_fields: [], numeric_plans: [[]], hash_lookup_reuse: [[]], hash_membership_reuse: [[]], hash_concat_probes: [[]], call_return_guards: [[]], types: [], records: [], fields: [], root_plans: [], enum_stack_functions: [], array_loops: [], loop_calls: [], file_scopes: [], array_check_reuse: [], array_read_guards: [], array_joins: [], string_splits: [],
+		signatures: [], calls: [],
+		source_count: [1],
+		entry_function: [1],
+		functions: [MirFunction.new(kind: 0, result_type: "Void", integer_guard: 0, id: 1, entry_block: 10, source_id: 0, line: 1, parameter_start: 0, parameter_count: 1, block_start: 0, block_count: 5)],
+		blocks: [
+			MirBlock.new(id: 10, source_id: 0, line: 2, parameter_start: 1, parameter_count: 0, instruction_start: 0, instruction_count: 1, terminator: 1, condition: -1, first_target: 11, second_target: -1, first_argument_start: 1, first_argument_count: 1, second_argument_start: 0, second_argument_count: 0, return_value: -1),
+			MirBlock.new(id: 11, source_id: 0, line: 3, parameter_start: 2, parameter_count: 1, instruction_start: 1, instruction_count: 2, terminator: 2, condition: 4, first_target: 12, second_target: 14, first_argument_start: 3, first_argument_count: 1, second_argument_start: 4, second_argument_count: 0, return_value: -1),
+			MirBlock.new(id: 12, source_id: 0, line: 4, parameter_start: 4, parameter_count: 1, instruction_start: 3, instruction_count: 3, terminator: 1, condition: -1, first_target: 11, second_target: -1, first_argument_start: 5, first_argument_count: 1, second_argument_start: 0, second_argument_count: 0, return_value: -1),
+			MirBlock.new(id: 13, source_id: 0, line: 5, parameter_start: 6, parameter_count: 0, instruction_start: 6, instruction_count: 0, terminator: 4, condition: -1, first_target: -1, second_target: -1, first_argument_start: 0, first_argument_count: 0, second_argument_start: 0, second_argument_count: 0, return_value: -1),
+			MirBlock.new(id: 14, source_id: 0, line: 6, parameter_start: 6, parameter_count: 0, instruction_start: 6, instruction_count: 0, terminator: 3, condition: -1, first_target: -1, second_target: -1, first_argument_start: 0, first_argument_count: 0, second_argument_start: 0, second_argument_count: 0, return_value: -1),
+		],
+		values: [
+			MirValue.new(function_id: 1, id: 0, type_id: 3, source_id: 0, line: 1),
+			MirValue.new(function_id: 1, id: 1, type_id: 1, source_id: 0, line: 2),
+			MirValue.new(function_id: 1, id: 2, type_id: 1, source_id: 0, line: 3),
+			MirValue.new(function_id: 1, id: 3, type_id: 1, source_id: 0, line: 3),
+			MirValue.new(function_id: 1, id: 4, type_id: 2, source_id: 0, line: 3),
+			MirValue.new(function_id: 1, id: 5, type_id: 1, source_id: 0, line: 4),
+			MirValue.new(function_id: 1, id: 6, type_id: 4, source_id: 0, line: 4),
+			MirValue.new(function_id: 1, id: 7, type_id: 1, source_id: 0, line: 4),
+			MirValue.new(function_id: 1, id: 8, type_id: 1, source_id: 0, line: 4),
+		],
+		instructions: [
+			MirInstruction.new(kind: 1, result: 1, first: -1, second: -1, payload: 0, failure: -1, source_id: 0, line: 2),
+			MirInstruction.new(kind: 4, result: 3, first: 0, second: -1, payload: 0, failure: -1, source_id: 0, line: 3),
+			MirInstruction.new(kind: 3, result: 4, first: 2, second: 3, payload: 0, failure: -1, source_id: 0, line: 3),
+			MirInstruction.new(kind: 5, result: 6, first: 0, second: array_index, payload: 0, failure: 13, source_id: 0, line: 4),
+			MirInstruction.new(kind: 1, result: 7, first: -1, second: -1, payload: 1, failure: -1, source_id: 0, line: 4),
+			MirInstruction.new(kind: 2, result: 8, first: 5, second: 7, payload: 0, failure: 13, source_id: 0, line: 4),
+		],
+		arguments: [0, 1, 2, 2, 5, 8],
+		literal_texts: [],
+		literal_data: [], string_concats: [],
+	)
+end
+
+def mir_test_block_with_cell(block: MirBlock, field: Integer, value: Integer): MirBlock
+	mut row := [block.id, block.source_id, block.line, block.parameter_start, block.parameter_count, block.instruction_start, block.instruction_count, block.terminator, block.condition, block.first_target, block.second_target, block.first_argument_start, block.first_argument_count, block.second_argument_start, block.second_argument_count, block.return_value]
+	row[field] = value
+	return MirBlock.new(id: row[0], source_id: row[1], line: row[2], parameter_start: row[3], parameter_count: row[4], instruction_start: row[5], instruction_count: row[6], terminator: row[7], condition: row[8], first_target: row[9], second_target: row[10], first_argument_start: row[11], first_argument_count: row[12], second_argument_start: row[13], second_argument_count: row[14], return_value: row[15])
+end

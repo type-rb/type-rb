@@ -1,0 +1,18 @@
+def divide(value: Integer): Integer
+	return 10 / value
+end
+
+def walk(value: Integer): Integer
+	mut remaining := value
+	while remaining > 0
+		remaining -= 1
+		if remaining == 0
+			return divide(remaining)
+		end
+	end
+	return 0
+end
+
+def main()
+	puts(walk(1))
+end

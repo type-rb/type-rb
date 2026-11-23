@@ -1,0 +1,56 @@
+record Point
+	x: Integer
+	y: Integer
+end
+
+record Box
+	point: Point
+	weight: Integer
+end
+
+enum Outcome
+	Ready
+	Found(point: Point)
+	Missing(code: Integer)
+end
+
+def shift(point: Point): Point
+	return Point.new(x: point.x + 1, y: point.y + 2)
+end
+
+def select_outcome(kind: Integer, point: Point): Outcome
+	if kind == 0
+		return Outcome::Ready
+	end
+	if kind == 1
+		return Outcome::Found(point)
+	end
+	return Outcome::Missing(17)
+end
+
+def score(outcome: Outcome): Integer
+	case outcome
+	when Outcome::Ready
+		return 0
+	when Outcome::Found(point)
+		return point.x + point.y
+	when Outcome::Missing(code)
+		return code
+	end
+end
+
+def main()
+	box := Box.new(point: shift(shift(shift(Point.new(x: 1, y: 2)))), weight: 9)
+	if box.weight == 9
+		if score(select_outcome(0, box.point)) == 0
+			if score(select_outcome(1, box.point)) == 12
+				if score(select_outcome(2, box.point)) == 17
+					puts("recovery-aggregate-aggregate-values")
+					return
+				end
+			end
+		end
+	end
+	puts("recovery-aggregate-aggregate-values-failed")
+	return
+end

@@ -1,0 +1,531 @@
+import { ascii_code } from support/literals
+
+# JSONC reader for project configuration. Schema validation stays in config;
+# strict package metadata JSON has a separate reader and acceptance contract.
+def project_json_set_error(
+		mut error: Array<String>,
+		mut error_line: Array<Integer>,
+		message: String,
+		line: Integer,
+	)
+	if error[0] == ""
+		error[0] = message
+		error_line[0] = line
+	end
+	return
+end
+
+def project_json_advance(mut value: Array<Integer>, amount: Integer)
+	value[0] = value[0] + amount
+	return
+end
+
+def project_json_skip_ignored(
+		source: String,
+		mut position: Array<Integer>,
+		mut line: Array<Integer>,
+		mut error: Array<String>,
+		mut error_line: Array<Integer>,
+	): Boolean
+	while position[0] < source.size()
+		character := source[position[0]]
+		if character == " " || character == "\t" || character == "\r"
+			project_json_advance(position, 1)
+		elsif character == "\n"
+			project_json_advance(position, 1)
+			project_json_advance(line, 1)
+		elsif character == "/" && position[0] + 1 < source.size()
+			following := source[position[0] + 1]
+			if following == "/"
+				project_json_advance(position, 2)
+				while position[0] < source.size() && source[position[0]] != "\n"
+					project_json_advance(position, 1)
+				end
+			elsif following == "*"
+				start_line := line[0]
+				project_json_advance(position, 2)
+				mut closed := false
+				while position[0] < source.size()
+					if source[position[0]] == "*" && position[0] + 1 < source.size() && source[position[0] + 1] == "/"
+						project_json_advance(position, 2)
+						closed = true
+						break
+					end
+					if source[position[0]] == "\n"
+						project_json_advance(line, 1)
+					end
+					project_json_advance(position, 1)
+				end
+				if !closed
+					project_json_set_error(error, error_line, "unterminated JSONC block comment", start_line)
+					return false
+				end
+			else
+				break
+			end
+		else
+			break
+		end
+	end
+	return error[0] == ""
+end
+
+def project_json_hex_digit(character: String): Integer
+	code := ascii_code(character)
+	if code >= 48
+		if code <= 57
+			return code - 48
+		end
+	end
+	if code >= 65
+		if code <= 70
+			return code - 55
+		end
+	end
+	if code >= 97
+		if code <= 102
+			return code - 87
+		end
+	end
+	return -1
+end
+
+def project_json_ascii_character(code: Integer): String
+	if code == 9
+		return "\t"
+	end
+	if code == 10
+		return "\n"
+	end
+	if code == 13
+		return "\r"
+	end
+	if code < 32
+		return ""
+	end
+	if code > 126
+		return ""
+	end
+	return " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"[code - 32]
+end
+
+def project_json_string(
+		source: String,
+		mut position: Array<Integer>,
+		mut line: Array<Integer>,
+		mut error: Array<String>,
+		mut error_line: Array<Integer>,
+	): String
+	if position[0] >= source.size()
+		project_json_set_error(error, error_line, "expected JSON string", line[0])
+		return ""
+	end
+	if source[position[0]] != "\""
+		project_json_set_error(error, error_line, "expected JSON string", line[0])
+		return ""
+	end
+	project_json_advance(position, 1)
+	mut result := ""
+	mut scanning := true
+	mut closed := false
+	while scanning
+		if position[0] >= source.size()
+			scanning = false
+		else
+			character := source[position[0]]
+			if character == "\""
+				project_json_advance(position, 1)
+				closed = true
+				scanning = false
+			else
+				if character == "\n"
+					project_json_set_error(error, error_line, "newline in JSON string", line[0])
+					scanning = false
+				else
+					if character == "\\"
+						project_json_advance(position, 1)
+						if position[0] >= source.size()
+							project_json_set_error(error, error_line, "unterminated JSON escape", line[0])
+							scanning = false
+						else
+							escaped := source[position[0]]
+							project_json_advance(position, 1)
+							if escaped == "\""
+								result += "\""
+							else
+								if escaped == "\\"
+									result += "\\"
+								else
+									if escaped == "/"
+										result += "/"
+									else
+										if escaped == "n"
+											result += "\n"
+										else
+											if escaped == "r"
+												result += "\r"
+											else
+												if escaped == "t"
+													result += "\t"
+												else
+													if escaped == "u"
+														mut code := 0
+														mut digit_index := 0
+														while digit_index < 4
+															if position[0] >= source.size()
+																project_json_set_error(error, error_line, "incomplete JSON Unicode escape", line[0])
+																digit_index = 4
+															else
+																digit := project_json_hex_digit(source[position[0]])
+																if digit < 0
+																	project_json_set_error(error, error_line, "invalid JSON Unicode escape", line[0])
+																	digit_index = 4
+																else
+																	code = code * 16 + digit
+																	project_json_advance(position, 1)
+																	digit_index += 1
+																end
+															end
+														end
+														if error[0] == ""
+															decoded := project_json_ascii_character(code)
+															if decoded == ""
+																project_json_set_error(error, error_line, "non-ASCII JSON Unicode escape is not supported", line[0])
+															else
+																result += decoded
+															end
+														end
+													else
+														project_json_set_error(error, error_line, "unsupported JSON escape", line[0])
+													end
+												end
+											end
+										end
+									end
+								end
+							end
+							if error[0] != ""
+								scanning = false
+							end
+						end
+					else
+						code := ascii_code(character)
+						if code >= 0
+							if code < 32
+								project_json_set_error(error, error_line, "control character in JSON string", line[0])
+								scanning = false
+							end
+						end
+						if scanning
+							result += character
+							project_json_advance(position, 1)
+						end
+					end
+				end
+			end
+		end
+	end
+	if !closed
+		if error[0] == ""
+			project_json_set_error(error, error_line, "unterminated JSON string", line[0])
+		end
+	end
+	return result
+end
+
+def project_json_literal_at(source: String, position: Integer, literal: String): Boolean
+	if position + literal.size() > source.size()
+		return false
+	end
+	mut index := 0
+	while index < literal.size()
+		if source[position + index] != literal[index]
+			return false
+		end
+		index += 1
+	end
+	return true
+end
+
+def project_json_boolean(
+		source: String,
+		mut position: Array<Integer>,
+		line: Integer,
+		mut error: Array<String>,
+		mut error_line: Array<Integer>,
+	): Boolean
+	if project_json_literal_at(source, position[0], "true")
+		project_json_advance(position, 4)
+		return true
+	end
+	if project_json_literal_at(source, position[0], "false")
+		project_json_advance(position, 5)
+		return false
+	end
+	project_json_set_error(error, error_line, "expected JSON Boolean", line)
+	return false
+end
+
+def project_json_has_key(values: Array<String>, value: String): Boolean
+	values.each do |item|
+		if item == value
+			return true
+		end
+	end
+	return false
+end
+
+def project_json_expect(
+		source: String,
+		mut position: Array<Integer>,
+		expected: String,
+		line: Integer,
+		mut error: Array<String>,
+		mut error_line: Array<Integer>,
+	): Boolean
+	if position[0] < source.size()
+		if source[position[0]] == expected
+			project_json_advance(position, 1)
+			return true
+		end
+	end
+	project_json_set_error(error, error_line, "expected JSON " + expected, line)
+	return false
+end
+
+def project_json_object_open(
+		source: String,
+		mut position: Array<Integer>,
+		mut line: Array<Integer>,
+		mut error: Array<String>,
+		mut error_line: Array<Integer>,
+	)
+	project_json_expect(source, position, "{", line[0], error, error_line)
+	project_json_skip_ignored(source, position, line, error, error_line)
+	return
+end
+
+# Reads the next object key and its colon, or consumes the closing brace and
+# sets done. Declared structures reject duplicate keys; maps and opaque values
+# accept them like the reference decoder, where the last value wins.
+def project_json_object_key(
+		source: String,
+		mut position: Array<Integer>,
+		mut line: Array<Integer>,
+		mut error: Array<String>,
+		mut error_line: Array<Integer>,
+		mut seen: Array<String>,
+		context: String,
+		check_duplicates: Boolean,
+		mut done: Array<Boolean>,
+		mut key_line: Array<Integer>,
+	): String
+	if error[0] != ""
+		done[0] = true
+		return ""
+	end
+	if position[0] >= source.size()
+		project_json_set_error(error, error_line, "unterminated " + context, line[0])
+		done[0] = true
+		return ""
+	end
+	if source[position[0]] == "}"
+		project_json_advance(position, 1)
+		done[0] = true
+		return ""
+	end
+	key_line[0] = line[0]
+	key := project_json_string(source, position, line, error, error_line)
+	if check_duplicates
+		if project_json_has_key(seen, key)
+			project_json_set_error(error, error_line, "duplicate " + context + " field " + key, key_line[0])
+		else
+			seen.push(key)
+		end
+	end
+	project_json_skip_ignored(source, position, line, error, error_line)
+	project_json_expect(source, position, ":", line[0], error, error_line)
+	project_json_skip_ignored(source, position, line, error, error_line)
+	if error[0] != ""
+		done[0] = true
+	end
+	return key
+end
+
+def project_json_object_after_value(
+		source: String,
+		mut position: Array<Integer>,
+		mut line: Array<Integer>,
+		mut error: Array<String>,
+		mut error_line: Array<Integer>,
+		context: String,
+	)
+	project_json_skip_ignored(source, position, line, error, error_line)
+	if error[0] != ""
+		return
+	end
+	if position[0] >= source.size()
+		project_json_set_error(error, error_line, "unterminated " + context, line[0])
+		return
+	end
+	if source[position[0]] == ","
+		project_json_advance(position, 1)
+		project_json_skip_ignored(source, position, line, error, error_line)
+		if position[0] < source.size() && source[position[0]] == "}"
+			project_json_set_error(error, error_line, "trailing comma in " + context, line[0])
+		end
+		return
+	end
+	if source[position[0]] != "}"
+		project_json_set_error(error, error_line, "expected JSON , or }", line[0])
+	end
+	return
+end
+
+def project_json_number_character(character: String): Boolean
+	code := ascii_code(character)
+	if code >= 48 && code <= 57
+		return true
+	end
+	if character == "-" || character == "+" || character == "." || character == "e" || character == "E"
+		return true
+	end
+	return false
+end
+
+# Reads a JSON array. Elements are Strings when strings_only is set and are
+# otherwise skipped as opaque values.
+def project_json_array(
+		source: String,
+		mut position: Array<Integer>,
+		mut line: Array<Integer>,
+		mut error: Array<String>,
+		mut error_line: Array<Integer>,
+		strings_only: Boolean,
+	)
+	project_json_expect(source, position, "[", line[0], error, error_line)
+	project_json_skip_ignored(source, position, line, error, error_line)
+	if error[0] != ""
+		return
+	end
+	if position[0] < source.size() && source[position[0]] == "]"
+		project_json_advance(position, 1)
+		return
+	end
+	mut scanning := true
+	while scanning
+		if strings_only
+			project_json_string(source, position, line, error, error_line)
+		else
+			project_json_skip_value(source, position, line, error, error_line)
+		end
+		project_json_skip_ignored(source, position, line, error, error_line)
+		if error[0] != ""
+			scanning = false
+		elsif position[0] >= source.size()
+			project_json_set_error(error, error_line, "unterminated JSON array", line[0])
+			scanning = false
+		elsif source[position[0]] == ","
+			project_json_advance(position, 1)
+			project_json_skip_ignored(source, position, line, error, error_line)
+			if position[0] < source.size() && source[position[0]] == "]"
+				project_json_set_error(error, error_line, "trailing comma in JSON array", line[0])
+				scanning = false
+			end
+		elsif source[position[0]] == "]"
+			project_json_advance(position, 1)
+			scanning = false
+		else
+			project_json_set_error(error, error_line, "expected JSON , or ]", line[0])
+			scanning = false
+		end
+	end
+	return
+end
+
+# Skips one JSON value whose content the configuration keeps opaque, such as
+# a packageOptions entry.
+def project_json_skip_value(
+		source: String,
+		mut position: Array<Integer>,
+		mut line: Array<Integer>,
+		mut error: Array<String>,
+		mut error_line: Array<Integer>,
+	)
+	if error[0] != ""
+		return
+	end
+	if position[0] >= source.size()
+		project_json_set_error(error, error_line, "expected JSON value", line[0])
+		return
+	end
+	character := source[position[0]]
+	if character == "\""
+		project_json_string(source, position, line, error, error_line)
+	elsif character == "{"
+		project_json_object_open(source, position, line, error, error_line)
+		mut seen: Array<String> := []
+		mut done := [false]
+		mut key_line := [0]
+		while !done[0]
+			project_json_object_key(source, position, line, error, error_line, seen, "JSON object", false, done, key_line)
+			if !done[0]
+				project_json_skip_value(source, position, line, error, error_line)
+				project_json_object_after_value(source, position, line, error, error_line, "JSON object")
+			end
+		end
+	elsif character == "["
+		project_json_array(source, position, line, error, error_line, false)
+	elsif project_json_literal_at(source, position[0], "true")
+		project_json_advance(position, 4)
+	elsif project_json_literal_at(source, position[0], "false")
+		project_json_advance(position, 5)
+	elsif project_json_literal_at(source, position[0], "null")
+		project_json_advance(position, 4)
+	elsif project_json_number_character(character)
+		while position[0] < source.size() && project_json_number_character(source[position[0]])
+			project_json_advance(position, 1)
+		end
+	else
+		project_json_set_error(error, error_line, "expected JSON value", line[0])
+	end
+	return
+end
+
+# Reads an object of String values. A repeated key replaces the earlier value.
+def project_json_string_map(
+		source: String,
+		mut position: Array<Integer>,
+		mut line: Array<Integer>,
+		mut error: Array<String>,
+		mut error_line: Array<Integer>,
+		context: String,
+		mut keys: Array<String>,
+		mut values: Array<String>,
+	)
+	project_json_object_open(source, position, line, error, error_line)
+	mut seen: Array<String> := []
+	mut done := [false]
+	mut key_line := [0]
+	while !done[0]
+		key := project_json_object_key(source, position, line, error, error_line, seen, context, false, done, key_line)
+		if !done[0]
+			value := project_json_string(source, position, line, error, error_line)
+			mut index := 0
+			mut replaced := false
+			while index < keys.size()
+				if keys[index] == key
+					values[index] = value
+					replaced = true
+				end
+				index += 1
+			end
+			if !replaced
+				keys.push(key)
+				values.push(value)
+			end
+			project_json_object_after_value(source, position, line, error, error_line, context)
+		end
+	end
+	return
+end

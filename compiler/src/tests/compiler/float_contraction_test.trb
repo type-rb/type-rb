@@ -1,0 +1,70 @@
+import { check, emit_qbe } from compiler
+import { MirInstruction, mir_instruction_with_payload } from mir/model/module
+import { mir_op_scalar_binary } from mir/model/instructions
+import { mir_scalar_contract_multiply, mir_scalar_inline_multiply } from mir/model/scalar_operators
+import { verify_mir } from mir/verify/module
+import { output_source } from testing/compiler
+import { logical_checked_source } from testing/pipeline
+import { describe, expect, test } from trb/std/test
+
+describe("Float contraction across checking, MIR and emission") do
+	test("permits Float products while retaining mixed operand conversion and Integer checks") do
+		mut state := logical_checked_source("def floats(left: Float, right: Float, extra: Float): Float\nreturn left * right + extra\nend\ndef mixed(left: Integer, right: Float): Float\nreturn left * right\nend\ndef integers(left: Integer, right: Integer): Integer\nreturn left * right\nend\ndef main()\nputs(floats(2.0, 3.0, 4.0))\nputs(mixed(2, 3.0))\nputs(integers(2, 3))\nend\n")
+		expect(check(state)).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		mut permitted := 0
+		mut checked := 0
+		state.scalar_mir.instructions.each do |instruction|
+			if instruction.kind == mir_op_scalar_binary()
+				if instruction.payload == mir_scalar_contract_multiply()
+					expect(instruction.failure).to_equal(-1)
+					permitted += 1
+				end
+				if instruction.payload == mir_scalar_inline_multiply()
+					expect(instruction.failure >= 0).to_be_true()
+					checked += 1
+				end
+			end
+		end
+		expect(permitted >= 2).to_be_true()
+		expect(checked >= 1).to_be_true()
+		qbe := output_source(emit_qbe(state))
+		expect(qbe.include?(" =d mulc ")).to_be_true()
+		expect(qbe.include?(" =d sltof ")).to_be_true()
+		expect(qbe.include?(" =l mulc ")).to_be_false()
+	end
+
+	test("rejects a forged permission on checked Integer multiplication") do
+		mut state := logical_checked_source("def product(left: Integer, right: Integer): Integer\nreturn left * right\nend\ndef main()\nputs(product(2, 3))\nend\n")
+		expect(check(state)).to_be_true()
+		mut changed := false
+		mut index := 0
+		while index < state.scalar_mir.instructions.size()
+			instruction := state.scalar_mir.instructions[index]
+			if instruction.kind == mir_op_scalar_binary() && instruction.payload == mir_scalar_inline_multiply()
+				state.scalar_mir.instructions[index] = mir_instruction_with_payload(instruction, mir_scalar_contract_multiply())
+				changed = true
+			end
+			index += 1
+		end
+		expect(changed).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR contractible multiply requires an unchecked Float result")
+	end
+
+	test("rejects a failure edge on contractible Float multiplication") do
+		mut state := logical_checked_source("def product(left: Float, right: Float): Float\nreturn left * right\nend\ndef main()\nputs(product(2.0, 3.0))\nend\n")
+		expect(check(state)).to_be_true()
+		mut changed := false
+		mut index := 0
+		while index < state.scalar_mir.instructions.size()
+			instruction := state.scalar_mir.instructions[index]
+			if instruction.kind == mir_op_scalar_binary() && instruction.payload == mir_scalar_contract_multiply()
+				state.scalar_mir.instructions[index] = MirInstruction.new(kind: instruction.kind, result: instruction.result, first: instruction.first, second: instruction.second, payload: instruction.payload, failure: 0, source_id: instruction.source_id, line: instruction.line)
+				changed = true
+			end
+			index += 1
+		end
+		expect(changed).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR contractible multiply requires an unchecked Float result")
+	end
+end

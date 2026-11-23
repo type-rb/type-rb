@@ -1,0 +1,95 @@
+record FloatValues
+	values: Array<Float>
+end
+
+def make_values(): Array<Float>
+	return [1, 2.5]
+end
+
+def append_integer(mut values: Array<Float>)
+	values.push(3)
+	return
+end
+
+def sum(values: Array<Float>): Float
+	mut total: Float := 0
+	mut index := 0
+	while index < values.size()
+		total += values[index]
+		index += 1
+	end
+	return total
+end
+
+def main()
+	mut inferred := [1, 2.5]
+	mut contextual: Array<Float> := []
+	contextual.push(0)
+	append_integer(contextual)
+	mut index := 0
+	while index < 12
+		contextual.push(index)
+		index += 1
+	end
+	contextual[0] = 0.5
+	contextual[1] = 1
+	contextual[-1] += 0.25
+	mut shared := contextual
+	shared[3] *= 2
+	box := FloatValues.new(values: [4, 5.5])
+	returned := make_values()
+	mut nested: Array<Array<Float>> := [[1, 2.5], []]
+	nested[1].push(3)
+	triple: Array<Array<Array<Float>>> := [[[4]], [[5.5]]]
+	mut ok := true
+	if inferred[0] == 1.0
+	else
+		ok = false
+	end
+	if inferred[1] == 2.5
+	else
+		ok = false
+	end
+	if contextual.size() == 14
+	else
+		ok = false
+	end
+	if sum(contextual) == 68.75
+	else
+		ok = false
+	end
+	if box.values[-1] == 5.5
+	else
+		ok = false
+	end
+	if returned[0] == 1.0
+	else
+		ok = false
+	end
+	if sum([1, 2.5]) == 3.5
+	else
+		ok = false
+	end
+	if nested[0][1] == 2.5
+	else
+		ok = false
+	end
+	if nested[1][0] == 3.0
+	else
+		ok = false
+	end
+	if triple[0][0][0] == 4.0
+	else
+		ok = false
+	end
+	if triple[1][0][0] == 5.5
+	else
+		ok = false
+	end
+	if ok
+		puts("float-arrays-ok")
+	else
+		puts("float-arrays-bad")
+	end
+	return
+end

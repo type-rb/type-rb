@@ -1,0 +1,13 @@
+{
+  "name": "scenario",
+  "mode": "go",
+  "sourceDir": "src",
+  "go": {
+    "module": "example.com/scenario"
+  },
+  "lint": {
+    "rules": {
+      "trb/not-a-rule": "error"
+    }
+  }
+}

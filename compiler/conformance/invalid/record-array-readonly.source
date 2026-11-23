@@ -1,0 +1,12 @@
+record Entry
+id: Integer
+end
+record Other
+id: Integer
+end
+def change(values: Array<Entry>)
+values.push(Entry.new(id: 2))
+end
+def main()
+return
+end

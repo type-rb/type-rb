@@ -1,0 +1,221 @@
+import { standard_source_file, standard_source_filesystem_host, standard_source_internal_process, standard_source_jobs_sql, standard_source_orm_sql, standard_source_process, standard_source_web_server } from state/standard_source_kinds
+import { official_source_kind } from project/official_catalog
+import { standard_source_base64, standard_source_hex, standard_source_internal_base64, standard_source_internal_hex, standard_source_internal_json, standard_source_internal_url, standard_source_json, standard_source_jsonc, standard_source_time, standard_source_time_host, standard_source_url } from state/standard_source_kinds
+import { CompilerState, diagnostic } from state/state
+import { integer_string } from support/literals
+import { load_integer, sparse_integer_at } from support/storage
+
+# Tarjan traversal preserves authored import order and entry-first discovery.
+# Component identities are assigned dependency-first; members retain discovery
+# order so moving a source path cannot change ties inside the same entry closure.
+def visit_module_component(mut state: CompilerState, source: Integer, mut indices: Array<Integer>, mut low: Array<Integer>, mut active: Array<Integer>, mut stack: Array<Integer>, mut next_index: Array<Integer>)
+	next_index[0] += 1
+	indices[source] = next_index[0]
+	low[source] = indices[source]
+	active[source] = 1
+	stack[next_index[1]] = source
+	next_index[1] += 1
+	mut self_edge := false
+	mut binding := load_integer(state.module_graph.module_import_starts, source)
+	finish := binding + load_integer(state.module_graph.module_import_counts, source)
+	while binding <= finish
+		mut target := -1
+		if binding < finish
+			target = load_integer(state.module_graph.import_targets, binding)
+		else
+			target = sparse_integer_at(state.module_graph.module_generated_dependencies, source) - 1
+		end
+		if target >= 0
+			if target == source
+				self_edge = true
+			end
+			if indices[target] == 0
+				visit_module_component(state, target, indices, low, active, stack, next_index)
+				if low[target] < low[source]
+					low[source] = low[target]
+				end
+			elsif active[target] == 1 && indices[target] < low[source]
+				low[source] = indices[target]
+			end
+		end
+		binding += 1
+	end
+	if low[source] != indices[source]
+		return
+	end
+	member_finish := next_index[1]
+	mut last := -1
+	while last != source
+		next_index[1] -= 1
+		last = stack[next_index[1]]
+		active[last] = 0
+	end
+	# The popped stack segment stays intact until traversal resumes.
+	mut members: Array<Integer> := []
+	component := state.global_bindings.component_modules.size()
+	mut index := next_index[1]
+	while index < member_finish
+		member := stack[index]
+		members.push(member)
+		state.global_bindings.module_components[member] = component
+		index += 1
+	end
+	state.global_bindings.component_modules.push(members)
+	mut cyclic := 0
+	if members.size() > 1 || self_edge
+		cyclic = 1
+	end
+	state.global_bindings.component_cyclic.push(cyclic)
+end
+
+def build_module_components(mut state: CompilerState)
+	if state.global_bindings.module_components.size() > 0
+		return
+	end
+	mut indices: Array<Integer> := []
+	mut low: Array<Integer> := []
+	mut active: Array<Integer> := []
+	mut source := 0
+	while source < state.module_graph.module_count[0] || source <= state.module_graph.entry_module[0]
+		indices.push(0)
+		low.push(0)
+		active.push(0)
+		state.global_bindings.module_components.push(-1)
+		source += 1
+	end
+	mut stack: Array<Integer> := []
+	indices.each do |_index|
+		stack.push(0)
+	end
+	mut next_index := [0, 0]
+	visit_module_component(state, state.module_graph.entry_module[0], indices, low, active, stack, next_index)
+	source = 0
+	while source < indices.size()
+		if indices[source] == 0
+			visit_module_component(state, source, indices, low, active, stack, next_index)
+		end
+		source += 1
+	end
+end
+
+def module_is_cyclic(state: CompilerState, source: Integer): Boolean
+	if source < 0 || source >= state.global_bindings.module_components.size()
+		return false
+	end
+	component := state.global_bindings.module_components[source]
+	return state.global_bindings.component_cyclic[component] == 1
+end
+
+# Package ownership is independent of the source import graph: even an
+# acyclic sequence of files must not introduce a cycle between units.
+def compilation_unit_owner(state: CompilerState, source: Integer, owners: Array<Integer>): Integer
+	# Each public standard service and its loader-owned adapter form one unit.
+	# Module/declaration identities stay distinct; authored units stay separate.
+	owned := sparse_integer_at(state.standard_modules, source)
+	# The testing dispatcher is generated for the application and calls its
+	# route handlers. It shares that unit, while retaining its owned identity.
+	if owned == official_source_kind("trb/web/testing") || owned == standard_source_web_server()
+		return -1
+	end
+	mut time_service := false
+	if owned >= standard_source_time() && owned <= standard_source_time_host()
+		time_service = true
+	end
+	mut file_service := false
+	if owned == standard_source_file() || owned == standard_source_filesystem_host()
+		file_service = true
+	end
+	mut process_service := false
+	if owned == standard_source_process() || owned == standard_source_internal_process()
+		process_service = true
+	end
+	mut orm_service := false
+	if owned == official_source_kind("trb/orm") || owned == standard_source_orm_sql()
+		orm_service = true
+	end
+	mut jobs_sql_service := false
+	if owned == official_source_kind("trb/jobs/sql") || owned == standard_source_jobs_sql()
+		jobs_sql_service = true
+	end
+	if owned == standard_source_hex() || owned == standard_source_internal_hex() || owned == standard_source_base64() || owned == standard_source_internal_base64() || owned == standard_source_url() || owned == standard_source_internal_url() || owned == standard_source_json() || owned == standard_source_jsonc() || owned == standard_source_internal_json() || time_service || file_service || process_service || jobs_sql_service || orm_service
+		mut owner := owners.size() + state.module_graph.module_count[0] + 1
+		mut index := 0
+		while index < owners.size()
+			if owners[index] >= owner
+				owner = owners[index] + 1
+			end
+			index += 1
+		end
+		if owned == standard_source_json() || owned == standard_source_jsonc() || owned == standard_source_internal_json()
+			owner += 1
+		elsif time_service
+			owner += 2
+		elsif owned == standard_source_hex() || owned == standard_source_internal_hex()
+			owner += 3
+		elsif owned == standard_source_base64() || owned == standard_source_internal_base64()
+			owner += 4
+		elsif file_service
+			owner += 5
+		elsif process_service
+			owner += 6
+		elsif jobs_sql_service
+			owner += 7
+		elsif orm_service
+			owner += 8
+		end
+		return owner
+	end
+	if source < owners.size()
+		return owners[source]
+	end
+	return owners.size() + source + 1
+end
+
+def visit_compilation_unit(mut state: CompilerState, owner: Integer, owners: Array<Integer>, mut colors: Hash<String, Integer>): Boolean
+	key := integer_string(owner)
+	if colors.key?(key)
+		return colors[key] == 2
+	end
+	colors[key] = 1
+	mut source := 0
+	while source < state.module_graph.module_count[0]
+		if compilation_unit_owner(state, source, owners) == owner
+			mut binding := load_integer(state.module_graph.module_import_starts, source)
+			finish := binding + load_integer(state.module_graph.module_import_counts, source)
+			while binding < finish
+				target := load_integer(state.module_graph.import_targets, binding)
+				if target >= 0
+					target_owner := compilation_unit_owner(state, target, owners)
+					# Web.serve is a project-provider entry. Its implementation binds
+					# application routes; this exact loader-owned edge is not a
+					# dependency from an authored package to the application.
+					mut provider := false
+					if sparse_integer_at(state.standard_modules, source) == official_source_kind("trb/web") && sparse_integer_at(state.standard_modules, target) == standard_source_web_server()
+						provider = true
+					end
+					if !provider && target_owner != owner && !visit_compilation_unit(state, target_owner, owners, colors)
+						state.module_graph.active_module[0] = source
+						diagnostic(state, "TRBN4003", load_integer(state.module_graph.import_lines, binding), "compilation unit dependency cycle")
+						return false
+					end
+				end
+				binding += 1
+			end
+		end
+		source += 1
+	end
+	colors[key] = 2
+	return true
+end
+
+def validate_compilation_units(mut state: CompilerState, owners: Array<Integer>): Boolean
+	mut colors: Hash<String, Integer> := {}
+	mut source := 0
+	while source < state.module_graph.module_count[0]
+		if !visit_compilation_unit(state, compilation_unit_owner(state, source, owners), owners, colors)
+			return false
+		end
+		source += 1
+	end
+	return true
+end

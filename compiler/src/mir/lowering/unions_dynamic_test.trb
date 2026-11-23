@@ -1,0 +1,55 @@
+import { check } from compiler
+import { compiler_test_instruction_with_cell } from testing/compiler
+import { managed_mir_test_fixture } from testing/mir/managed
+import { logical_checked_source } from testing/pipeline
+import { MirRootPlan } from mir/model/module
+import { verify_mir } from mir/verify/module
+import { CompilerState } from state/state
+import { describe, expect, test } from trb/std/test
+
+def dynamic_mir_test_state(): CompilerState
+	mut state := logical_checked_source("def optional(value: Any): Any?\nreturn value\nend\ndef main()\nvalue := optional(\"kept\" + \" value\")\nputs(value == nil)\nend\n")
+	expect(check(state)).to_be_true()
+	expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	return state
+end
+
+describe("Dynamic payload MIR") do
+	test("retains checked dynamic fields and nullable boundaries through forced collection") do
+		managed_mir_test_fixture("managed-dynamic-payloads", 12)
+	end
+
+	test("rejects a forged dynamic nil tag") do
+		mut state := dynamic_mir_test_state()
+		mut changed := false
+		state.scalar_mir.instructions.each.with_index do |instruction, index|
+			if instruction.kind == 53 && !changed
+				state.scalar_mir.instructions[index] = compiler_test_instruction_with_cell(instruction, 4, 999999)
+				changed = true
+			end
+		end
+		expect(changed).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR union operation alternative differs")
+	end
+
+	test("requires the managed dynamic payload root during optional injection") do
+		mut state := dynamic_mir_test_state()
+		mut changed := false
+		state.scalar_mir.root_plans.each.with_index do |plan, slot|
+			mut point := 0
+			while point < plan.instructions.size()
+				instruction := state.scalar_mir.instructions[plan.instructions[point]]
+				if instruction.kind == 34
+					expect(plan.roots[point].size() > 0).to_be_true()
+					mut roots := plan.roots
+					roots[point] = []
+					state.scalar_mir.root_plans[slot] = MirRootPlan.new(function_id: plan.function_id, instructions: plan.instructions, roots: roots, capacity: plan.capacity)
+					changed = true
+				end
+				point += 1
+			end
+		end
+		expect(changed).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR live root plan differs")
+	end
+end

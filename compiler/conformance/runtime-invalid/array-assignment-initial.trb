@@ -1,0 +1,11 @@
+def grow(mut values: Array<Integer>): Integer
+	values.push(3)
+	puts("unexpected RHS")
+	return 9
+end
+
+def main()
+	mut values := [1, 2]
+	values[2] = grow(values)
+	return
+end

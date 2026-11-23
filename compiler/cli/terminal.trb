@@ -1,0 +1,35 @@
+import { native_cli_character, native_cli_env, native_cli_tty, native_cli_stderr_tty } from host
+
+def terminal_color_enabled(): Boolean
+	return native_cli_tty() != 0 && native_cli_env("NO_COLOR") == "" && native_cli_env("TERM") != "dumb"
+end
+
+# Lexical roles 0..7 are shared with the editor. The remaining roles describe
+# presentation rather than syntax: title, annotation and error severity.
+def terminal_style(role: Integer): String
+	colors := ["1;38;2;214;222;235", "1;38;2;198;120;221", "38;2;197;228;120", "38;2;255;184;108", "3;38;2;98;114;164", "38;2;127;219;202", "38;2;130;170;255", "4;38;2;255;88;116", "1;38;2;130;170;255", "38;2;98;114;164", "38;2;255;88;116"]
+	return native_cli_character(27) + "[" + colors[role] + "m"
+end
+
+def terminal_paint(text: String, role: Integer, enabled: Boolean): String
+	if enabled
+		return terminal_style(role) + text + native_cli_character(27) + "[0m"
+	end
+	return text
+end
+
+def terminal_style_title(): Integer
+	return 8
+end
+
+def terminal_style_annotation(): Integer
+	return 9
+end
+
+def terminal_style_error(): Integer
+	return 10
+end
+
+def terminal_error_color_enabled(): Boolean
+	return terminal_color_enabled() && native_cli_stderr_tty() != 0
+end

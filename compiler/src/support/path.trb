@@ -1,0 +1,149 @@
+def string_ends_with(value: String, suffix: String): Boolean
+	if suffix.size() > value.size()
+		return false
+	end
+	mut index := 0
+	start := value.size() - suffix.size()
+	while index < suffix.size()
+		if value[start + index] != suffix[index]
+			return false
+		end
+		index += 1
+	end
+	return true
+end
+
+def string_starts_with(value: String, prefix: String): Boolean
+	if prefix.size() > value.size()
+		return false
+	end
+	mut index := 0
+	while index < prefix.size()
+		if value[index] != prefix[index]
+			return false
+		end
+		index += 1
+	end
+	return true
+end
+
+def string_without_suffix(value: String, suffix: String): String
+	if !string_ends_with(value, suffix)
+		return value
+	end
+	mut result := ""
+	mut index := 0
+	finish := value.size() - suffix.size()
+	while index < finish
+		result += value[index]
+		index += 1
+	end
+	return result
+end
+
+def path_directory(path: String): String
+	mut slash := -1
+	mut index := 0
+	while index < path.size()
+		if path[index] == "/"
+			slash = index
+		end
+		index += 1
+	end
+	if slash < 0
+		return "."
+	end
+	if slash == 0
+		return "/"
+	end
+	mut result := ""
+	index = 0
+	while index < slash
+		result += path[index]
+		index += 1
+	end
+	return result
+end
+
+def path_basename(path: String): String
+	mut slash := -1
+	mut index := 0
+	while index < path.size()
+		if path[index] == "/"
+			slash = index
+		end
+		index += 1
+	end
+	mut result := ""
+	index = slash + 1
+	while index < path.size()
+		result += path[index]
+		index += 1
+	end
+	return result
+end
+
+def path_join(root: String, relative: String): String
+	if root == "/"
+		return root + relative
+	end
+	return root + "/" + relative
+end
+
+# Lexical POSIX normalization matches configured roots without resolving symlinks.
+def path_normalize(path: String): String
+	mut parts: Array<String> := []
+	mut depth := 0
+	mut part := ""
+	mut index := 0
+	mut absolute := false
+	if path.size() > 0
+		absolute = path[0] == "/"
+	end
+	while index <= path.size()
+		mut character := "/"
+		if index < path.size()
+			character = path[index]
+		end
+		if character == "/"
+			mut retain := false
+			if part == ".."
+				if depth > 0 && parts[depth - 1] != ".."
+					depth -= 1
+				elsif !absolute
+					retain = true
+				end
+			elsif part != "" && part != "."
+				retain = true
+			end
+			if retain
+				if depth < parts.size()
+					parts[depth] = part
+				else
+					parts.push(part)
+				end
+				depth += 1
+			end
+			part = ""
+		else
+			part += character
+		end
+		index += 1
+	end
+	mut result := ""
+	if absolute
+		result = "/"
+	end
+	index = 0
+	while index < depth
+		if index > 0
+			result += "/"
+		end
+		result += parts[index]
+		index += 1
+	end
+	if result == ""
+		result = "."
+	end
+	return result
+end

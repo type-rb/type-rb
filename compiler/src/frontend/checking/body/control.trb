@@ -1,0 +1,413 @@
+import { checked_category_value } from frontend/types/value_categories
+import { mir_state_enabled_slot, mir_state_function_slot, mir_state_return_value_slot, nullable_state_head_slot } from state/local_slots
+import { control_syntax_case, control_syntax_if, control_syntax_ternary, loop_transfer_none } from state/control_kinds
+import { token_kind_number, token_kind_string } from state/token_kinds
+import { mir_op_enum_test, mir_op_union_test } from mir/model/instructions
+import { check_literal_case, literal_branch_types, literal_case_type } from frontend/checking/nominal/literal_cases
+import { narrow_union_discriminant } from frontend/checking/nominal/union_members
+import { mir_literal_scalar } from mir/lowering/nullable
+import { union_parts } from frontend/types/union_types
+import { check_union_binding, check_union_patterns } from frontend/checking/nominal/unions
+import { mir_union_operation } from mir/lowering/unions
+import { checked_return_type } from frontend/checking/body/lambdas
+import { binding_scope_check } from frontend/checking/nominal/results
+import { advance, expect, finish_statement, token_is } from frontend/syntax/syntax_tokens
+import { check_enum_bindings, check_enum_patterns } from frontend/checking/nominal/enums
+import { mir_enum_operation } from mir/lowering/enums
+import { find_enum_type } from frontend/types/enum_types
+import { nullable_apply, nullable_finish, nullable_loop_writes } from frontend/checking/nominal/nullable_flow
+import { nullable_common } from frontend/types/nullable_types
+import { mir_value_complete, mir_value_exit, mir_value_join } from mir/build/value_control
+import { binary_result_type, check_expected, type_diagnostic } from frontend/checking/body/types
+import { CheckedValue, checked_mir_value, checked_value, checked_view, scalar_mir_binary, scalar_mir_disable } from frontend/checking/body/values
+import { checked_iteration_parameters, checked_iteration_shape, iteration_element_type } from frontend/checking/collections/iteration
+import { mir_iteration_valid } from mir/model/iteration
+import { MirLoopTransfer, mir_loop_transfer_valid } from mir/model/module
+import { mir_logical_begin, mir_logical_join } from mir/build/logical
+import { mir_checked_string_binary } from mir/lowering/strings
+import { mir_control_active, mir_control_branch, mir_control_enter, mir_control_jump, mir_control_loop_begin, mir_control_loop_branch, mir_control_loop_end, mir_control_prepare, mir_control_return, mir_control_transfer } from mir/build/control
+import { syntax_loop_transfer_kind, syntax_statement_boundary } from frontend/syntax/syntax_forms
+import { CompilerState, diagnostic, diagnostic_at, has_diagnostic } from state/state
+import { CheckedLocals } from state/local_state
+import { load_integer, load_string, sparse_integer_at, store_integer, store_string } from support/storage
+import { check_expression } from frontend/checking/body/expressions
+import { check_block, check_block_value, check_direct_statement_value, checked_readonly_reference_binding } from frontend/checking/body/statements
+
+def checked_while(mut state: CompilerState, mut position: Array<Integer>, mut locals: CheckedLocals, result_type: String): Boolean
+	origin := position[0]
+	line := load_integer(state.source_tokens.token_lines, origin)
+	count := locals.count[0]
+	flow_parent := locals.nullable_state[nullable_state_head_slot()]
+	flow_first := locals.nullable_facts.size()
+	nullable_loop_writes(state, locals, origin, sparse_integer_at(state.parsed.loop_finishes, origin))
+	exit := mir_control_loop_begin(state, locals, origin, line)
+	advance(position)
+	condition := check_expression(state, position, locals, 1, "Boolean")
+	check_expected(state, condition.type_name, "Boolean", line)
+	finish_statement(state, position)
+	mir_control_loop_branch(state, locals, condition, exit, line)
+	nullable_apply(locals, condition.truth)
+	# A while body does not permit redeclaring an enclosing local. The
+	# reference applies the surrounding declaration scope through the loop.
+	check_block(state, position, locals, result_type, origin, locals.scope_start[0])
+	binding_scope_check(state, locals, count)
+	locals.count[0] = count
+	mir_control_loop_end(state, locals, load_integer(state.source_tokens.token_lines, position[0]))
+	nullable_finish(locals, flow_parent, flow_first, count)
+	expect(state, position, "end")
+	return finish_statement(state, position)
+end
+
+def check_control_value(mut state: CompilerState, mut position: Array<Integer>, mut locals: CheckedLocals, wants_value: Boolean, expected: String, predicate: CheckedValue): CheckedValue
+	origin := position[0]
+	line := load_integer(state.source_tokens.token_lines, origin)
+	control := state.parsed.controls[sparse_integer_at(state.parsed.control_origins, origin) - 1]
+	saved_flow := locals.nullable_state[nullable_state_head_slot()]
+	flow_first := locals.nullable_facts.size()
+	saved_count := locals.count[0]
+	saved_mir := locals.mir_state[mir_state_enabled_slot()]
+	mut reachable := true
+	mir_control_prepare(state, locals)
+	mut join := mir_value_join(locals, line)
+	mut selector := checked_value(predicate.type_name, predicate.category, predicate.origin, predicate.mutable)
+	mut enum_owner := -1
+	mut union_selector := false
+	mut literal_selector := false
+	if control.kind == control_syntax_case()
+		position[0] = control.selector
+		selector = check_expression(state, position, locals, 1, "")
+		enum_owner = find_enum_type(state, selector.type_name)
+		if literal_case_type(selector.type_name) || selector.type_name == "Integer" || selector.type_name == "String"
+			literal_selector = check_literal_case(state, control, selector.type_name)
+			if has_diagnostic(state)
+				return checked_value("Invalid", checked_category_value(), origin, 0)
+			end
+			selector = mir_literal_scalar(state, locals, selector, control.selector)
+		end
+		union_selector = union_parts(selector.type_name).size() > 0
+		if literal_selector
+			union_selector = false
+		end
+		if union_selector && !check_union_patterns(state, control, selector.type_name)
+			return checked_value("Invalid", checked_category_value(), origin, 0)
+		end
+		if enum_owner >= 0 && !check_enum_patterns(state, control, enum_owner)
+			return checked_value("Invalid", checked_category_value(), origin, 0)
+		end
+		if enum_owner < 0 && !union_selector && !literal_selector && selector.type_name != "Never" && selector.type_name != "Integer" && selector.type_name != "String"
+			return type_diagnostic(state, line, "case selector requires Integer, String, enum or union")
+		end
+	elsif control.kind == control_syntax_ternary()
+		check_expected(state, predicate.type_name, "Boolean", line)
+	end
+	if selector.type_name == "Never"
+		reachable = false
+		scalar_mir_disable(locals)
+	end
+	mut immutable_reference := false
+	mut concurrent_borrowed := false
+	mut common := "Never"
+	mut common_presentation := ""
+	mut completing := 0
+	mut otherwise := false
+	mut branch_index := 0
+	while branch_index < control.branches.size()
+		branch := control.branches[branch_index]
+		mut alternate_flow := locals.nullable_state[nullable_state_head_slot()]
+		mut false_facts := -1
+		mut alternate := -1
+		if branch.condition >= 0 || (control.kind == control_syntax_ternary() && branch_index == 0)
+			mut condition := checked_view(predicate, predicate.type_name, predicate.category)
+			if control.kind == control_syntax_case()
+				position[0] = branch.condition
+				if union_selector
+					pattern := state.callables.checked[0].union_patterns[sparse_integer_at(state.callables.checked[0].union_pattern_origins, branch.condition) - 1]
+					condition = mir_union_operation(state, locals, mir_op_union_test(), selector, pattern.type_name, "Boolean", branch.condition)
+				elsif literal_selector && union_parts(selector.type_name).size() > 0
+					mut first := true
+					literal_branch_types(state, branch.condition, branch.condition_finish).each do |literal|
+						mut short := -1
+						if !first
+							short = mir_logical_begin(state, locals, condition, 1, branch.condition)
+						end
+						test := mir_union_operation(state, locals, mir_op_union_test(), selector, literal, "Boolean", branch.condition)
+						if first
+							condition = test
+						else
+							condition = mir_logical_join(state, locals, condition, test, short, branch.condition)
+						end
+						first = false
+					end
+				elsif enum_owner >= 0
+					pattern := state.callables.checked[0].enum_patterns[sparse_integer_at(state.callables.checked[0].enum_pattern_origins, branch.condition) - 1]
+					condition = mir_enum_operation(state, locals, mir_op_enum_test(), selector, -1, pattern.variant, "Boolean", branch.condition)
+				else
+					condition = check_case_condition(state, position, locals, selector, branch.condition_finish)
+				end
+			elsif control.kind == control_syntax_if()
+				position[0] = branch.condition
+				condition = check_expression(state, position, locals, 1, "Boolean")
+			end
+			if condition.type_name == "Never"
+				reachable = false
+				scalar_mir_disable(locals)
+			end
+			alternate_flow = locals.nullable_state[nullable_state_head_slot()]
+			false_facts = condition.falsity
+			nullable_apply(locals, condition.truth)
+			if (enum_owner >= 0 || union_selector || literal_selector) && branch_index == control.branches.size() - 1
+				otherwise = true
+			else
+				alternate = mir_control_branch(state, locals, condition, line)
+			end
+		else
+			otherwise = true
+		end
+		if union_selector && branch.condition >= 0
+			check_union_binding(state, locals, selector, branch.condition)
+		end
+		if enum_owner >= 0 && branch.condition >= 0
+			check_enum_bindings(state, locals, selector, branch.condition)
+		end
+		if control.kind == control_syntax_case() && literal_selector
+			narrow_union_discriminant(state, locals, control, branch_index)
+		end
+		position[0] = branch.body
+		mut value := checked_value("Void", checked_category_value(), 9007199254740991, 0)
+		if control.kind == control_syntax_ternary()
+			value = check_expression(state, position, locals, 1, expected)
+		else
+			mut result_type := "Void"
+			if locals.mir_state[mir_state_function_slot()] >= 0 || locals.lambda_result.size() > 0
+				result_type = checked_return_type(state, locals)
+			end
+			value = check_block_value(state, position, locals, result_type, locals.lexical_loop[0], wants_value, "", saved_count)
+		end
+		if reachable && value.concurrent_borrowed
+			concurrent_borrowed = true
+		end
+		if reachable && value.type_name != "Never" && checked_readonly_reference_binding(state, locals, value)
+			immutable_reference = true
+		end
+		binding_scope_check(state, locals, saved_count)
+		locals.count[0] = saved_count
+		if value.type_name != "Never" && reachable
+			completing += 1
+			if wants_value
+				if value.type_name == "Void"
+					return type_diagnostic(state, line, "control expression branch must end with a value or transfer")
+				end
+				if completing == 1
+					common_presentation = value.presentation
+				elsif common_presentation != value.presentation
+					common_presentation = ""
+				end
+				if common == "Never"
+					common = value.type_name
+				elsif common != value.type_name
+					common = nullable_common(common, value.type_name)
+					common_presentation = ""
+					if common == ""
+						return type_diagnostic(state, line, "control expression branches have incompatible types")
+					end
+				end
+				mir_value_exit(state, locals, join, value)
+			else
+				mir_control_jump(state, locals, join.target, saved_count)
+			end
+		end
+		if alternate >= 0
+			mir_control_enter(state, locals, alternate, line)
+		end
+		locals.nullable_state[nullable_state_head_slot()] = alternate_flow
+		nullable_apply(locals, false_facts)
+		branch_index += 1
+		if has_diagnostic(state)
+			return checked_value("Invalid", checked_category_value(), 9007199254740991, 0)
+		end
+	end
+	mut promoted_flow := saved_flow
+	if !otherwise && completing == 0
+		promoted_flow = locals.nullable_state[nullable_state_head_slot()]
+	end
+	nullable_finish(locals, promoted_flow, flow_first, saved_count)
+	if !otherwise
+		if wants_value
+			return type_diagnostic(state, line, "control expression requires an else branch")
+		end
+		if reachable
+			completing += 1
+			mir_control_jump(state, locals, join.target, saved_count)
+		end
+	end
+	position[0] = control.finish
+	if !reachable
+		locals.mir_state[mir_state_enabled_slot()] = saved_mir
+	end
+	if wants_value
+		store_string(state.callables.checked[0].control_types, origin, common)
+		if expected != ""
+			common_presentation = ""
+		end
+		value := mir_value_complete(state, locals, join, common, origin)
+		return CheckedValue.new(concurrent_borrowed: concurrent_borrowed, presentation: common_presentation, type_name: value.type_name, category: value.category, origin: value.origin, mutable: value.mutable, binding: false, readonly: false, immutable_reference: immutable_reference, nullable_binding: value.nullable_binding, nullable_field: value.nullable_field, truth: value.truth, falsity: value.falsity, flow_type: value.flow_type)
+	end
+	store_string(state.callables.checked[0].control_types, origin, "Void")
+	if completing == 0
+		return checked_value("Never", checked_category_value(), 9007199254740991, 0)
+	end
+	mir_control_enter(state, locals, join.target, line)
+	return checked_value("Void", checked_category_value(), 9007199254740991, 0)
+end
+
+def check_case_condition(mut state: CompilerState, mut position: Array<Integer>, mut locals: CheckedLocals, selector: CheckedValue, finish: Integer): CheckedValue
+	mut result := checked_value("Invalid", checked_category_value(), 9007199254740991, 0)
+	mut first := true
+	while position[0] < finish
+		origin := position[0]
+		mut short := -1
+		if !first
+			short = mir_logical_begin(state, locals, result, 1, origin)
+		end
+		mut literal := origin
+		if token_is(state, literal, "-")
+			literal += 1
+		end
+		kind := load_integer(state.source_tokens.token_kinds, literal)
+		if kind != token_kind_number() && kind != token_kind_string()
+			return type_diagnostic(state, load_integer(state.source_tokens.token_lines, origin), "case patterns currently require scalar literals")
+		end
+		mut expected := selector.type_name
+		if expected == "Never"
+			expected = ""
+		end
+		value := check_expression(state, position, locals, 1, expected)
+		if position[0] != literal + 1
+			return type_diagnostic(state, load_integer(state.source_tokens.token_lines, origin), "case patterns currently require scalar literals")
+		end
+		if selector.type_name == "Never"
+			if token_is(state, position[0], ",")
+				advance(position)
+			end
+			next
+		end
+		binary_result_type(state, "==", selector.type_name, value.type_name, load_integer(state.source_tokens.token_lines, origin), origin)
+		mut comparison := checked_value("Boolean", checked_category_value(), 9007199254740991, 0)
+		if selector.type_name == "String"
+			comparison = mir_checked_string_binary(state, locals, selector, value, "==", origin)
+		else
+			comparison = scalar_mir_binary(state, locals, "==", selector, value, "Boolean", origin)
+		end
+		if first
+			result = comparison
+		else
+			result = mir_logical_join(state, locals, result, comparison, short, origin)
+		end
+		first = false
+		if token_is(state, position[0], ",")
+			advance(position)
+		else
+			break
+		end
+	end
+	if selector.type_name == "Never"
+		return selector
+	end
+	return result
+end
+
+# Validate exact source and nearest-loop bindings before an adapter consumes
+# the plan. Zero-filled target storage represents absence, never token zero.
+def checked_loop_transfer_kind(mut state: CompilerState, origin: Integer, loop_origin: Integer): Integer
+	encoded_target := load_integer(state.callables.checked[0].loop_transfer_targets, origin)
+	mut target := -1
+	if encoded_target > 0
+		target = encoded_target - 1
+	end
+	plan := MirLoopTransfer.new(
+		kind: load_integer(state.callables.checked[0].loop_transfer_kinds, origin),
+		origin: origin,
+		target: target,
+	)
+	if mir_loop_transfer_valid(plan, origin, syntax_loop_transfer_kind(state, origin), loop_origin, state.source_tokens.token_count[0])
+		if token_is(state, loop_origin, "while")
+			return plan.kind
+		end
+		encoded_iteration := sparse_integer_at(state.callables.checked[0].iteration_origins, loop_origin)
+		if encoded_iteration > 0 && encoded_iteration <= state.callables.checked[0].iterations.size()
+			iteration := state.callables.checked[0].iterations[encoded_iteration - 1]
+			if checked_iteration_shape(state, iteration.syntax, loop_origin) && checked_iteration_parameters(state, iteration) && mir_iteration_valid(iteration, loop_origin, state.source_tokens.token_count[0], iteration.type_name, iteration_element_type(iteration.type_name))
+				if origin >= iteration.syntax.body_start && origin < iteration.syntax.body_finish
+					return plan.kind
+				end
+			end
+		end
+	end
+	diagnostic(state, "TRBN4004", load_integer(state.source_tokens.token_lines, origin), "invalid checked loop transfer target")
+	return loop_transfer_none()
+end
+
+def check_transfer_value(mut state: CompilerState, mut position: Array<Integer>, mut locals: CheckedLocals, result_type: String, loop_origin: Integer, finish: Integer): CheckedValue
+	origin := position[0]
+	# A generated case function retains the authored test block's control
+	# boundary. Nested closures and locally owned loops keep their own targets.
+	if locals.lambda_result.size() == 0 && (token_is(state, origin, "return") || loop_origin < 0)
+		function_id := locals.mir_state[mir_state_function_slot()]
+		state.parsed.tests.each do |item|
+			if item.function_id >= 0 && item.function_id == function_id
+				diagnostic_at(state, "TRBN4004", origin, load_string(state.source_tokens.token_texts, origin) + " cannot cross the test() block boundary")
+				return checked_value("Invalid", checked_category_value(), 9007199254740991, 0)
+			end
+		end
+	end
+	if token_is(state, origin, "return") && locals.transaction_body[0]
+		return type_diagnostic(state, load_integer(state.source_tokens.token_lines, origin), "return is unavailable inside a transaction block")
+	end
+	if token_is(state, origin, "return") && locals.file_body[0]
+		return type_diagnostic(state, load_integer(state.source_tokens.token_lines, origin), "return is unavailable inside a scoped File block")
+	end
+	if token_is(state, origin, "return") && locals.value_block[0]
+		return type_diagnostic(state, load_integer(state.source_tokens.token_lines, origin), "return is unavailable inside a value-producing collection block")
+	end
+	if token_is(state, origin, "return") && locals.lambda_result.size() == 0 && sparse_integer_at(state.parsed.function_expression_bodies, locals.mir_state[mir_state_function_slot()]) > 0
+		return type_diagnostic(state, load_integer(state.source_tokens.token_lines, origin), "return is unavailable inside a default initializer")
+	end
+	line := load_integer(state.source_tokens.token_lines, origin)
+	kind := syntax_loop_transfer_kind(state, origin)
+	advance(position)
+	if kind > loop_transfer_none()
+		if loop_origin < 0
+			diagnostic(state, "TRBN4004", line, load_string(state.source_tokens.token_texts, origin) + " is only valid inside a loop")
+		else
+			store_integer(state.callables.checked[0].loop_transfer_kinds, origin, kind)
+			store_integer(state.callables.checked[0].loop_transfer_targets, origin, loop_origin + 1)
+			mir_control_transfer(state, locals, loop_origin, kind)
+		end
+	elsif position[0] == finish || syntax_statement_boundary(state, position[0])
+		if result_type != "Void"
+			diagnostic(state, "TRBN4004", line, "return value is required")
+		elsif mir_control_active(locals)
+			mir_control_return(state, locals, -1)
+			locals.mir_state[mir_state_return_value_slot()] = -2
+		end
+	else
+		value := check_direct_statement_value(state, position, locals, result_type, false, 3)
+		if result_type == "Void" && value.type_name != "Never"
+			diagnostic(state, "TRBN4004", line, "Void function cannot return a value")
+		elsif value.type_name != "Never" && locals.mir_state[mir_state_enabled_slot()] > 0
+			operand := checked_mir_value(value)
+			if operand >= 0
+				locals.mir_state[mir_state_return_value_slot()] = operand
+				mir_control_return(state, locals, operand)
+			else
+				scalar_mir_disable(locals)
+			end
+		end
+	end
+	if finish < 0
+		finish_statement(state, position)
+	elsif position[0] != finish
+		diagnostic(state, "TRBN4004", line, "invalid conditional transfer body")
+	end
+	return checked_value("Never", checked_category_value(), 9007199254740991, 0)
+end

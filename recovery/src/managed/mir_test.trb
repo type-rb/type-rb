@@ -1,0 +1,350 @@
+import { ComparisonOperator, IntegerBinaryOperator, RecoveryScalarInstruction, ScalarType } from scalar/mir
+import { RecoveryManagedField, RecoveryManagedTypeDefinition, RecoveryManagedValueType, RecoveryManagedVariant } from managed/layout
+import { RecoveryManagedBlock, RecoveryManagedFunction, RecoveryManagedInstruction, RecoveryManagedModule, RecoveryManagedParameter, RecoveryManagedResultType, RecoveryManagedTerminator, verify_recovery_managed_mir } from managed/mir
+import { NativeSource } from snapshot/mir
+import { SourceOrigin } from snapshot/schema
+import trb/std/result
+import { describe, expect, test } from trb/std/test
+
+def _recovery_managed_mir_origin(line: Integer): SourceOrigin
+	return SourceOrigin.new(
+		source_id: "main",
+		start_line: line,
+		start_column: 1,
+		end_line: line,
+		end_column: 8,
+	)
+end
+
+def _recovery_managed_mir_scalar(value_type: ScalarType): RecoveryManagedValueType
+	return RecoveryManagedValueType::Scalar(value_type)
+end
+
+def _recovery_managed_mir_types(): Array<RecoveryManagedTypeDefinition>
+	return [
+		RecoveryManagedTypeDefinition::Record(
+			"example#Point",
+			[
+				RecoveryManagedField.new(name: "x", value_type: _recovery_managed_mir_scalar(ScalarType::Integer)),
+				RecoveryManagedField.new(name: "y", value_type: _recovery_managed_mir_scalar(ScalarType::Integer)),
+			],
+		),
+		RecoveryManagedTypeDefinition::Tagged(
+			"example#Outcome",
+			[
+				RecoveryManagedVariant.new(
+					name: "Found",
+					fields: [
+						RecoveryManagedField.new(name: "point", value_type: RecoveryManagedValueType::Aggregate("example#Point")),
+					],
+				),
+				RecoveryManagedVariant.new(
+					name: "Missing",
+					fields: [
+						RecoveryManagedField.new(name: "code", value_type: _recovery_managed_mir_scalar(ScalarType::Integer)),
+					],
+				),
+			],
+		),
+	]
+end
+
+def _recovery_managed_make_point(): RecoveryManagedFunction
+	origin := _recovery_managed_mir_origin(1)
+	return RecoveryManagedFunction.new(
+		id: "example#make_point",
+		name: "make_point",
+		parameters: [
+			RecoveryManagedParameter.new(id: "x", value_type: _recovery_managed_mir_scalar(ScalarType::Integer), origin: origin),
+			RecoveryManagedParameter.new(id: "y", value_type: _recovery_managed_mir_scalar(ScalarType::Integer), origin: origin),
+		],
+		result_type: RecoveryManagedResultType::Value(RecoveryManagedValueType::Aggregate("example#Point")),
+		entry: "entry",
+		origin: origin,
+		blocks: [
+			RecoveryManagedBlock.new(
+				id: "entry",
+				parameters: [],
+				origin: origin,
+				instructions: [
+					RecoveryManagedInstruction::RecordConstruct("point", "example#Point", ["x", "y"], origin),
+				],
+				terminator: RecoveryManagedTerminator::Return("point", origin),
+			),
+		],
+	)
+end
+
+def _recovery_managed_classify(): RecoveryManagedFunction
+	origin := _recovery_managed_mir_origin(5)
+	point_type := RecoveryManagedValueType::Aggregate("example#Point")
+	return RecoveryManagedFunction.new(
+		id: "example#classify",
+		name: "classify",
+		parameters: [
+			RecoveryManagedParameter.new(id: "point", value_type: point_type, origin: origin),
+			RecoveryManagedParameter.new(id: "found", value_type: _recovery_managed_mir_scalar(ScalarType::Boolean), origin: origin),
+		],
+		result_type: RecoveryManagedResultType::Value(RecoveryManagedValueType::Aggregate("example#Outcome")),
+		entry: "entry",
+		origin: origin,
+		blocks: [
+			RecoveryManagedBlock.new(
+				id: "entry",
+				parameters: [],
+				origin: origin,
+				instructions: [],
+				terminator: RecoveryManagedTerminator::Branch("found", "yes", ["point"], "no", [], origin),
+			),
+			RecoveryManagedBlock.new(
+				id: "yes",
+				parameters: [RecoveryManagedParameter.new(id: "selected", value_type: point_type, origin: origin)],
+				origin: origin,
+				instructions: [
+					RecoveryManagedInstruction::VariantConstruct(
+						"outcome",
+						"example#Outcome",
+						"Found",
+						["selected"],
+						origin,
+					),
+				],
+				terminator: RecoveryManagedTerminator::Return("outcome", origin),
+			),
+			RecoveryManagedBlock.new(
+				id: "no",
+				parameters: [],
+				origin: origin,
+				instructions: [
+					RecoveryManagedInstruction::Scalar(RecoveryScalarInstruction::IntegerLiteral("code", 404, origin)),
+					RecoveryManagedInstruction::VariantConstruct(
+						"outcome_missing",
+						"example#Outcome",
+						"Missing",
+						["code"],
+						origin,
+					),
+				],
+				terminator: RecoveryManagedTerminator::Return("outcome_missing", origin),
+			),
+		],
+	)
+end
+
+def _recovery_managed_sum_point(): RecoveryManagedFunction
+	origin := _recovery_managed_mir_origin(12)
+	return RecoveryManagedFunction.new(
+		id: "example#sum_point",
+		name: "sum_point",
+		parameters: [
+			RecoveryManagedParameter.new(
+				id: "point",
+				value_type: RecoveryManagedValueType::Aggregate("example#Point"),
+				origin: origin,
+			),
+		],
+		result_type: RecoveryManagedResultType::Value(_recovery_managed_mir_scalar(ScalarType::Integer)),
+		entry: "entry",
+		origin: origin,
+		blocks: [
+			RecoveryManagedBlock.new(
+				id: "entry",
+				parameters: [],
+				origin: origin,
+				instructions: [
+					RecoveryManagedInstruction::RecordProject("x", "example#Point", "point", "x", origin),
+					RecoveryManagedInstruction::RecordProject("y", "example#Point", "point", "y", origin),
+					RecoveryManagedInstruction::Scalar(
+						RecoveryScalarInstruction::IntegerBinary("sum", IntegerBinaryOperator::Add, "x", "y", origin)
+					),
+				],
+				terminator: RecoveryManagedTerminator::Return("sum", origin),
+			),
+		],
+	)
+end
+
+def _recovery_managed_entry(): RecoveryManagedFunction
+	origin := _recovery_managed_mir_origin(18)
+	outcome_type := RecoveryManagedValueType::Aggregate("example#Outcome")
+	return RecoveryManagedFunction.new(
+		id: "example#main",
+		name: "main",
+		parameters: [],
+		result_type: RecoveryManagedResultType::Void,
+		entry: "entry",
+		origin: origin,
+		blocks: [
+			RecoveryManagedBlock.new(
+				id: "entry",
+				parameters: [],
+				origin: origin,
+				instructions: [
+					RecoveryManagedInstruction::Scalar(RecoveryScalarInstruction::IntegerLiteral("twenty", 20, origin)),
+					RecoveryManagedInstruction::Scalar(RecoveryScalarInstruction::IntegerLiteral("twenty_two", 22, origin)),
+					RecoveryManagedInstruction::Scalar(RecoveryScalarInstruction::BooleanLiteral("found", true, origin)),
+					RecoveryManagedInstruction::Call("point", "example#make_point", ["twenty", "twenty_two"], origin),
+					RecoveryManagedInstruction::Call("outcome", "example#classify", ["point", "found"], origin),
+					RecoveryManagedInstruction::VariantTest("is_found", "example#Outcome", "outcome", "Found", origin),
+				],
+				terminator: RecoveryManagedTerminator::Branch("is_found", "found", ["outcome"], "failure", [], origin),
+			),
+			RecoveryManagedBlock.new(
+				id: "found",
+				parameters: [RecoveryManagedParameter.new(id: "matched", value_type: outcome_type, origin: origin)],
+				origin: origin,
+				instructions: [
+					RecoveryManagedInstruction::VariantProject(
+						"point_payload",
+						"example#Outcome",
+						"matched",
+						"Found",
+						"point",
+						origin,
+					),
+					RecoveryManagedInstruction::Call("answer", "example#sum_point", ["point_payload"], origin),
+					RecoveryManagedInstruction::Scalar(RecoveryScalarInstruction::IntegerLiteral("expected", 42, origin)),
+					RecoveryManagedInstruction::Scalar(
+						RecoveryScalarInstruction::IntegerCompare(
+							"matches",
+							ComparisonOperator::Equal,
+							"answer",
+							"expected",
+							origin,
+						)
+					),
+				],
+				terminator: RecoveryManagedTerminator::Branch("matches", "success", [], "failure", [], origin),
+			),
+			RecoveryManagedBlock.new(
+				id: "success",
+				parameters: [],
+				origin: origin,
+				instructions: [
+					RecoveryManagedInstruction::Scalar(RecoveryScalarInstruction::WriteStatic("recovery-managed-aggregate\n", origin)),
+				],
+				terminator: RecoveryManagedTerminator::Return(nil, origin),
+			),
+			RecoveryManagedBlock.new(
+				id: "failure",
+				parameters: [],
+				origin: origin,
+				instructions: [
+					RecoveryManagedInstruction::Scalar(RecoveryScalarInstruction::WriteStatic("bad\n", origin)),
+				],
+				terminator: RecoveryManagedTerminator::Return(nil, origin),
+			),
+		],
+	)
+end
+
+def recovery_managed_mir_sample_module(): RecoveryManagedModule
+	return RecoveryManagedModule.new(
+		id: "example",
+		entry_function: "example#main",
+		sources: [NativeSource.new(id: "main", path: "src/main.trb")],
+		types: _recovery_managed_mir_types(),
+		functions: [_recovery_managed_make_point(), _recovery_managed_classify(), _recovery_managed_sum_point(), _recovery_managed_entry()],
+	)
+end
+
+def _recovery_managed_invalid_projection_module(): RecoveryManagedModule
+	origin := _recovery_managed_mir_origin(40)
+	entry := RecoveryManagedFunction.new(
+		id: "example#main",
+		name: "main",
+		parameters: [],
+		result_type: RecoveryManagedResultType::Void,
+		entry: "entry",
+		origin: origin,
+		blocks: [
+			RecoveryManagedBlock.new(
+				id: "entry",
+				parameters: [],
+				origin: origin,
+				instructions: [
+					RecoveryManagedInstruction::Scalar(RecoveryScalarInstruction::IntegerLiteral("code", 404, origin)),
+					RecoveryManagedInstruction::VariantConstruct(
+						"missing",
+						"example#Outcome",
+						"Missing",
+						["code"],
+						origin,
+					),
+					RecoveryManagedInstruction::VariantProject(
+						"invalid",
+						"example#Outcome",
+						"missing",
+						"Found",
+						"point",
+						origin,
+					),
+				],
+				terminator: RecoveryManagedTerminator::Return(nil, origin),
+			),
+		],
+	)
+	return RecoveryManagedModule.new(
+		id: "example",
+		entry_function: entry.id,
+		sources: [NativeSource.new(id: "main", path: "src/main.trb")],
+		types: _recovery_managed_mir_types(),
+		functions: [entry],
+	)
+end
+
+describe("Managed recovery aggregate MIR") do
+	test("verifies aggregate construction, projection, calls, returns, and block arguments") do
+		case verify_recovery_managed_mir(recovery_managed_mir_sample_module())
+		when Result::Ok(valid)
+			expect(valid).to_be_true()
+		when Result::Err(diagnostic)
+			puts(diagnostic.path + ": " + diagnostic.message)
+			expect(false).to_be_true()
+		end
+	end
+
+	test("rejects nominally mismatched record construction") do
+		origin := _recovery_managed_mir_origin(30)
+		broken := RecoveryManagedFunction.new(
+			id: "example#main",
+			name: "main",
+			parameters: [],
+			result_type: RecoveryManagedResultType::Void,
+			entry: "entry",
+			origin: origin,
+			blocks: [
+				RecoveryManagedBlock.new(
+					id: "entry",
+					parameters: [],
+					origin: origin,
+					instructions: [
+						RecoveryManagedInstruction::Scalar(RecoveryScalarInstruction::BooleanLiteral("wrong", true, origin)),
+						RecoveryManagedInstruction::Scalar(RecoveryScalarInstruction::IntegerLiteral("right", 1, origin)),
+						RecoveryManagedInstruction::RecordConstruct(
+							"point",
+							"example#Point",
+							["wrong", "right"],
+							origin,
+						),
+					],
+					terminator: RecoveryManagedTerminator::Return(nil, origin),
+				),
+			],
+		)
+		native_module := RecoveryManagedModule.new(
+			id: "example",
+			entry_function: broken.id,
+			sources: [NativeSource.new(id: "main", path: "src/main.trb")],
+			types: _recovery_managed_mir_types(),
+			functions: [broken],
+		)
+		case verify_recovery_managed_mir(native_module)
+		when Result::Ok(_valid)
+			expect(false).to_be_true()
+		when Result::Err(diagnostic)
+			expect(diagnostic.code).to_equal("TRBN0004")
+			expect(diagnostic.message).to_equal("operand type does not match the operation")
+		end
+	end
+end

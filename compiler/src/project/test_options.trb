@@ -1,0 +1,113 @@
+import { package_json_quote } from project/package_json
+import { string_starts_with } from support/path
+
+record TestOptions
+	config: String
+	reporter: String
+	compile: Boolean
+	debug: Boolean
+	output: String
+	paths: Array<String>
+	error: String
+end
+
+def test_boolean_option(value: String): Integer
+	if value == "1" || value == "t" || value == "T" || value == "TRUE" || value == "true" || value == "True"
+		return 1
+	end
+	if value == "0" || value == "f" || value == "F" || value == "FALSE" || value == "false" || value == "False"
+		return 0
+	end
+	return -1
+end
+
+def parse_test_options(arguments: Array<String>): TestOptions
+	mut config := ""
+	mut reporter := "human"
+	mut compile := false
+	mut debug := false
+	mut output := ""
+	mut paths: Array<String> := []
+	mut error := ""
+	mut index := 0
+	mut positional := false
+	while index < arguments.size() && error == ""
+		argument := arguments[index]
+		index += 1
+		if positional || argument == "-" || !string_starts_with(argument, "-")
+			paths.push(argument)
+			next
+		end
+		if argument == "--"
+			positional = true
+			next
+		end
+		mut start := 1
+		if string_starts_with(argument, "--")
+			start = 2
+		end
+		mut name := ""
+		mut value := ""
+		mut inline := false
+		while start < argument.size()
+			character := argument[start]
+			if !inline && character == "="
+				inline = true
+			elsif inline
+				value += character
+			else
+				name += character
+			end
+			start += 1
+		end
+		if name == "t" || name == "test-name-pattern"
+			error = argument + ": test name selection is deferred; select a file or directory"
+			next
+		end
+		if name == "compile" || name == "debug"
+			mut flag := 1
+			if inline
+				flag = test_boolean_option(value)
+			end
+			if flag < 0
+				error = "invalid Boolean value for --" + name
+			elsif name == "compile"
+				compile = flag == 1
+			else
+				debug = flag == 1
+			end
+			next
+		end
+		if name != "config" && name != "reporter" && name != "outfile"
+			error = "unknown option " + argument
+			next
+		end
+		if !inline
+			if index >= arguments.size()
+				error = "missing value for --" + name
+				next
+			end
+			value = arguments[index]
+			index += 1
+		end
+		if name == "config"
+			config = value
+		elsif name == "reporter"
+			reporter = value
+		else
+			output = value
+		end
+	end
+	if error == ""
+		if reporter != "human" && reporter != "json"
+			error = "--reporter must be human or json; got " + package_json_quote(reporter)
+		elsif debug && !compile
+			error = "--debug requires --compile"
+		elsif output != "" && !compile
+			error = "--outfile requires --compile"
+		elsif compile && (paths.size() > 0 || reporter != "human")
+			error = "test paths, --test-name-pattern, and --reporter select a test execution and cannot be combined with --compile"
+		end
+	end
+	return TestOptions.new(config: config, reporter: reporter, compile: compile, debug: debug, output: output, paths: paths, error: error)
+end

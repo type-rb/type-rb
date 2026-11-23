@@ -1,0 +1,40 @@
+import { check, emit_qbe } from compiler
+import { control_test_output } from testing/mir/control
+import { managed_mir_test_fixture } from testing/mir/managed
+import { logical_checked_source } from testing/pipeline
+import { logical_run_qbe } from testing/qbe_runner
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+describe("Integer decimal String storage") do
+	test("matches reference decimal formatting through digit-pair transitions and portable endpoints") do
+		source := "def main()\nmut value := -10050\nwhile value <= 10050\nputs(value.to_s())\nvalue += 1\nend\nputs(9007199254740991.to_s())\nputs((-9007199254740991).to_s())\nputs(1000000000000000.to_s())\nputs((-1000000000000000).to_s())\nend\n"
+		mut expected: Array<String> := []
+		mut value := -10050
+		while value <= 10050
+			expected.push(value.to_s())
+			value += 1
+		end
+		expected.push("9007199254740991")
+		expected.push("-9007199254740991")
+		expected.push("1000000000000000")
+		expected.push("-1000000000000000")
+		mut state := logical_checked_source(source)
+		expect(check(state)).to_be_true()
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+			when Result::Ok(actual)
+				expect(actual).to_equal(expected.join("\n") + "\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("keeps every cached value and heap fallback alive across collection") do
+		managed_mir_test_fixture("integer-string-cache", 8)
+	end
+end

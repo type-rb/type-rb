@@ -1,0 +1,311 @@
+import { standard_sqlite_host } from frontend/resolution/sqlite_intrinsics
+import { standard_process } from frontend/resolution/process_intrinsics
+import { concurrent_borrowed_type } from frontend/types/concurrent_types
+import { mir_deadlines_enabled } from mir/model/deadlines
+import { mir_lower_deadline_checkpoints } from mir/lowering/deadlines
+import { standard_runtime_deadline } from frontend/resolution/standard_intrinsics
+import { test_provider_function } from frontend/providers/test_declarations
+import { standard_test_capture, standard_test_equal, standard_test_fail, standard_test_finish, standard_test_inspect, standard_test_scalar_kind } from frontend/resolution/test_intrinsics
+import { standard_filesystem_host } from frontend/resolution/filesystem_intrinsics
+import { check_file_body_function, file_body_bind_captures } from frontend/checking/body/file_bodies
+import { resource_checked_body, verify_resource_calls } from frontend/checking/body/resource_calls
+import { standard_oidc_host } from frontend/resolution/oidc_intrinsics
+import { standard_crypto } from frontend/resolution/crypto_intrinsics
+import { standard_compression } from frontend/resolution/compression_intrinsics
+import { standard_string_builder } from frontend/resolution/string_builder_intrinsics
+import { standard_network_host } from frontend/resolution/network_intrinsics
+import { standard_entropy } from frontend/resolution/secure_random_intrinsics
+import { web_context_function } from frontend/providers/web_context
+import { web_context_primitive } from frontend/resolution/web_context_intrinsics
+import { lower_web_context_primitive } from mir/lowering/web_context
+import { standard_time_host } from frontend/resolution/time_intrinsics
+import { standard_runtime_fail, standard_runtime_recover } from frontend/resolution/standard_intrinsics
+import { web_binding_function } from frontend/providers/web_declarations
+import { json_provider_function, json_provider_kind } from frontend/providers/json_declarations
+import { mir_control_terminated_slot, mir_state_enabled_slot, mir_state_function_slot, mir_state_return_value_slot } from state/local_slots
+import { checking_discovery, checking_lowering } from state/checking_phases
+import { prepare_collection_contexts } from frontend/checking/collections/context_analysis
+import { mir_lower_program } from mir/lowering/program
+import { resolution_locals_new } from state/resolution_locals
+import { plan_global_initialization } from mir/lowering/global_initialization
+import { declare_object_witnesses, prepare_object_dispatch } from frontend/resolution/object_dispatch
+import { object_abstract_function, object_initializer_owner } from frontend/types/object_types
+import { mir_initialize_object_field } from frontend/checking/nominal/object_fields
+import { builtin_result_source } from frontend/checking/builtins/results
+import { binding_scope_check } from frontend/checking/nominal/results
+import { checked_body_lowering } from state/checked_body
+import { declare_default_functions } from frontend/resolution/default_arguments
+import { lambda_bind_captures } from mir/lowering/lambdas
+import { mir_binding_initialize, mir_binding_read } from mir/build/bindings
+import { check_block, check_block_value } from frontend/checking/body/statements
+import { check_expression } from frontend/checking/body/expressions
+import { checked_mir_value, scalar_mir_disable } from frontend/checking/body/values
+import { checked_hash_verify } from frontend/checking/collections/hashes
+import { mir_add_parameter, scalar_mir_begin, scalar_mir_commit } from mir/build/functions
+import { mir_control_active, mir_control_prepare, mir_control_return } from mir/build/control
+import { mir_refine_call_effects } from mir/analysis/call_effects
+import { optimize_verified_mir } from mir/passes/optimize
+import { mir_managed_type, mir_semantic_type_id } from mir/model/types
+import { verify_mir } from mir/verify/module
+import { validate_import_usage } from frontend/resolution/import_resolution
+import { resolve_function_body } from frontend/checking/program/resolution
+import { CompilerState, diagnostic, has_diagnostic, local_add, select_checked_body } from state/state
+import { CheckedLocals, local_identity, locals_new } from state/local_state
+import { load_integer, load_string, sparse_integer_at, sparse_string_at, store_integer } from support/storage
+
+# Parameter binding and body checking are separate semantic stages. All
+# concrete functions start MIR here and require an owned body before finalization.
+def checked_function_locals(mut state: CompilerState, function_index: Integer): CheckedLocals
+	select_checked_body(state, function_index)
+	prepare_collection_contexts(state, function_index)
+	state.module_graph.active_module[0] = load_integer(state.declarations.function_modules, function_index)
+	state.global_bindings.declaration_owner[0] = sparse_string_at(state.source_tokens.token_namespaces, load_integer(state.declarations.function_body_starts, function_index))
+	mut locals := locals_new(state.source_tokens.token_count[0] + 1)
+	locals.concurrent_function[0] = state.callables.concurrent_audit[0]
+	if state.type_resolution.generic_template_mode[0] || state.callables.lambda_phase[0] == checking_discovery()
+		locals.mir_state[mir_state_function_slot()] = function_index
+	else
+		scalar_mir_begin(state, function_index, locals)
+	end
+	state.callables.checked[0].shared_bindings.each do |identity|
+		store_integer(locals.mir_cell_plans, identity, 1)
+	end
+	parameter_start := load_integer(state.declarations.function_parameter_starts, function_index)
+	parameter_finish := parameter_start + load_integer(state.declarations.function_parameter_counts, function_index)
+	mut captures := lambda_bind_captures(state, locals, function_index)
+	if sparse_integer_at(state.callables.function_file_bodies, function_index) > 0
+		captures = file_body_bind_captures(state, locals, function_index)
+	end
+	mut parameter_index := parameter_start + captures
+	while parameter_index < parameter_finish
+		added := local_add(
+			state,
+			locals,
+			load_string(state.declarations.parameter_names, parameter_index),
+			load_string(state.declarations.parameter_types, parameter_index),
+			load_integer(state.declarations.parameter_mutable, parameter_index),
+			load_integer(state.declarations.parameter_lines, parameter_index),
+		)
+		if added
+			if locals.concurrent_function[0] > 0 && concurrent_borrowed_type(state, load_string(state.declarations.parameter_types, parameter_index))
+				store_integer(locals.concurrent_borrowed, local_identity(locals, locals.count[0] - 1), 1)
+			end
+			store_integer(locals.mir_values, locals.count[0] - 1, 0)
+			mir_add_parameter(state, locals, parameter_index)
+		end
+		parameter_index += 1
+	end
+	# ABI parameter values occupy the first N SSA identities before allocation.
+	mut slot := captures
+	while slot < locals.count[0]
+		if sparse_integer_at(locals.mir_cell_plans, local_identity(locals, slot)) > 0
+			origin := load_integer(state.declarations.function_body_starts, function_index)
+			value := mir_binding_read(state, locals, slot, origin)
+			mir_binding_initialize(state, locals, slot, value, origin)
+		end
+		slot += 1
+	end
+	return locals
+end
+
+def check_function_body(mut state: CompilerState, function_index: Integer, mut locals: CheckedLocals): Boolean
+	resource_checked_body(state, function_index)
+	if state.type_resolution.generic_template_mode[0] && (test_provider_function(state, function_index) > 0 || web_context_function(state, function_index) > 0 || web_binding_function(state, function_index) > 0 || json_provider_function(state, function_index) > 0)
+		# The trusted provider validates its schema during speculative checking.
+		# Ordinary checking materializes and verifies its complete executable body.
+		return !has_diagnostic(state)
+	end
+	primitive := web_context_primitive(state, function_index)
+	if primitive > 0
+		if !state.type_resolution.generic_template_mode[0] && state.callables.lambda_phase[0] != checking_discovery()
+			lower_web_context_primitive(state, function_index, primitive, locals)
+		end
+		return !has_diagnostic(state)
+	end
+	if standard_test_scalar_kind(state, function_index) || standard_test_inspect(state, function_index) || standard_test_equal(state, function_index) || standard_test_finish(state, function_index) || standard_test_capture(state, function_index) || standard_test_fail(state, function_index) || standard_process(state, function_index) >= 0 || standard_sqlite_host(state, function_index) >= 0 || standard_filesystem_host(state, function_index) >= 0 || standard_oidc_host(state, function_index) >= 0 || standard_crypto(state, function_index) >= 0 || standard_compression(state, function_index) || standard_string_builder(state, function_index) >= 0 || standard_network_host(state, function_index) >= 0 || standard_entropy(state, function_index) || standard_runtime_fail(state, function_index) || standard_runtime_recover(state, function_index) || standard_runtime_deadline(state, function_index) || standard_time_host(state, function_index) > 0
+		# Headers and generic arguments use ordinary checking. The verified
+		# intrinsic signature owns this declaration instead of an empty body.
+		return !has_diagnostic(state)
+	end
+	previous_body := select_checked_body(state, function_index)
+	parameter_start := load_integer(state.declarations.function_parameter_starts, function_index)
+	parameter_finish := parameter_start + load_integer(state.declarations.function_parameter_counts, function_index)
+	mut parameter_index := parameter_start
+	while parameter_index < parameter_finish
+		if locals.mir_state[mir_state_enabled_slot()] == 1 && mir_managed_type(state.scalar_mir, mir_semantic_type_id(state.scalar_mir, load_string(state.declarations.parameter_types, parameter_index)))
+			mir_control_prepare(state, locals)
+		end
+		parameter_index += 1
+	end
+	result_type := load_string(state.declarations.function_result_types, function_index)
+	if (result_type == "Void" || mir_managed_type(state.scalar_mir, mir_semantic_type_id(state.scalar_mir, result_type))) && locals.mir_state[mir_state_enabled_slot()] == 1
+		mir_control_prepare(state, locals)
+	end
+	owner := object_initializer_owner(state, function_index)
+	if owner >= 0
+		state.nominal.object_instances[owner].fields.each do |field|
+			if field.default_start >= 0
+				mut default_position := [field.default_start]
+				value := check_expression(state, default_position, locals, 1, field.type_name)
+				mir_initialize_object_field(state, locals, owner, field.name, value, field.origin)
+			end
+		end
+	end
+	mut position := [load_integer(state.declarations.function_body_starts, function_index)]
+	if sparse_integer_at(state.callables.function_file_bodies, function_index) > 0
+		check_file_body_function(state, position, locals, state.callables.file_bodies[sparse_integer_at(state.callables.function_file_bodies, function_index) - 1])
+	elsif sparse_integer_at(state.parsed.function_expression_bodies, function_index) > 0
+		value := check_expression(state, position, locals, 1, result_type)
+		returned := checked_mir_value(value)
+		if returned >= 0
+			locals.mir_state[mir_state_return_value_slot()] = returned
+			mir_control_return(state, locals, returned)
+		else
+			scalar_mir_disable(locals)
+		end
+	else
+		if state.type_resolution.generic_template_mode[0] || state.callables.lambda_phase[0] == checking_discovery()
+			completion := check_block_value(state, position, locals, result_type, -1, false, "", 0)
+			if result_type != "Void" && completion.type_name != "Never"
+				mut message := "function must return on every completing path"
+				if state.type_resolution.generic_template_mode[0]
+					message = "generic " + message
+				end
+				diagnostic(state, "TRBN4004", load_integer(state.declarations.function_lines, function_index), message)
+			end
+		else
+			check_block(state, position, locals, result_type, -1, 0)
+		end
+	end
+	binding_scope_check(state, locals, 0)
+	if position[0] != load_integer(state.declarations.function_body_ends, function_index)
+		diagnostic(
+			state,
+			"TRBN4004",
+			load_integer(state.declarations.function_lines, function_index),
+			"checker did not consume the complete function body",
+		)
+	end
+	if result_type == "Void" && mir_control_active(locals) && locals.mir_control[mir_control_terminated_slot()] == 0
+		mir_control_return(state, locals, -1)
+	end
+	if !has_diagnostic(state) && !state.type_resolution.generic_template_mode[0] && state.callables.lambda_phase[0] != checking_discovery()
+		mir_error := scalar_mir_commit(state, function_index, locals)
+		if mir_error != ""
+			diagnostic(
+				state,
+				"TRBN4004",
+				load_integer(state.declarations.function_lines, function_index),
+				mir_error,
+			)
+		end
+	end
+	state.callables.checked[0] = previous_body
+	return !has_diagnostic(state)
+end
+
+# Finish closure/generic/default discovery before freezing the MIR catalog.
+# File programs without closures or inferred transform results retain one pass.
+# REPL witnesses also analyze retained shared bindings before MIR lowering.
+def analyze_callable_bodies(mut state: CompilerState): Boolean
+	mut inferred_calls := false
+	mut definition_index := 0
+	state.type_resolution.generic_functions.each do |definition|
+		if definition.receiver_type != "" || json_provider_kind(state, definition_index) > 0
+			inferred_calls = true
+		end
+		definition_index += 1
+	end
+	if state.callables.lambdas.size() == 0 && state.callables.call_blocks.size() == 0 && state.parsed.transforms.size() == 0 && !state.interactive && !inferred_calls && state.nominal.objects.size() == 0 && !builtin_result_source(state)
+		return true
+	end
+	state.callables.lambda_phase[0] = checking_discovery()
+	resolved := state.declarations.function_count[0]
+	mut objects := prepare_object_dispatch(state, 0)
+	mut function := 0
+	while function < state.declarations.function_count[0] && !has_diagnostic(state)
+		if sparse_integer_at(state.callables.function_lambdas, function) == 0 && sparse_integer_at(state.callables.function_file_bodies, function) == 0 && !object_abstract_function(state, function)
+			if function >= resolved
+				mut names := resolution_locals_new(state.source_tokens.token_count[0] + 1)
+				resolve_function_body(state, function, names)
+				declare_default_functions(state)
+			end
+			if !has_diagnostic(state)
+				mut locals := checked_function_locals(state, function)
+				check_function_body(state, function, locals)
+				declare_default_functions(state)
+			end
+		end
+		objects = prepare_object_dispatch(state, objects)
+		function += 1
+	end
+	if !declare_object_witnesses(state)
+		return false
+	end
+	if has_diagnostic(state)
+		return false
+	end
+	mut pending := true
+	while pending && !has_diagnostic(state)
+		pending = false
+		function = 0
+		while function < state.callables.concurrent_functions.size() && !has_diagnostic(state)
+			mode := state.callables.concurrent_functions[function]
+			if mode > state.callables.concurrent_checked[function]
+				pending = true
+				state.callables.concurrent_checked[function] = mode
+				state.callables.concurrent_audit[0] = mode
+				mut locals := checked_function_locals(state, function)
+				check_function_body(state, function, locals)
+				state.callables.concurrent_audit[0] = 0
+			end
+			function += 1
+		end
+	end
+	if has_diagnostic(state)
+		return false
+	end
+	function = 0
+	while function < state.declarations.function_count[0]
+		encoded := sparse_integer_at(state.callables.checked_body_indices, function)
+		if encoded > 0
+			previous := state.callables.checked_bodies[encoded - 1]
+			state.callables.checked_bodies[encoded - 1] = checked_body_lowering(previous, function, previous.resolved_names.origin, previous.resolved_names.limit[0])
+		end
+		function += 1
+	end
+	state.callables.lambda_phase[0] = checking_lowering()
+	return true
+end
+
+def finalize_checked_module(mut state: CompilerState): Boolean
+	if !verify_resource_calls(state)
+		return false
+	end
+	if !has_diagnostic(state)
+		mir_refine_call_effects(state.scalar_mir)
+		if !plan_global_initialization(state)
+			return false
+		end
+		mir_lower_program(state)
+		if mir_deadlines_enabled(state.scalar_mir)
+			mir_lower_deadline_checkpoints(state.scalar_mir)
+			mir_refine_call_effects(state.scalar_mir)
+		end
+		mut mir_error := verify_mir(state.scalar_mir, false)
+		if mir_error == ""
+			optimize_verified_mir(state.scalar_mir)
+			mir_error = verify_mir(state.scalar_mir, true)
+		end
+		if mir_error != ""
+			diagnostic(state, "TRBN4004", 1, mir_error)
+		end
+	end
+	if !has_diagnostic(state)
+		checked_hash_verify(state)
+	end
+	if !has_diagnostic(state)
+		validate_import_usage(state)
+	end
+	return !has_diagnostic(state)
+end

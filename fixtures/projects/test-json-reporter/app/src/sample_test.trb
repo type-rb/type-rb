@@ -1,0 +1,10 @@
+import { describe, expect, test } from trb/std/test
+
+describe("Sample") do
+	test("passes") do
+		expect(1).to_equal(1)
+	end
+	test("fails") do
+		expect("a").to_equal("b")
+	end
+end

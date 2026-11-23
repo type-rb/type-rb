@@ -1,0 +1,2 @@
+import { BASE, mark } from shared
+Z := mark("z") + BASE

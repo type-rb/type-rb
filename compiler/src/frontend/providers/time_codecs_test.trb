@@ -1,0 +1,114 @@
+import { standard_source_json, standard_source_time } from state/standard_source_kinds
+import { time_codec_name } from frontend/providers/time_codecs
+import { generic_program_fork } from frontend/checking/program/generic_fork
+import { declare_json_codecs, json_provider_kind } from frontend/providers/json_declarations
+import { instantiate_generic_function } from frontend/resolution/generic_functions
+import { find_record_in_module } from frontend/resolution/declaration_lookup
+import { record_type, resolve_type_name } from frontend/resolution/type_resolution
+import { check, emit_qbe } from compiler
+import { resolve } from frontend/checking/program/resolution
+import { lex, lex_module } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { CompilerState, add_module, compiler_new } from state/state
+import { load_string, store_integer, store_string } from support/storage
+import { expect_compiler_phase } from testing/pipeline
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { control_test_output } from testing/mir/control
+import { verify_mir } from mir/verify/module
+import { describe, expect, test } from trb/std/test
+
+# Owned minimal fixtures isolate schema identity from the recovery byte
+# constructor. Ordinary Native CLI tests execute the complete pinned sources.
+def time_codec_owned_fixture(mut state: CompilerState, name: String, kind: Integer, source: String)
+	owner := add_module(state, name, "<" + name + ">")
+	store_integer(state.standard_modules, owner, kind)
+	start := state.source_tokens.token_count[0]
+	expect_compiler_phase(state, "fixture lex", lex_module(state, source, owner))
+	expect_compiler_phase(state, "fixture parse", parse_module(state, start, owner))
+	if kind == standard_source_json()
+		declare_json_codecs(state, owner)
+	end
+	state.module_graph.active_module[0] = 0
+end
+
+def time_codec_parsed_source(source: String): CompilerState
+	mut state := compiler_new(1048576)
+	expect_compiler_phase(state, "lex", lex(state, source))
+	expect_compiler_phase(state, "parse", parse_module(state, 0, 0))
+	time_codec_owned_fixture(state, "trb/std/time/index", standard_source_time(), "import trb/std/result\nclass Date\ndef initialize(_year: Integer, _month: Integer, _day: Integer)\nend\ndef self.try_parse(_source: String): Result<Date, String>\nreturn Result<Date, String>::Ok(Date.new(2024, 1, 2))\nend\ndef to_s(): String\nreturn \"2024-01-02\"\nend\nend\n")
+	time_codec_owned_fixture(state, "trb/std/json/index", standard_source_json(), "import trb/std/result\nmodule JSON\nenum ErrorKind\nSyntax\nDecode\nEncode\nend\nrecord Error\nkind: JSON::ErrorKind\nmessage: String\npath: String\nline: Integer?\ncolumn: Integer?\nend\nenum Value\nNull\nBoolean(value: Boolean)\nInteger(value: Integer)\nFloat(value: Float)\nString(value: String)\nArray(value: Array<JSON::Value>)\nObject(value: Hash<String, JSON::Value>)\nend\nend\ndef parse(_source: String): Result<JSON::Value, JSON::Error>\nreturn Result<JSON::Value, JSON::Error>::Ok(JSON::Value::Object({\"value\" => JSON::Value::String(\"2024-01-02\")}))\nend\ndef stringify(_value: JSON::Value): Result<String, JSON::Error>\nreturn Result<String, JSON::Error>::Ok(\"encoded\")\nend\n")
+	return state
+end
+
+def time_codec_checked_source(source: String): CompilerState
+	mut state := time_codec_parsed_source(source)
+	expect_compiler_phase(state, "resolve", resolve(state))
+	return state
+end
+
+def time_codec_consume(call: String): String
+	return "case " + call + "\nwhen Result::Ok(_value)\nputs(\"ok\")\nwhen Result::Err(_error)\nputs(\"error\")\nend\n"
+end
+
+def time_codec_source(probe: Boolean = true): String
+	mut source := "import { Date } from trb/std/time\nimport trb/std/json\nimport trb/std/result\nrecord Payload\nvalue: Date\nend\ndef main()\n"
+	if probe
+		source += time_codec_consume("JSON.decode<Payload>(\"{}\")")
+		source += time_codec_consume("JSON.encode(Payload.new(value: Date.new(2024, 1, 2)))")
+	end
+	return source + "end\n"
+end
+
+describe("Time codec declaration identity") do
+	test("lowers time codecs to ordinary verified source-independent MIR") do
+		mut state := time_codec_checked_source(time_codec_source())
+		expect_compiler_phase(state, "check", check(state))
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		before := control_test_output(emit_qbe(state))
+		intrinsic_mir_erase(state)
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+	end
+
+	test("recognizes loader-owned time classes and rejects authored homonyms") do
+		mut standard := time_codec_checked_source("import { Date } from trb/std/time\ndef main()\nputs(Date.new(2024, 1, 2).to_s())\nend\n")
+		expect(time_codec_name(standard, resolve_type_name(standard, 0, "Date", false))).to_equal("Date")
+		mut authored := time_codec_checked_source("class Date\nend\ndef main()\nend\n")
+		expect(time_codec_name(authored, resolve_type_name(authored, 0, "Date", false))).to_equal("")
+	end
+
+	test("retains reference spelling restrictions through arrays and record fields") do
+		["JSON.decode<CalendarDate>(\"null\")", "JSON.decode<Array<CalendarDate>>(\"[]\")", "JSON.decode<Payload>(\"{}\")", "JSON.encode(CalendarDate.new(2024, 1, 2))"].each do |call|
+			mut state := time_codec_parsed_source("import { Date as CalendarDate } from trb/std/time\nimport trb/std/json\nimport trb/std/result\nrecord Payload\nvalue: CalendarDate\nend\ndef main()\n" + time_codec_consume(call) + "end\n")
+			if resolve(state)
+				expect(check(state)).to_be_false()
+			end
+		end
+	end
+
+	test("accepts transparent canonical aliases") do
+		["JSON.encode(CalendarDate.new(2024, 1, 2))", "JSON.decode<CalendarDate>(\"null\")"].each do |call|
+			mut state := time_codec_checked_source("import { Date } from trb/std/time\nalias CalendarDate = Date\nimport trb/std/json\nimport trb/std/result\ndef main()\n" + time_codec_consume(call) + "end\n")
+			expect_compiler_phase(state, "check", check(state))
+		end
+	end
+
+	test("keeps field spellings and borrowed syntax isolated in speculative forks") do
+		parent := time_codec_checked_source(time_codec_source(false))
+		tokens := parent.source_tokens.token_count[0]
+		controls := parent.parsed.controls.size()
+		original := load_string(parent.parsed.field_type_names, 0)
+		mut fork := generic_program_fork(parent)
+		store_string(fork.parsed.field_type_names, 0, "String")
+		expect(load_string(parent.parsed.field_type_names, 0)).to_equal(original)
+		mut definition := 0
+		while definition < fork.type_resolution.generic_functions.size()
+			if json_provider_kind(fork, definition) > 0
+				target := record_type(find_record_in_module(fork, 0, "Payload"))
+				expect(instantiate_generic_function(fork, definition, [target], 0) >= 0).to_be_true()
+			end
+			definition += 1
+		end
+		expect(parent.source_tokens.token_count[0]).to_equal(tokens)
+		expect(parent.parsed.controls.size()).to_equal(controls)
+	end
+end

@@ -1,0 +1,65 @@
+import { attribute_record_field } from frontend/types/attribute_kinds
+import { check_expression } from frontend/checking/body/expressions
+import { checked_function_locals } from frontend/checking/program/functions
+import { generic_program_fork } from frontend/checking/program/generic_fork
+import { resolve_function_body } from frontend/checking/program/resolution
+import { CompilerState, diagnostic, has_diagnostic } from state/state
+import { resolution_locals_new } from state/resolution_locals
+import { load_integer, load_string, store_integer, store_string } from support/storage
+
+# Attribute arguments are compile-time metadata. Check them with ordinary
+# lexical expression rules in an isolated analysis program; no argument MIR is
+# published to the executable module.
+def check_declaration_attributes(mut state: CompilerState): Boolean
+	if state.parsed.attributes.size() == 0
+		return true
+	end
+	mut program := generic_program_fork(state)
+	program.type_resolution.generic_template_mode[0] = false
+	mut attribute_index := 0
+	while attribute_index < program.parsed.attributes.size() && !has_diagnostic(program)
+		attribute := program.parsed.attributes[attribute_index]
+		if attribute.kind == attribute_record_field() && attribute.name == "@gorm"
+			program.module_graph.active_module[0] = attribute.source_id
+			diagnostic(program, "TRBN4004", attribute.line, "@gorm is only available in mode: go")
+			break
+		end
+		mut argument_index := 0
+		while argument_index < attribute.arguments.size() && !has_diagnostic(program)
+			argument := attribute.arguments[argument_index]
+			function := program.declarations.function_count[0]
+			store_string(program.declarations.function_names, function, "$attribute")
+			store_integer(program.declarations.function_modules, function, attribute.source_id)
+			store_integer(program.declarations.function_parameter_starts, function, program.declarations.parameter_count[0])
+			store_integer(program.declarations.function_parameter_counts, function, 0)
+			store_string(program.declarations.function_result_types, function, "Void")
+			store_integer(program.declarations.function_body_starts, function, argument.start)
+			store_integer(program.declarations.function_body_ends, function, argument.finish)
+			store_integer(program.declarations.function_lines, function, attribute.line)
+			program.declarations.function_count[0] = function + 1
+			mut names := resolution_locals_new(program.source_tokens.token_count[0] + 1)
+			if resolve_function_body(program, function, names)
+				mut locals := checked_function_locals(program, function)
+				mut position := [argument.start]
+				check_expression(program, position, locals, 1, "")
+				if position[0] != argument.finish && !has_diagnostic(program)
+					diagnostic(program, "TRBN4004", attribute.line, "checker did not consume the attribute argument")
+				end
+			end
+			argument_index += 1
+		end
+		attribute_index += 1
+	end
+	mut import_index := 0
+	while import_index < state.module_graph.import_count[0]
+		if load_integer(program.module_graph.import_used, import_index) > 0
+			store_integer(state.module_graph.import_used, import_index, 1)
+		end
+		import_index += 1
+	end
+	if has_diagnostic(program)
+		state.module_graph.active_module[0] = load_integer(program.diagnostics.modules, 0)
+		diagnostic(state, load_string(program.diagnostics.codes, 0), load_integer(program.diagnostics.lines, 0), load_string(program.diagnostics.messages, 0))
+	end
+	return !has_diagnostic(state)
+end

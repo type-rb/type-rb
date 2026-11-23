@@ -1,0 +1,8 @@
+{
+  "name": "recovery-managed-array-index-failure",
+  "mode": "go",
+  "sourceDir": "src",
+  "go": {
+    "module": "github.com/type-rb/type-rb-native/corpus/recovery-managed/array-index-failure"
+  }
+}

@@ -1,0 +1,179 @@
+import { CatchSyntax, ResultOperation } from frontend/types/result_model
+import { check, emit_qbe } from compiler
+import { lex } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { compiler_new } from state/state
+import { load_string } from support/storage
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { logical_run_qbe } from testing/qbe_runner
+import { control_test_output } from testing/mir/control
+import { verify_mir } from mir/verify/module
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+describe("MIR standard Result") do
+	test("lowers standard ownership and Result flow to ordinary enum blocks") do
+		sources := ["import trb/std/result\nimport trb/std/unit\ndef operation(): Result<Unit, String>\nreturn Result<Unit, String>::Ok(Unit.new())\nend\ndef probe()\ncase operation()\nwhen Result::Ok(_value)\nputs(\"done\")\nwhen Result::Err(error)\nputs(error)\nend\nend\n\ndef main()\nprobe()\nend\n",
+			"import trb/std/result\ndef read(value: Integer): Result<Integer, String>\nputs(value)\nif value == 0\nreturn Result<Integer, String>::Err(\"missing\")\nend\nreturn Result<Integer, String>::Ok(value)\nend\ndef walk(): Result<String, String>\nmut total := 0\n[1, 0, 2].each do |item|\nvalue := try read(item)\ntotal += value\nend\nreturn Result<String, String>::Ok(total.to_s())\nend\ndef probe()\ncase walk()\nwhen Result::Ok(value)\nputs(value)\nwhen Result::Err(error)\nputs(error)\nend\nend\n\ndef main()\nprobe()\nend\n",
+			"import trb/std/result\ndef read(value: Integer): Result<Integer, String>\nputs(value)\nif value == 0\nreturn Result<Integer, String>::Err(\"missing\")\nend\nreturn Result<Integer, String>::Ok(value)\nend\ndef sum(): Result<Integer, String>\nvalue := try read(3) + 4\nreturn Result<Integer, String>::Ok(value)\nend\ndef probe()\ncase sum()\nwhen Result::Ok(value)\nputs(value)\nwhen Result::Err(error)\nputs(error)\nend\nend\n\ndef main()\nprobe()\nend\n",
+			"import trb/std/result\ndef failure(): Result<Integer, Integer>\nreturn Result<Integer, Integer>::Err(7)\nend\ndef convert(): Result<String, Float>\nvalue := try failure()\nreturn Result<String, Float>::Ok(value.to_s())\nend\ndef probe()\ncase convert()\nwhen Result::Ok(value)\nputs(value)\nwhen Result::Err(error)\nputs(error.to_i())\nend\nend\n\ndef main()\nprobe()\nend\n",
+			"import trb/std/result\ndef read(value: Integer): Result<Integer, String>\nputs(value)\nif value == 0\nreturn Result<Integer, String>::Err(\"missing\")\nend\nreturn Result<Integer, String>::Ok(value)\nend\ndef recover(value: Integer): Integer\nreturn read(value) catch |error|\nputs(error)\n9\nend\nend\n\ndef main()\nputs(recover(3))\nputs(recover(0))\nend\n",
+			"import trb/std/result\ndef read(value: Integer): Result<Integer, String>\nputs(value)\nif value == 0\nreturn Result<Integer, String>::Err(\"missing\")\nend\nreturn Result<Integer, String>::Ok(value)\nend\ndef probe()\nmut total := 0\n[0, 1, 2].each do |item|\nvalue := read(item) catch |_error|\nnext\nend\ntotal += value\nend\nputs(total)\nwhile true\nvalue := read(0) catch |_error|\nbreak\nend\nputs(value)\nend\nend\ndef returned(): Integer\nvalue := read(0) catch |_error|\nreturn 8\nend\nreturn value\nend\n\ndef main()\nprobe()\nputs(returned())\nend\n",
+			"import trb/std/result\ndef failure(): Result<Float, String>\nreturn Result<Float, String>::Err(\"failure\")\nend\ndef recover(): Float\nreturn failure() catch |_error|\n7\nend\nend\n\ndef main()\nputs(recover().to_i())\nend\n",
+			"import trb/std/result\ndef read(value: Integer): Result<Integer, String>\nputs(value)\nif value == 0\nreturn Result<Integer, String>::Err(\"missing\")\nend\nreturn Result<Integer, String>::Ok(value)\nend\ndef accept(_value: Result<Integer, String>)\nreturn\nend\ndef probe()\naccept(read(1))\nitems := [read(2)]\nputs(items.size())\nend\n\ndef main()\nprobe()\nend\n",
+			"import trb/std/result\nrecord Detail\ntext: String\nparts: Array<String>\nend\ndef source(success: Boolean): Result<Array<String>, Detail>\nif success\nreturn Result<Array<String>, Detail>::Ok([\"hello\" + \" world\"])\nend\nreturn Result<Array<String>, Detail>::Err(Detail.new(text: \"failed\" + \" now\", parts: [\"kept\" + \" alive\"]))\nend\ndef forward(): Result<Integer, Detail>\nitems := try source(false)\nreturn Result<Integer, Detail>::Ok(items.size())\nend\ndef probe()\nitems := source(false) catch |error|\nputs(error.text)\nerror.parts\nend\nputs(items[0])\ncase forward()\nwhen Result::Ok(value)\nputs(value)\nwhen Result::Err(error)\nputs(error.parts[0])\nend\nend\n\ndef main()\nprobe()\nend\n",
+			"import trb/std/result\ndef nested(): Result<Result<Integer, String>, String>\nreturn Result<Result<Integer, String>, String>::Err(\"outer\")\nend\ndef probe()\ninner := nested() catch |error|\nResult<Integer, String>::Err(error + \" handled\")\nend\ncase inner\nwhen Result::Ok(value)\nputs(value)\nwhen Result::Err(error)\nputs(error)\nend\nend\n\ndef main()\nprobe()\nend\n",
+			"import trb/std/result\ndef source(present: Boolean): Result<String, Integer?>\nif present\nreturn Result<String, Integer?>::Err(7)\nend\nreturn Result<String, Integer?>::Err(nil)\nend\ndef forward(present: Boolean): Result<Array<String>, Float?>\ntext := try source(present)\nreturn Result<Array<String>, Float?>::Ok([text])\nend\ndef probe()\n[false, true].each do |present|\ncase forward(present)\nwhen Result::Ok(values)\nputs(values.size())\nwhen Result::Err(error)\nif error == nil\nputs(\"nil\")\nelse\nputs(error.to_i())\nend\nend\nend\nend\n\ndef main()\nprobe()\nend\n",
+			"import trb/std/result\ndef operation(): Result<Integer, String>\nreturn Result<Integer, String>::Ok(1)\nend\ndef probe()\nmut _unused := operation()\n_unused = operation()\nend\n\ndef main()\nprobe()\nend\n",
+			"enum Result<T, E>\nOk(value: T)\nErr(error: E)\nend\ndef operation(): Result<Integer, String>\nreturn Result<Integer, String>::Ok(1)\nend\ndef probe()\noperation()\n_unused := operation()\nputs(\"ordinary enum\")\nend\n\ndef main()\nprobe()\nend\n"]
+		outputs := ["done\n", "1\n0\nmissing\n", "3\n7\n", "7\n", "3\n3\n0\nmissing\n9\n", "0\n1\n2\n3\n0\n0\n8\n", "7\n", "1\n2\n1\n", "failed now\nkept alive\nkept alive\n", "outer handled\n", "nil\n7\n", "", "ordinary enum\n"]
+		mut index := 0
+		sources.each do |source|
+			mut state := compiler_new(source.size() * 3 + 16)
+			valid := lex(state, source) && parse_module(state, 0, state.module_graph.entry_module[0]) && resolve(state) && check(state)
+			if !valid
+				puts(index)
+				puts(load_string(state.diagnostics.messages, 0))
+			end
+			expect(valid).to_be_true()
+			if valid
+				before := control_test_output(emit_qbe(state))
+				intrinsic_mir_erase(state)
+				mut item := 0
+				state.callables.checked_bodies.each do |body|
+					item = 0
+					while item < body.result_operations.size()
+						body.result_operations[item] = ResultOperation.new(origin: -1, finish: -1, result_type: "Invalid", success_type: "Invalid", error_type: "Invalid", ok_variant: -1, err_variant: -1, boundary_type: "", boundary_error: "", boundary_variant: -1)
+						item += 1
+					end
+				end
+				item = 0
+				while item < state.parsed.catch_syntax.size()
+					state.parsed.catch_syntax[item] = CatchSyntax.new(origin: -1, operand_finish: -1, binding: -1, body: -1, finish: -1)
+					item += 1
+				end
+				state.parsed.catch_origins.used[0] = 0
+				state.standard_modules.used[0] = 0
+				expect(verify_mir(state.scalar_mir, true)).to_equal("")
+				expect(control_test_output(emit_qbe(state))).to_equal(before)
+				qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+				if qbe != nil
+					mut forced := ""
+					mut ordinary := false
+					before.split("\n").each do |line|
+						if line.start_with?("function ")
+							ordinary = line.include?("$trbnf")
+						end
+						if line == "}"
+							ordinary = false
+						end
+						if ordinary && (line.include?("call $trbn_gc_alloc(") || line.include?("call $trbnf") || line.include?("call $trbn_array_") || line.include?("call $trbn_hash_"))
+							forced += "\tcall $trbn_gc_collect(w 0)\n"
+						end
+						forced += line + "\n"
+					end
+					case logical_run_qbe(qbe, forced)
+					when Result::Ok(actual)
+						expect(actual).to_equal(outputs[index])
+					when Result::Err(error)
+						puts(error)
+						expect(false).to_be_true()
+					end
+				end
+			end
+			index += 1
+		end
+	end
+	test("uses caller-owned storage only for nonescaping direct-call Results") do
+		source := "import trb/std/result\ndef make(value: Integer): Result<Integer, String>\nif value == 0\nreturn Result<Integer, String>::Err(\"error \" + value.to_s())\nend\nreturn Result<Integer, String>::Ok(value)\nend\ndef read(value: Integer): Integer\ncase make(value)\nwhen Result::Ok(number)\nreturn number\nwhen Result::Err(error)\nputs(error)\nreturn 7\nend\nend\ndef main()\nputs(read(0))\nputs(read(9))\nend\n"
+		mut state := compiler_new(source.size() * 3 + 16)
+		expect(lex(state, source) && parse_module(state, 0, state.module_graph.entry_module[0]) && resolve(state) && check(state)).to_be_true()
+		mut make_id := -1
+		state.scalar_mir.signatures.each.with_index do |signature, index|
+			if signature.name == "make"
+				make_id = index
+			end
+		end
+		expect(make_id >= 0).to_be_true()
+		expect(state.scalar_mir.enum_stack_functions[make_id]).to_equal(1)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		qbe := control_test_output(emit_qbe(state))
+		expect(qbe.include?("$trbnf" + make_id.to_s() + "(l %p0, l %enum_out)")).to_be_true()
+		expect(qbe.include?("%enum_slot")).to_be_true()
+		make_parts := qbe.split("function l $trbnf" + make_id.to_s() + "(")
+		expect(make_parts.size()).to_equal(2)
+		make_body := make_parts[1].split("\n}\n")[0]
+		expect(make_body.include?("\t%root_reserved =l alloc4 4")).to_be_true()
+		expect(make_body.split("@mir_")[0].include?("call $trbn_gc_temp_reserve")).to_be_false()
+		expect(make_body.include?("loadw %root_reserved")).to_be_true()
+		expect(make_body.include?("call $trbn_gc_temp_reserve")).to_be_true()
+		expect(make_body.include?("storew 1, %root_reserved")).to_be_true()
+		qbe_binary := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe_binary != nil
+			mut forced := ""
+			mut ordinary := false
+			qbe.split("\n").each do |line|
+				if line.start_with?("function ")
+					ordinary = line.include?("$trbnf")
+				end
+				if line == "}"
+					ordinary = false
+				end
+				if ordinary && (line.include?("call $trbn_gc_alloc(") || line.include?("call $trbnf") || line.include?("call $trbn_string_"))
+					forced += "\tcall $trbn_gc_collect(w 0)\n"
+				end
+				forced += line + "\n"
+			end
+			case logical_run_qbe(qbe_binary, forced)
+			when Result::Ok(actual)
+				expect(actual).to_equal("error 0\n7\n9\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+		state.scalar_mir.enum_stack_functions[make_id] = 0
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR enum stack plan differs")
+		negative_sources := ["import trb/std/result\ndef make(value: Integer): Result<Integer, String>\nreturn Result<Integer, String>::Ok(value)\nend\ndef save(): Array<Result<Integer, String>>\nreturn [make(1)]\nend\ndef main()\nputs(save().size())\nend\n",
+			"import trb/std/result\ndef make(value: Integer): Result<Integer, String>\nreturn Result<Integer, String>::Err(\"payload\" + value.to_s())\nend\ndef read(): Integer\nitem := make(0)\nputs(\"safe\" + \"point\")\ncase item\nwhen Result::Ok(number)\nreturn number\nwhen Result::Err(error)\nputs(error)\nreturn 7\nend\nend\ndef main()\nputs(read())\nend\n",
+			"import trb/std/result\ndef make(value: Integer): Result<Integer, String>\nreturn Result<Integer, String>::Ok(value)\nend\ndef read(callback: (Integer) -> Result<Integer, String>): Integer\ncase callback(2)\nwhen Result::Ok(number)\nreturn number\nwhen Result::Err(_error)\nreturn 0\nend\nend\ndef main()\ncallback := make\nputs(read(callback))\nend\n",
+			"import trb/std/result\ndef make(value: Integer): Result<Integer, String>\nif value > 0\nreturn make(value - 1)\nend\nreturn Result<Integer, String>::Ok(0)\nend\ndef main()\ncase make(2)\nwhen Result::Ok(number)\nputs(number)\nwhen Result::Err(error)\nputs(error)\nend\nend\n"]
+		negative_sources.each do |negative_source|
+			mut escaped := compiler_new(negative_source.size() * 3 + 16)
+			expect(lex(escaped, negative_source) && parse_module(escaped, 0, escaped.module_graph.entry_module[0]) && resolve(escaped) && check(escaped)).to_be_true()
+			mut escaped_id := -1
+			escaped.scalar_mir.signatures.each.with_index do |signature, index|
+				if signature.name == "make"
+					escaped_id = index
+				end
+			end
+			expect(escaped_id >= 0).to_be_true()
+			expect(escaped.scalar_mir.enum_stack_functions[escaped_id]).to_equal(0)
+		end
+	end
+	test("rejects unhandled Results, invalid boundaries and invalid catch usage") do
+		sources := ["import trb/std/result\ndef read(value: Integer): Result<Integer, String>\nputs(value)\nif value == 0\nreturn Result<Integer, String>::Err(\"missing\")\nend\nreturn Result<Integer, String>::Ok(value)\nend\ndef probe()\nread(1)\nend\n\ndef main()\nprobe()\nend\n",
+			"import trb/std/result\ndef read(value: Integer): Result<Integer, String>\nputs(value)\nif value == 0\nreturn Result<Integer, String>::Err(\"missing\")\nend\nreturn Result<Integer, String>::Ok(value)\nend\ndef probe()\n_value := read(1)\nend\n\ndef main()\nprobe()\nend\n",
+			"enum Result<T, E>\nOk(value: T)\nErr(error: E)\nend\ndef source(): Result<Integer, String>\nreturn Result<Integer, String>::Ok(1)\nend\ndef probe(): Result<Integer, String>\nvalue := try source()\nreturn Result<Integer, String>::Ok(value)\nend\n\ndef main()\nprobe()\nend\n",
+			"import trb/std/result\ndef read(value: Integer): Result<Integer, String>\nputs(value)\nif value == 0\nreturn Result<Integer, String>::Err(\"missing\")\nend\nreturn Result<Integer, String>::Ok(value)\nend\ndef probe(): Result<Integer, Integer>\nvalue := try read(1)\nreturn Result<Integer, Integer>::Ok(value)\nend\n\ndef main()\nprobe()\nend\n",
+			"import trb/std/result\ndef read(value: Integer): Result<Integer, String>\nputs(value)\nif value == 0\nreturn Result<Integer, String>::Err(\"missing\")\nend\nreturn Result<Integer, String>::Ok(value)\nend\ndef probe(): Integer\nreturn try read(1)\nend\n\ndef main()\nputs(probe())\nend\n",
+			"import trb/std/result\ndef read(value: Integer): Result<Integer, String>\nputs(value)\nif value == 0\nreturn Result<Integer, String>::Err(\"missing\")\nend\nreturn Result<Integer, String>::Ok(value)\nend\ndef probe(): Integer\nreturn read(0) catch |error|\nerror = \"changed\"\n7\nend\nend\n\ndef main()\nputs(probe())\nend\n",
+			"import trb/std/result\ndef read(value: Integer): Result<Integer, String>\nputs(value)\nif value == 0\nreturn Result<Integer, String>::Err(\"missing\")\nend\nreturn Result<Integer, String>::Ok(value)\nend\ndef accept(value: Integer): Integer\nreturn value\nend\ndef probe(): Integer\nreturn accept(read(0) catch |_error|\n7\nend)\nend\n\ndef main()\nputs(probe())\nend\n",
+			"import trb/std/result\ndef operation(): Result<Integer, String>\nreturn Result<Integer, String>::Ok(1)\nend\ndef probe()\n[1].each do |_item|\n_unused := operation()\nend\nend\n\ndef main()\nprobe()\nend\n",
+			"import trb/std/result\ndef operation(): Result<Integer, String>\nreturn Result<Integer, String>::Ok(1)\nend\ndef probe()\nif true\n_unused := operation()\nelse\nputs(0)\nend\nend\n\ndef main()\nprobe()\nend\n",
+			"import trb/std/result\ndef operation(): Result<Integer, String>\nreturn Result<Integer, String>::Ok(1)\nend\ndef probe(): Integer\nreturn operation() catch |_error|\nend\nend\n\ndef main()\nputs(probe())\nend\n",
+			"import trb/std/result\ndef operation(): Result<Integer, String>\nreturn Result<Integer, String>::Ok(1)\nend\ndef probe()\nitems := [operation() catch |_error|\n0\nend]\nputs(items.size())\nend\n\ndef main()\nprobe()\nend\n"]
+		mut index := 0
+		sources.each do |source|
+			mut state := compiler_new(source.size() * 3 + 16)
+			valid := lex(state, source) && parse_module(state, 0, state.module_graph.entry_module[0]) && resolve(state) && check(state)
+			if valid
+				puts(index)
+			end
+			expect(valid).to_be_false()
+			index += 1
+		end
+	end
+end

@@ -1,0 +1,115 @@
+import { check, emit_qbe } from compiler
+import { control_test_output } from testing/mir/control
+import { compiler_test_instruction_with_cell } from testing/compiler
+import { managed_mir_test_fixture } from testing/mir/managed
+import { logical_checked_source } from testing/pipeline
+import { MirNewtype, NewtypeDefinition } from frontend/types/newtype_model
+import { mir_managed_type, mir_storage_type_name } from mir/model/types
+import { mir_instruction_effects } from mir/analysis/call_effects
+import { verify_mir } from mir/verify/module
+import { MirRootPlan } from mir/model/module
+import { CompilerState } from state/state
+import { describe, expect, test } from trb/std/test
+
+def newtype_mir_state(): CompilerState
+	mut state := logical_checked_source("newtype Label = String\nnewtype Price = Float\nnewtype Values = Array<Integer>\ndef main()\nlabel := Label.new(\"he\" + \"ld\")\nnoise := later(\"extra\")\nputs(label.value() + noise)\nputs(Price.new(1.5).value())\nend\ndef later(text: String): String\nreturn text + \"!\"\nend\n")
+	expect(check(state)).to_be_true()
+	expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	return state
+end
+
+describe("Nominal newtype MIR") do
+	test("preserves scalar ABI through arrays Hashes fields defaults and captures") do
+		managed_mir_test_fixture("newtype-values-mir", 6)
+	end
+	test("retains closed managed values after source erasure reordering and collection") do
+		managed_mir_test_fixture("newtype-managed-mir", 10)
+	end
+	test("erases storage without erasing nominal identity or adding allocation") do
+		mut state := newtype_mir_state()
+		label := state.scalar_mir.newtypes[0].type_id
+		price := state.scalar_mir.newtypes[1].type_id
+		expect(mir_storage_type_name(state.scalar_mir, label)).to_equal("String")
+		expect(mir_storage_type_name(state.scalar_mir, price)).to_equal("Float")
+		expect(mir_managed_type(state.scalar_mir, label)).to_be_true()
+		expect(mir_managed_type(state.scalar_mir, price)).to_be_false()
+		mut casts := 0
+		state.scalar_mir.instructions.each do |instruction|
+			if instruction.kind == 55 || instruction.kind == 56
+				expect(mir_instruction_effects(state.scalar_mir, instruction)).to_equal(0)
+				casts += 1
+			end
+		end
+		expect(casts).to_equal(4)
+		before := control_test_output(emit_qbe(state))
+		state.nominal.newtypes.each.with_index do |_row, index|
+			state.nominal.newtypes[index] = NewtypeDefinition.new(name: "unavailable", source_id: -1, line: -1, target: "Invalid", representation: "Invalid", closed: false)
+		end
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+	end
+	test("rejects forged construction projection owner operand and failure identities") do
+		mut kind := 55
+		while kind <= 56
+			mut cell := 1
+			while cell <= 5
+				mut state := newtype_mir_state()
+				mut index := 0
+				while state.scalar_mir.instructions[index].kind != kind
+					index += 1
+				end
+				instruction := state.scalar_mir.instructions[index]
+				state.scalar_mir.instructions[index] = compiler_test_instruction_with_cell(instruction, cell, 999999)
+				expect(verify_mir(state.scalar_mir, true).empty?()).to_be_false()
+				cell += 1
+			end
+			kind += 1
+		end
+	end
+	test("rejects forged declaration cycles storage and closed mutability policy") do
+		mut mutation := 0
+		while mutation < 5
+			mut state := newtype_mir_state()
+			row := state.scalar_mir.newtypes[0]
+			mut representation := row.representation
+			mut declaration := row.declaration
+			mut source := row.source_id
+			mut closed := row.closed
+			if mutation == 0
+				declaration = 1
+			elsif mutation == 1
+				source = -1
+			elsif mutation == 2
+				representation = row.type_id
+			elsif mutation == 3
+				representation = 0
+			else
+				representation = state.scalar_mir.newtypes[2].representation
+				closed = true
+			end
+			state.scalar_mir.newtypes[0] = MirNewtype.new(declaration: declaration, type_id: row.type_id, name: row.name, source_id: source, line: row.line, representation: representation, closed: closed)
+			expect(verify_mir(state.scalar_mir, true).empty?()).to_be_false()
+			mutation += 1
+		end
+	end
+	test("requires a live managed newtype root across later allocation") do
+		mut state := newtype_mir_state()
+		plan := state.scalar_mir.root_plans[0]
+		mut selected := -1
+		plan.roots.each.with_index do |roots, point|
+			roots.each do |root|
+				state.scalar_mir.values.each do |value|
+					if value.function_id == plan.function_id && value.id == root && value.type_id == state.scalar_mir.newtypes[0].type_id
+						selected = point
+					end
+				end
+			end
+		end
+		expect(selected >= 0).to_be_true()
+		if selected >= 0
+			mut roots := plan.roots
+			roots[selected] = []
+			state.scalar_mir.root_plans[0] = MirRootPlan.new(function_id: plan.function_id, instructions: plan.instructions, roots: roots, capacity: plan.capacity)
+			expect(verify_mir(state.scalar_mir, true)).to_equal("MIR live root plan differs")
+		end
+	end
+end

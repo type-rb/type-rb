@@ -1,0 +1,128 @@
+{
+  "purpose": "Assess a verified nonempty first Array visit against accepted Native, the prior integrated candidate, its immediate predecessor and unchanged Go controls. Existing first-visit IL diagnosis reproduced byte-for-byte through ordinary Native generation.",
+  "cohortBudget": 1,
+  "firstSamples": 1,
+  "steadySamples": 5,
+  "suiteSHA256": "5e906479f1cc81727bb714d11fb95130fee37f5dbf1711dff8012534a386e44b",
+  "variants": {
+    "accepted": {
+      "revision": "c80ddb04443fdc482986edc28b30ab71d17d894b",
+      "appSHA256": {
+        "fannkuch-redux": "8b700a4f1ced759f8a88db7be21ea4eb9e36814218ea8c9f4531aa3247a03329",
+        "n-body": "0f6cf1468dbfe83d3aee76e99e8de7092f773ae868b4c5b586499708a639bf89",
+        "spectral-norm": "1b8af697852ec10271f032602a01622ff436a2b6a7f91d3ecb2917b2b9ce0601",
+        "array-streaming": "1d8cf8f6a9a386c0d660d2004d4eedf682bf24fd12239a96e1d113ce1e02e713",
+        "allocation": "29aff42399d9cd937274d33967e10128eca27c161a3c8cef0e0134ecd6cf112b",
+        "worker": "423a47729e7e77122dd8ee6c202e41913574ca03560be6fa4bf73c46119ac730",
+        "startup": "278accc651069568b4d3c18639e75f5dfa4c368440b9978f4b25e146d9e04b83",
+        "string-building": "b008b502b85a34cce150055deedefedd40db49246449a614e9f93c4671805ff0",
+        "string-scanning": "b0b487cf2bffa2901e2019887411ebb517308ad89f663ed6b736e44ecb56b10a",
+        "hash-integer-keys": "ba84b8865ff85b91ada7ee187f76ab1c010a82bc678be7edc80f7afa2e2092da",
+        "hash-string-keys": "ca46d0b3c3e6bf2692616d2a40755e1a8d94eefc0a7f491594e2f8e62dba591a",
+        "array-sorting": "bb55edd02b80f7a2a450d0ececde944470bfbee62baa800bc935813d312f14fb",
+        "object-dispatch": "950b243c294a4bbdef7b205018d08663053cf825183aa9b08ec708111922894e",
+        "closures": "d7baf4ddf789a929e10b540452c726cdc640c377fc4e09fed13aaf07c49bc516",
+        "recursion": "c5a8079ae9df33c85d14e0b1d8715645791a8928f2b5ea5b1446a663cf0ae10b",
+        "enum-result": "ef3d52bb12c2838241ea3bf437770c58e448e62260460f6ce6f091c615f2d584"
+      },
+      "reusedRole": "accepted"
+    },
+    "prior-integrated": {
+      "revision": "88ff729ebf4bdc1be7a13aaf7b45e064ecb4f9c4",
+      "appSHA256": {
+        "fannkuch-redux": "7447a81cc922197cbcee7ef0d565f216b75cdc00bed03dcab7a94cf073672875",
+        "n-body": "2b24c5929ac7e6b0ddde9a0fbed35d7f799acf17fe6f827579837050872eb7b8",
+        "spectral-norm": "d8dac5d7346c39cdc2cfd97b850a76124eb360172633694bff1e005dd00b2500",
+        "array-streaming": "4d0bf123d8484ddc99bb5e26a6d199a43773606542cf3ad53b149290b7bbdcde",
+        "allocation": "1bc8b63b68189075b20d4b874dc7398909bf9964d841e306337a2a292047cdcb",
+        "worker": "5ccddd161f59c83c01ebce02f0d5b95a24d30110c9488dc2087275f50c2d446b",
+        "startup": "dc4cd03f20e98b73c76a68c08a56a257d0cd9a993bd76ecd106d0df15a227431",
+        "string-building": "9dfecdefd2e437234acf9ce5c515666a9cc1a61ef86391eaa724c12705145d94",
+        "string-scanning": "c2e8aa1b241fce4a44a928e24fcbad525bf681b440f46428f740c5bd2b4b4ef9",
+        "hash-integer-keys": "17aed1893db1f5cf51dec62230fd9f5c55ba2b5bc2808c5359fb32bd23ca54a8",
+        "hash-string-keys": "e6855eb1f52a11751e5c20b80100f359c9adeb274b690ee21cd943f48a52ec0a",
+        "array-sorting": "9b05f6a4509406c98040ea379146408a4eee281d10dcfbf38d9f61c82e46c3b1",
+        "object-dispatch": "d64bef19bc49ab88c3b2199d70bb5eb9e9bd4278c67a3375cbae62dfbaf852aa",
+        "closures": "3c7da16fbce4482133a05289245cff0fb36f0e888639ba3890a59fd38dd81ec9",
+        "recursion": "3d44dd8047b1d2a5abe421da747a6c9e79c79aef785a6bf7c9c69a1560951faa",
+        "enum-result": "65cb928249370a36fef040a0c0eb3566243825f3fe8a23c71ca147169ba80b8a"
+      },
+      "reusedRole": "integrated-current"
+    },
+    "previous-branches": {
+      "revision": "37bb09c24f227a87b64c1e087e06478b2e3cc9f9",
+      "appSHA256": {
+        "fannkuch-redux": "ef1121f6bd9813397b2cce7a102addbfc74f913cd2442471dbaeedc066a05a62",
+        "n-body": "b507b064ee4620602fcc23a2d1e7f4700944db00559d76b6c54fda8d33448385",
+        "spectral-norm": "c36432182c84151a2897d4e9f5cf49bc67ce30cc8de40fc1faa12eff47bdb808",
+        "array-streaming": "4d0bf123d8484ddc99bb5e26a6d199a43773606542cf3ad53b149290b7bbdcde",
+        "allocation": "56d54b1e8a85ed7443b6b997d8ebba60a923bf1164906e22ce9407496070d604",
+        "worker": "bf4d8db18cd2b9b08ff2b15c4d8adbdde714675406aae20dfbd9405741aa6557",
+        "startup": "dc4cd03f20e98b73c76a68c08a56a257d0cd9a993bd76ecd106d0df15a227431",
+        "string-building": "5c57075aa23611414b539b6034ce8eb51884f36eb9d63d316096f647fd1a34aa",
+        "string-scanning": "448d22f1876bb1ea6bbd42d86262001d3f082ce3c516819b89eab04395b1666c",
+        "hash-integer-keys": "17aed1893db1f5cf51dec62230fd9f5c55ba2b5bc2808c5359fb32bd23ca54a8",
+        "hash-string-keys": "922c596f95688656faf954afd541a162405f4d1c945ccd46687c7fe6429aa4af",
+        "array-sorting": "398c9ae3a0729e1bd903504a4867a3e0d8225451094e5420c7909737e56c7fae",
+        "object-dispatch": "d64bef19bc49ab88c3b2199d70bb5eb9e9bd4278c67a3375cbae62dfbaf852aa",
+        "closures": "3c7da16fbce4482133a05289245cff0fb36f0e888639ba3890a59fd38dd81ec9",
+        "recursion": "3d44dd8047b1d2a5abe421da747a6c9e79c79aef785a6bf7c9c69a1560951faa",
+        "enum-result": "0f62c71e4942f1e7eb7060855a85fc577b93d5719dfc0f6b9ec8c4263e3ce7fb"
+      },
+      "parentCompilerRole": "integrated-current"
+    },
+    "nonempty-integrated": {
+      "revision": "5c9f66a7160c33511a9405d26fd202f1f5cc6821",
+      "appSHA256": {
+        "fannkuch-redux": "4ffe2b346e90bf026eea90e369025541cf261b004d90fb43155b00a3be62bbbe",
+        "n-body": "b507b064ee4620602fcc23a2d1e7f4700944db00559d76b6c54fda8d33448385",
+        "spectral-norm": "c36432182c84151a2897d4e9f5cf49bc67ce30cc8de40fc1faa12eff47bdb808",
+        "array-streaming": "4d0bf123d8484ddc99bb5e26a6d199a43773606542cf3ad53b149290b7bbdcde",
+        "allocation": "56d54b1e8a85ed7443b6b997d8ebba60a923bf1164906e22ce9407496070d604",
+        "worker": "bf4d8db18cd2b9b08ff2b15c4d8adbdde714675406aae20dfbd9405741aa6557",
+        "startup": "dc4cd03f20e98b73c76a68c08a56a257d0cd9a993bd76ecd106d0df15a227431",
+        "string-building": "5c57075aa23611414b539b6034ce8eb51884f36eb9d63d316096f647fd1a34aa",
+        "string-scanning": "448d22f1876bb1ea6bbd42d86262001d3f082ce3c516819b89eab04395b1666c",
+        "hash-integer-keys": "17aed1893db1f5cf51dec62230fd9f5c55ba2b5bc2808c5359fb32bd23ca54a8",
+        "hash-string-keys": "922c596f95688656faf954afd541a162405f4d1c945ccd46687c7fe6429aa4af",
+        "array-sorting": "398c9ae3a0729e1bd903504a4867a3e0d8225451094e5420c7909737e56c7fae",
+        "object-dispatch": "d64bef19bc49ab88c3b2199d70bb5eb9e9bd4278c67a3375cbae62dfbaf852aa",
+        "closures": "3c7da16fbce4482133a05289245cff0fb36f0e888639ba3890a59fd38dd81ec9",
+        "recursion": "3d44dd8047b1d2a5abe421da747a6c9e79c79aef785a6bf7c9c69a1560951faa",
+        "enum-result": "0f62c71e4942f1e7eb7060855a85fc577b93d5719dfc0f6b9ec8c4263e3ce7fb"
+      },
+      "parentCompilerRole": "integrated-current"
+    }
+  },
+  "cases": [
+    "fannkuch-redux",
+    "n-body",
+    "spectral-norm",
+    "array-streaming",
+    "allocation",
+    "worker",
+    "startup",
+    "string-building",
+    "string-scanning",
+    "hash-integer-keys",
+    "hash-string-keys",
+    "array-sorting",
+    "object-dispatch",
+    "closures",
+    "recursion",
+    "enum-result"
+  ],
+  "stopConditions": [
+    "Any provenance, source, application or workload identity mismatch",
+    "Any nonzero exit, output mismatch or unexpected stderr",
+    "Retain all first and steady samples, dispersion and unfavorable effects; no unchanged timing retry",
+    "Do not relabel the previous closed hardware or local cohorts; new measurements require this material source change"
+  ],
+  "decision": "Run one changed-source hardware cohort after current preflight, all compiler units, recovery closure, ordinary core and CLI fixed points, all 16 application outputs, shared Float conformance and 30 forced-GC Unicode operations pass. Reuse exact accepted, prior-integrated and Go controls from the registered archive. Build the immediate predecessor and candidate once each with the same prior-integrated fixed-point compiler. Four Native roles, TypeRB Go and the available Pure Go programs produce 552 runtime and 36 preparation observations. The predecessor's Fannkuch improvement was 4.9718%, below the existing 5% Faster band. The new IL diagnostic reduced wall time by 4.4597% with unchanged CPU; the ordinary candidate reproduces that executable exactly, and its other 15 applications equal the predecessor, so local timing is not repeated. Retain every historical miss, unknown, first sample and steady sample. Main feature integration is not attributed to optimizer self-cost. Preparation is separate from build-performance qualification. Thresholds, formal scores and Pages remain unchanged.",
+  "reuse": {
+    "runId": 39515292509,
+    "artifactId": 12307559314,
+    "archiveSHA256": "4c43922f40bf9102ab1b02b0902c1bf3a63eec09a06abb6c911e9b8ed3f72237",
+    "controllerRevision": "25c9f4837e2cbba69baa3b6d21c7ac167826a1f0"
+  }
+}

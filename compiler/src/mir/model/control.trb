@@ -1,0 +1,35 @@
+# Function categories, block terminators and source loop transfers are separate
+# domains. Open blocks are builder state; the verifier rejects unfinished control.
+# The retired function category 2 remains invalid.
+
+def mir_function_fixture(): Integer
+	return 0
+end
+
+def mir_function_scalar(): Integer
+	return 1
+end
+
+def mir_function_control(): Integer
+	return 3
+end
+
+def mir_terminator_open(): Integer
+	return 0
+end
+
+def mir_terminator_jump(): Integer
+	return 1
+end
+
+def mir_terminator_branch(): Integer
+	return 2
+end
+
+def mir_terminator_return(): Integer
+	return 3
+end
+
+def mir_terminator_trap(): Integer
+	return 4
+end

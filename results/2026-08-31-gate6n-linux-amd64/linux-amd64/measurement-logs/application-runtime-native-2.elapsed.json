@@ -1,0 +1,32 @@
+{
+  "artifact": null,
+  "clock": "time.monotonic_ns",
+  "clockInfo": {
+    "adjustable": false,
+    "implementation": "clock_gettime(CLOCK_MONOTONIC)",
+    "monotonic": true,
+    "resolutionSeconds": 1e-09
+  },
+  "command": [
+    "/home/runner/work/_temp/gate6n-linux-amd64-workspace/native-first/program",
+    "144"
+  ],
+  "elapsedNanoseconds": 883897,
+  "elapsedSeconds": "0.000883897",
+  "inputExecutableAfter": {
+    "executable": true,
+    "exists": true,
+    "path": "/home/runner/work/_temp/gate6n-linux-amd64-workspace/native-first/program",
+    "sha256": "f55d78ee71381d275a6169635c2609d205b2067ba5b9e6f5bfc050fc75164b56",
+    "size": 14056
+  },
+  "inputExecutableBefore": {
+    "executable": true,
+    "exists": true,
+    "path": "/home/runner/work/_temp/gate6n-linux-amd64-workspace/native-first/program",
+    "sha256": "f55d78ee71381d275a6169635c2609d205b2067ba5b9e6f5bfc050fc75164b56",
+    "size": 14056
+  },
+  "schemaVersion": 1,
+  "status": 0
+}

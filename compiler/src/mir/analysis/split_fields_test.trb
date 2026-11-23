@@ -1,0 +1,39 @@
+import { check, emit_qbe } from compiler
+import { MirStringSplit } from mir/model/module
+import { verify_mir } from mir/verify/module
+import { output_source } from testing/compiler
+import { logical_checked_source } from testing/pipeline
+import { describe, expect, test } from trb/std/test
+
+describe("observable String.split fields") do
+	test("keeps the full length and unions the checked reads across branches") do
+		mut state := logical_checked_source("def field(text: String, sep: String, alternate: Boolean): String\nparts := text.split(sep)\nif alternate && parts.size() > 3\nreturn parts[3]\nend\nreturn parts[1]\nend\ndef main()\nend\n")
+		expect(check(state)).to_be_true()
+		plans := state.scalar_mir.string_splits[0]
+		expect(plans.size()).to_equal(1)
+		plan := plans[0]
+		expect(plan.first_field).to_equal(1)
+		expect(plan.last_field).to_equal(3)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(output_source(emit_qbe(state)).include?("call $trbn_string_split_fields(")).to_be_true()
+		state.scalar_mir.string_splits[0][0] = MirStringSplit.new(instruction: plan.instruction, fragments: [], first_field: 1, last_field: 2)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR String split plan differs")
+	end
+
+	test("keeps all fields for observable Arrays or nonconstant indexes") do
+		cases := [
+			"def field(text: String): Array<String>\nreturn text.split(\",\")\nend\n",
+			"def field(text: String, at: Integer): String\nparts := text.split(\",\")\nreturn parts[at]\nend\n",
+			"def field(text: String): String\nparts := text.split(\",\")\nreturn parts[-1]\nend\n",
+			"def field(text: String): String\nmut parts := text.split(\",\")\nparts[0] = \"new\"\nreturn parts[1]\nend\n",
+			"def read(parts: Array<String>): String\nreturn parts[2]\nend\ndef field(text: String): String\nparts := text.split(\",\")\nreturn parts[1] + read(parts)\nend\n",
+			"def field(text: String, other: Array<String>, choose: Boolean): String\nmut parts := text.split(\",\")\nfirst := parts[0]\nif choose\nparts = other\nend\nreturn first + parts.join(\":\")\nend\n",
+		]
+		cases.each do |source|
+			mut state := logical_checked_source(source + "def main()\nend\n")
+			expect(check(state)).to_be_true()
+			expect(verify_mir(state.scalar_mir, true)).to_equal("")
+			expect(output_source(emit_qbe(state)).include?("call $trbn_string_split_fields(")).to_be_false()
+		end
+	end
+end

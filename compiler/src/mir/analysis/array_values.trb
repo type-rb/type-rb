@@ -1,0 +1,203 @@
+import { binary_not_equal } from frontend/types/operators
+import { mir_type_boolean, mir_type_float, mir_type_integer } from mir/model/type_ids
+import { mir_terminator_branch } from mir/model/control
+import { mir_op_array_load, mir_op_array_position, mir_op_array_store, mir_op_direct_call, mir_op_scalar_binary } from mir/model/instructions
+import { mir_effect_failure, mir_effect_none } from mir/model/effects
+import { MirArrayReadGuard, MirBlock, MirFunction, MirInstruction, MirModule } from mir/model/module
+import { mir_element_type } from mir/model/types
+import { mir_array_guard_conditions } from mir/analysis/array_bounds
+import { mir_instruction_effects } from mir/analysis/call_effects
+import { MirFlow, MirFlowAliases, mir_build_flow, mir_flow_alias, mir_flow_aliases, mir_flow_block_index, mir_flow_blocks, mir_flow_dominates, mir_flow_position, mir_flow_type, mir_value_available } from mir/analysis/flow
+import { mir_live_add, mir_managed_contains } from mir/analysis/liveness
+import { integer_string } from support/literals
+
+record MirArraySeparation
+	reader: Integer
+	writer: Integer
+end
+
+def mir_array_primitive_value(type_id: Integer): Boolean
+	if type_id == mir_type_integer() || type_id == mir_type_float() || type_id == mir_type_boolean()
+		return true
+	end
+	return false
+end
+
+# Add guards only for repeated reads from an owner never written directly in
+# this loop. Every potentially aliased writer must be covered together. The
+# original version remains the fallback when any pair is actually identical.
+def mir_array_value_separations(native_module: MirModule, function: MirFunction, flow: MirFlow, aliases: MirFlowAliases, preheader: MirBlock, members: Array<Integer>): Array<MirArraySeparation>
+	mut readers: Array<Integer> := []
+	mut writers: Array<Integer> := []
+	members.each do |member|
+		block := native_module.blocks[function.block_start + member]
+		mut seen: Hash<String, Integer> := {}
+		mut index := block.instruction_start
+		while index < block.instruction_start + block.instruction_count
+			instruction := native_module.instructions[index]
+			if instruction.kind == mir_op_array_load() || instruction.kind == mir_op_array_store()
+				owner := mir_flow_alias(aliases, instruction.first)
+				if owner < 0
+					return []
+				end
+				if instruction.kind == mir_op_array_store()
+					mir_live_add(writers, owner)
+				elsif mir_array_primitive_value(mir_flow_type(flow, instruction.result))
+					key := integer_string(owner) + ":" + integer_string(instruction.second)
+					if seen.key?(key)
+						mir_live_add(readers, owner)
+					else
+						seen[key] = 1
+					end
+				end
+			end
+			index += 1
+		end
+	end
+	mut pairs: Array<MirArraySeparation> := []
+	if writers.size() == 0 || writers.size() > 8
+		return pairs
+	end
+	readers.each do |reader|
+		if !mir_managed_contains(writers, reader) && pairs.size() + writers.size() <= 8
+			available := preheader.instruction_start + preheader.instruction_count
+			mut eligible := mir_value_available(flow, preheader, available, reader)
+			reader_type := mir_flow_type(flow, reader)
+			writers.each do |writer|
+				if mir_flow_type(flow, writer) != reader_type || !mir_value_available(flow, preheader, available, writer)
+					eligible = false
+				end
+			end
+			if eligible && mir_array_primitive_value(mir_element_type(native_module, reader_type))
+				writers.each do |writer|
+					pairs.push(MirArraySeparation.new(reader: reader, writer: writer))
+				end
+			end
+		end
+	end
+	return pairs
+end
+
+# SSA identity does not imply different storage. Only a dominating successful
+# pointer comparison proves separation, including a leaf of a true conjunction.
+# Its true successor must have no entry from a path where the predicate failed.
+def mir_array_values_disjoint(native_module: MirModule, function: MirFunction, flow: MirFlow, aliases: MirFlowAliases, block_index: Integer, reader: Integer, writer: Integer): Boolean
+	left := mir_flow_alias(aliases, reader)
+	right := mir_flow_alias(aliases, writer)
+	if left < 0 || right < 0 || left == right
+		return false
+	end
+	mut index := 0
+	while index < function.block_count
+		guard := native_module.blocks[function.block_start + index]
+		if guard.terminator == mir_terminator_branch() && guard.first_target != guard.second_target && mir_flow_dominates(flow, index, block_index)
+			first := mir_flow_block_index(flow, guard.first_target)
+			if first >= 0 && flow.predecessors[first].size() == 1 && flow.predecessors[first][0] == index && mir_flow_dominates(flow, first, block_index)
+				mir_array_guard_conditions(native_module, flow, guard).each do |position|
+					condition := native_module.instructions[position]
+					if condition.kind == mir_op_scalar_binary() && condition.payload == binary_not_equal()
+						first_owner := mir_flow_alias(aliases, condition.first)
+						second_owner := mir_flow_alias(aliases, condition.second)
+						if (left == first_owner && right == second_owner) || (left == second_owner && right == first_owner)
+							return true
+						end
+					end
+				end
+			end
+		end
+		index += 1
+	end
+	return false
+end
+
+# Assignment captures normalize negative indexes before the RHS. The separate
+# read-guard proof already excludes every length change between that capture
+# and the later load, so its original raw index denotes the same position.
+def mir_array_stored_position(native_module: MirModule, flow: MirFlow, aliases: MirFlowAliases, store: MirInstruction, load: MirInstruction): Boolean
+	owner := mir_flow_alias(aliases, load.first)
+	if owner < 0 || mir_flow_alias(aliases, store.first) != owner
+		return false
+	end
+	if store.second == load.second
+		return true
+	end
+	position := mir_flow_position(flow, store.second)
+	if position < 0
+		return false
+	end
+	capture := native_module.instructions[position]
+	if capture.kind == mir_op_array_position() && mir_flow_alias(aliases, capture.first) == owner && capture.second == load.second
+		return true
+	end
+	return false
+end
+
+def mir_array_reused_value(native_module: MirModule, function: MirFunction, flow: MirFlow, aliases: MirFlowAliases, guard: MirArrayReadGuard): Integer
+	source := native_module.instructions[guard.source]
+	later := native_module.instructions[guard.instruction]
+	if later.kind != mir_op_array_load() || !mir_array_primitive_value(mir_flow_type(flow, later.result))
+		return -1
+	end
+	mut block_index := -1
+	mut index := 0
+	while index < function.block_count
+		block := native_module.blocks[function.block_start + index]
+		if guard.source >= block.instruction_start && guard.instruction < block.instruction_start + block.instruction_count
+			block_index = index
+		end
+		index += 1
+	end
+	if block_index < 0 || guard.source >= guard.instruction
+		return -1
+	end
+	mut value := -1
+	if source.kind == mir_op_array_load()
+		value = source.result
+	end
+	index = guard.source + 1
+	while index < guard.instruction
+		instruction := native_module.instructions[index]
+		if instruction.kind == mir_op_array_store()
+			if mir_array_stored_position(native_module, flow, aliases, instruction, later)
+				value = instruction.payload
+			elsif !mir_array_values_disjoint(native_module, function, flow, aliases, block_index, later.first, instruction.first)
+				value = -1
+			end
+		elsif instruction.kind == mir_op_direct_call()
+			return -1
+		else
+			effects := mir_instruction_effects(native_module, instruction)
+			if effects != mir_effect_none() && effects != mir_effect_failure()
+				return -1
+			end
+		end
+		index += 1
+	end
+	if value >= 0 && mir_flow_type(flow, value) == mir_flow_type(flow, later.result)
+		return value
+	end
+	return -1
+end
+
+# Retain the original load in canonical MIR. Verification derives this value
+# again, so a later writer, changed guard, or changed owner invalidates reuse.
+def mir_array_value_guards(native_module: MirModule, function: MirFunction, guards: Array<MirArrayReadGuard>): Array<MirArrayReadGuard>
+	if guards.size() == 0 || native_module.functions.size() > 96
+		return guards
+	end
+	flow := mir_build_flow(native_module, function, mir_flow_blocks(native_module, function))
+	aliases := mir_flow_aliases(native_module, function, flow, native_module.blocks[function.block_start + flow.entry])
+	mut result: Array<MirArrayReadGuard> := []
+	guards.each do |guard|
+		mut value := mir_array_reused_value(native_module, function, flow, aliases, guard)
+		# A load also supplying a normalized-index witness must still emit that
+		# witness. The first-read cache normally makes this check redundant.
+		guards.each do |other|
+			if other.source == guard.instruction
+				value = -1
+			end
+		end
+		result.push(MirArrayReadGuard.new(instruction: guard.instruction, source: guard.source, loaded_value: value))
+	end
+	return result
+end

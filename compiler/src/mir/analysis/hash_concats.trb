@@ -1,0 +1,110 @@
+import { hash_action_has_key } from mir/model/hash_actions
+import { mir_op_hash_method, mir_op_scalar_literal, mir_op_singleton_literal, mir_op_string_concat, mir_op_string_literal } from mir/model/instructions
+import { mir_instruction_occurrences } from mir/analysis/flow
+import { mir_function_string_concats, mir_string_concat_index } from mir/analysis/string_concats
+import { MirHashConcatProbe, MirModule, mir_type_id, mir_value_type } from mir/model/module
+import { mir_hash_key_type } from mir/model/types
+
+# A plain String Hash keeps immutable keys with the same byte semantics as
+# concatenation. Only literal materialization may separate these operations:
+# it cannot observe the String, mutate the Hash, fail, or define its receiver.
+# Thus the receiver already dominates the original allocating safe point.
+def mir_hash_concat_plans(native_module: MirModule): Array<MirHashConcatProbe>
+	mut plans: Array<MirHashConcatProbe> := []
+	occurrences := mir_instruction_occurrences(native_module)
+	native_module.functions.each do |function|
+		mut candidates: Array<MirHashConcatProbe> := []
+		mut block_index := function.block_start
+		while block_index < function.block_start + function.block_count
+			block := native_module.blocks[block_index]
+			mut concat := -1
+			mut index := block.instruction_start
+			while index < block.instruction_start + block.instruction_count
+				instruction := native_module.instructions[index]
+				if occurrences[index] != 1
+					concat = -1
+				elsif instruction.kind == mir_op_string_concat()
+					concat = index
+				elsif instruction.kind == mir_op_hash_method() && instruction.payload == hash_action_has_key()
+					if concat >= 0 && instruction.second == native_module.instructions[concat].result
+						owner_type := mir_value_type(native_module, function.id, instruction.first)
+						if mir_hash_key_type(native_module, owner_type) == mir_type_id("String")
+							candidates.push(MirHashConcatProbe.new(function_id: function.id, concat: concat, membership: index))
+						end
+					end
+					concat = -1
+				elsif instruction.kind != mir_op_scalar_literal() && instruction.kind != mir_op_string_literal() && instruction.kind != mir_op_singleton_literal()
+					concat = -1
+				end
+				index += 1
+			end
+			block_index += 1
+		end
+		if candidates.size() > 0
+			# Another plan owns complete concat chains and their root operands.
+			# Keep this proof limited to an ordinary two-fragment allocation.
+			chains := mir_function_string_concats(native_module, function)
+			candidates.each do |plan|
+				if mir_string_concat_index(chains, plan.concat) < 0
+					plans.push(plan)
+				end
+			end
+		end
+	end
+	# Physical block order is not a proof input. Disjoint intervals also keep
+	# membership order equal to concat order for both binary searches.
+	mut index := 1
+	while index < plans.size()
+		row := plans[index]
+		mut position := index
+		while position > 0 && plans[position - 1].concat > row.concat
+			plans[position] = plans[position - 1]
+			position -= 1
+		end
+		plans[position] = row
+		index += 1
+	end
+	return plans
+end
+
+def mir_hash_concats_equal(left: Array<MirHashConcatProbe>, right: Array<MirHashConcatProbe>): Boolean
+	if left.size() != right.size()
+		return false
+	end
+	mut index := 0
+	while index < left.size()
+		if left[index].function_id != right[index].function_id || left[index].concat != right[index].concat || left[index].membership != right[index].membership
+			return false
+		end
+		index += 1
+	end
+	return true
+end
+
+def mir_hash_concat_find(plans: Array<MirHashConcatProbe>, instruction: Integer, membership: Boolean): Integer
+	mut lower := 0
+	mut upper := plans.size()
+	while lower < upper
+		middle := lower + (upper - lower) / 2
+		mut identity := plans[middle].concat
+		if membership
+			identity = plans[middle].membership
+		end
+		if identity == instruction
+			return middle
+		elsif identity < instruction
+			lower = middle + 1
+		else
+			upper = middle
+		end
+	end
+	return -1
+end
+
+def mir_hash_concat_at_producer(plans: Array<MirHashConcatProbe>, instruction: Integer): Integer
+	return mir_hash_concat_find(plans, instruction, false)
+end
+
+def mir_hash_concat_at_membership(plans: Array<MirHashConcatProbe>, instruction: Integer): Integer
+	return mir_hash_concat_find(plans, instruction, true)
+end

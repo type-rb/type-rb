@@ -1,0 +1,224 @@
+import { hash_action_copy, hash_action_delete, hash_action_empty, hash_action_fetch, hash_action_has_key, hash_action_index_read, hash_action_index_write, hash_action_keys, hash_action_literal, hash_action_merge, hash_action_none, hash_action_size, hash_action_update, hash_action_values } from mir/model/hash_actions
+import { find_object_type } from frontend/types/object_types
+import { literal_type_base } from frontend/types/literal_types
+import { find_newtype_type } from frontend/types/newtype_types
+import { union_parts } from frontend/types/union_types
+import { callable_parts } from frontend/types/callable_types
+import { find_enum_type } from frontend/types/enum_types
+import { token_is } from frontend/syntax/syntax_tokens
+import { nullable_element } from frontend/types/nullable_types
+import { MirHashOperation, mir_hash_operation, mir_hash_valid } from mir/model/hashes
+import { hash_key_type, hash_value_type } from frontend/types/hash_types
+import { array_element_type, find_record_type } from frontend/resolution/type_resolution
+import { CompilerState, diagnostic } from state/state
+import { load_integer, load_string, sparse_integer_at, store_integer } from support/storage
+
+def checked_hash_index_at(state: CompilerState, origin: Integer): Integer
+	return sparse_integer_at(state.callables.checked[0].hash_origins, origin) - 1
+end
+
+# Publish a single named plan per source operation; the origin table is only an
+# index into verified MIR, never an independent collection semantics store.
+def checked_hash_publish(mut state: CompilerState, plan: MirHashOperation)
+	mut operations := state.callables.checked[0].hash_operations
+	index := checked_hash_index_at(state, plan.origin)
+	if index >= 0
+		operations[index] = plan
+	else
+		operations.push(plan)
+		store_integer(state.callables.checked[0].hash_origins, plan.origin, operations.size())
+	end
+	store_integer(state.callables.checked[0].hash_origins, plan.finish, load_integer(state.callables.checked[0].hash_origins, plan.origin))
+end
+
+def checked_hash_plan(state: CompilerState, origin: Integer): MirHashOperation
+	if origin >= 0 && origin < state.source_tokens.token_count[0]
+		index := checked_hash_index_at(state, origin)
+		if index >= 0 && index < state.callables.checked[0].hash_operations.size()
+			return state.callables.checked[0].hash_operations[index]
+		end
+	end
+	return mir_hash_operation(hash_action_none(), -1, -1, -1, "", false, 0)
+end
+
+def checked_hash_method(method: String): Integer
+	if method == "fetch"
+		return hash_action_fetch()
+	elsif method == "size"
+		return hash_action_size()
+	elsif method == "key?"
+		return hash_action_has_key()
+	elsif method == "delete"
+		return hash_action_delete()
+	elsif method == "dup"
+		return hash_action_copy()
+	elsif method == "merge"
+		return hash_action_merge()
+	elsif method == "update"
+		return hash_action_update()
+	elsif method == "keys"
+		return hash_action_keys()
+	elsif method == "values"
+		return hash_action_values()
+	elsif method == "empty?"
+		return hash_action_empty()
+	end
+	return hash_action_none()
+end
+
+def checked_hash_empty_constant(state: CompilerState, plan: MirHashOperation): Boolean
+	if plan.type_name != "Hash" || plan.entries != 0
+		return false
+	end
+	if plan.kind == hash_action_size() || plan.kind == hash_action_empty()
+		return true
+	end
+	if plan.kind != hash_action_literal()
+		return false
+	end
+	mut index := 0
+	while index < state.global_bindings.globals.size()
+		row := state.global_bindings.globals[index]
+		mut start := row.start
+		mut finish := row.finish
+		while finish - start > 2 && token_is(state, start, "(") && token_is(state, finish - 1, ")")
+			start += 1
+			finish -= 1
+		end
+		if row.constant && start == plan.origin && finish == plan.finish + 1
+			return true
+		end
+		index += 1
+	end
+	return false
+end
+
+def checked_hash_valid(state: CompilerState, plan: MirHashOperation, pending: Boolean): Boolean
+	mut allow_pending := pending
+	if checked_hash_empty_constant(state, plan)
+		allow_pending = true
+	end
+	if !mir_hash_valid(plan, state.source_tokens.token_count[0], allow_pending)
+		return false
+	end
+	if plan.type_name != "Hash" && !checked_hash_value_layout(state, plan.value_type)
+		return false
+	end
+	if plan.kind == hash_action_index_write() || plan.kind == hash_action_delete() || plan.kind == hash_action_update()
+		if !checked_hash_binding_target(state, plan.receiver_origin)
+			return false
+		end
+	end
+	if plan.kind == hash_action_literal()
+		if token_is(state, plan.origin, "{") && token_is(state, plan.finish, "}")
+			return true
+		end
+		return false
+	end
+	if plan.kind == hash_action_index_read() || plan.kind == hash_action_index_write()
+		if !token_is(state, plan.origin, "[") || !token_is(state, plan.finish, "]")
+			return false
+		end
+		if plan.kind == hash_action_index_write()
+			return token_is(state, plan.finish + 1, "=")
+		end
+		return true
+	end
+	if token_is(state, plan.origin, "(") && token_is(state, plan.finish, ")") && plan.kind == checked_hash_method(load_string(state.source_tokens.token_texts, plan.origin - 1))
+		return true
+	end
+	return false
+end
+
+def checked_hash_verify_body(mut state: CompilerState): Boolean
+	state.callables.checked[0].hash_operations.each do |plan|
+		if !checked_hash_valid(state, plan, state.interactive)
+			diagnostic(state, "TRBN4004", load_integer(state.source_tokens.token_lines, plan.origin), "unresolved or invalid Hash operation; annotate Hash<K, V>")
+			return false
+		end
+	end
+	return true
+end
+
+# A fresh value may be passed to a mutable parameter, but mutation syntax
+# requires a binding. Follow checked indexed receivers without token guessing.
+def checked_hash_binding_target(state: CompilerState, origin: Integer): Boolean
+	mut root := origin
+	mut depth := 0
+	while depth < state.source_tokens.token_count[0]
+		parent := checked_hash_plan(state, root)
+		if parent.kind == hash_action_literal()
+			return false
+		end
+		if parent.kind != hash_action_index_read()
+			return true
+		end
+		root = parent.receiver_origin
+		depth += 1
+	end
+	return false
+end
+
+def checked_hash_value_layout(state: CompilerState, type_name: String): Boolean
+	if literal_type_base(type_name) != ""
+		return true
+	end
+	alternatives := union_parts(type_name)
+	if alternatives.size() > 0
+		mut valid := true
+		alternatives.each do |alternative|
+			if !checked_hash_value_layout(state, alternative)
+				valid = false
+			end
+		end
+		return valid
+	end
+	parts := callable_parts(type_name)
+	if parts.size() > 0
+		mut index := 0
+		while index < parts.size()
+			if !(index == 0 && parts[index] == "Void") && !checked_hash_value_layout(state, parts[index])
+				return false
+			end
+			index += 1
+		end
+		return true
+	end
+	if nullable_element(type_name) != ""
+		return checked_hash_value_layout(state, nullable_element(type_name))
+	end
+	if type_name == "Any" || type_name == "Nil" || type_name == "Integer" || type_name == "Float" || type_name == "Boolean" || type_name == "String" || type_name == "Bytes" || type_name == "Range<Integer>"
+		return true
+	end
+	if hash_key_type(type_name) != ""
+		return checked_hash_value_layout(state, hash_value_type(type_name))
+	end
+	element := array_element_type(type_name)
+	if element != ""
+		return checked_hash_value_layout(state, element)
+	end
+	if find_newtype_type(state, type_name) >= 0
+		return true
+	end
+	if find_enum_type(state, type_name) >= 0
+		return true
+	end
+	if find_record_type(state, type_name) >= 0
+		return true
+	end
+	return find_object_type(state, type_name) >= 0
+end
+
+def checked_hash_verify(mut state: CompilerState): Boolean
+	previous := state.callables.checked[0]
+	mut valid := true
+	state.callables.checked_bodies.each do |body|
+		state.callables.checked[0] = body
+		if !checked_hash_verify_body(state)
+			valid = false
+			break
+		end
+	end
+	state.callables.checked[0] = previous
+	return valid
+end

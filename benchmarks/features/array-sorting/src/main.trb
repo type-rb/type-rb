@@ -1,0 +1,27 @@
+# Array construction, natural sorting and stable key sorting.
+
+def run(count: Integer, rounds: Integer): Integer
+	mut seed := 42
+	mut checksum := 0
+	mut round := 0
+	while round < rounds
+		mut values: Array<Integer> := []
+		mut index := 0
+		while index < count
+			seed = (seed * 1664525 + 1013904223) % 4294967296
+			values.push(seed % 100000)
+			index += 1
+		end
+		sorted := values.sort()
+		checksum = (checksum + sorted[0] + sorted[count / 2] + sorted[count - 1]) % 1000000007
+		by_suffix := values.sort_by { |value| value % 1000 }
+		checksum = (checksum + by_suffix[0] + by_suffix[count - 1]) % 1000000007
+		round += 1
+	end
+	return checksum
+end
+
+def main()
+	puts(run(20000, 24))
+	return
+end

@@ -1,0 +1,109 @@
+import trb/std/process
+
+def integer_value(index: Integer): Integer
+	return index * 3 - 7
+end
+
+def make_integers(limit: Integer): Array<Integer>
+	mut values: Array<Integer> := []
+	mut index := 0
+	while index < limit
+		values.push(integer_value(index))
+		index += 1
+	end
+	return values
+end
+
+def verify_integers(values: Array<Integer>, limit: Integer): Boolean
+	if values.size() != limit
+		return false
+	end
+	mut index := 0
+	while index < limit
+		if values[index] != integer_value(index)
+			return false
+		end
+		index += 1
+	end
+	if limit > 0
+		if values[-1] != integer_value(limit - 1)
+			return false
+		end
+	end
+	return true
+end
+
+def churn(rounds: Integer)
+	mut index := 0
+	while index < rounds
+		discarded := "scalar-garbage-" + index.to_s()
+		if discarded == ""
+			puts("unexpected")
+		end
+		index += 1
+	end
+	return
+end
+
+def exercise_integer_boundary(limit: Integer): Boolean
+	mut values := make_integers(limit)
+	mut alias_values := values
+	mut nested: Array<Array<Integer>> := []
+	nested.push(values)
+	if verify_integers(values, limit) == false
+		return false
+	end
+	churn(30000)
+	if verify_integers(alias_values, limit) == false
+		return false
+	end
+	if verify_integers(nested[0], limit) == false
+		return false
+	end
+	if limit > 0
+		values[0] = limit + 1000
+		if alias_values[0] != limit + 1000
+			return false
+		end
+		values[limit - 1] = 0 - limit - 2000
+		if nested[0][-1] != 0 - limit - 2000
+			return false
+		end
+	end
+	values.push(integer_value(limit))
+	if values.size() != limit + 1
+		return false
+	end
+	if values[-1] != integer_value(limit)
+		return false
+	end
+	return true
+end
+
+def main()
+	arguments := Process.argv()
+	if arguments.size() > 0
+		if exercise_integer_boundary(arguments[0].to_i())
+			puts("scalar-array-growth-ok")
+		else
+			puts("scalar-array-growth-bad")
+		end
+		return
+	end
+
+	limits := [0, 1, 4, 5, 15, 16, 17, 63, 64, 65, 127, 128, 129, 255, 256, 257, 511, 512, 513, 1023, 1024, 1025]
+	mut index := 0
+	mut ok := true
+	while index < limits.size()
+		if exercise_integer_boundary(limits[index]) == false
+			ok = false
+		end
+		index += 1
+	end
+	if ok
+		puts("scalar-array-growth-ok")
+	else
+		puts("scalar-array-growth-bad")
+	end
+	return
+end

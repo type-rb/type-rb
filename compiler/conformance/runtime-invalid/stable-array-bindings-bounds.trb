@@ -1,0 +1,16 @@
+def copy(mut first: Array<Integer>, mut second: Array<Integer>)
+	mut values := second
+	mut index := 0
+	while index < first.size()
+		first[index] = values[index]
+		index += 1
+	end
+	return
+end
+
+def main()
+	mut first := [1, 2]
+	mut second := [3]
+	copy(first, second)
+	return
+end

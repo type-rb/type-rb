@@ -1,0 +1,39 @@
+# Nonnegative checked categories identify a value view or a declaration receiver.
+# Negative categories encode SSA identity as -id - 1; they are not enum members.
+# Initializer is a call-only category, sharing dispatch with declaration receivers.
+
+def checked_category_value(): Integer
+	return 0
+end
+
+def checked_category_function(): Integer
+	return 1
+end
+
+def checked_category_record(): Integer
+	return 2
+end
+
+def checked_category_readonly(): Integer
+	return 3
+end
+
+def checked_category_math(): Integer
+	return 5
+end
+
+def checked_category_enum(): Integer
+	return 6
+end
+
+def checked_category_newtype(): Integer
+	return 7
+end
+
+def checked_category_object(): Integer
+	return 8
+end
+
+def checked_category_initializer(): Integer
+	return 9
+end

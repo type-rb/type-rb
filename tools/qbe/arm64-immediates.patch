@@ -1,0 +1,91 @@
+--- a/arm64/isel.c
++++ b/arm64/isel.c
+@@ -197,12 +197,59 @@
+ 	return 0;
+ }
+ 
++/* Keep only constants representable by the selected integer instruction. */
++static int
++selimm(Ins *i, Fn *fn)
++{
++	Con *c;
++	int64_t n;
++
++	if (KBASE(i->cls) || rtype(i->arg[1]) != RCon)
++		return 0;
++	c = &fn->con[i->arg[1].val];
++	if (c->type != CBits)
++		return 0;
++	switch (i->op) {
++	case Oadd:
++	case Osub:
++		switch (imm(c, i->cls, &n)) {
++		case Inlo12:
++		case Inhi12:
++			i->op = i->op == Oadd ? Osub : Oadd;
++			i->arg[1] = getcon(n, fn);
++			return 1;
++		case Iplo12:
++		case Iphi12:
++			i->arg[1] = getcon(n, fn);
++			return 1;
++		default:
++			return 0;
++		}
++	case Oand:
++	case Oor:
++	case Oxor:
++		n = i->cls == Kw ? (uint32_t)c->bits.i : c->bits.i;
++		if (!arm64_logimm(n, i->cls))
++			return 0;
++		i->arg[1] = getcon(n, fn);
++		return 1;
++	case Oshl:
++	case Oshr:
++	case Osar:
++		/* IL shift counts are reduced modulo the result width. */
++		i->arg[1] = getcon(c->bits.i & (KWIDE(i->cls) ? 63 : 31), fn);
++		return 1;
++	default:
++		return 0;
++	}
++}
++
+ static void
+ sel(Ins i, Fn *fn)
+ {
+ 	Ref *iarg;
+ 	Ins *i0;
+-	int ck, cc;
++	int ck, cc, immediate;
+ 
+ 	if (INRANGE(i.op, Oalloc, Oalloc1)) {
+ 		i0 = curi - 1;
+@@ -225,10 +272,12 @@
+ 		return;
+ 	}
+ 	if (i.op != Onop) {
++		immediate = selimm(&i, fn);
+ 		emiti(i);
+ 		iarg = curi->arg; /* fixarg() can change curi */
+ 		fixarg(&iarg[0], argcls(&i, 0), 0, fn);
+-		fixarg(&iarg[1], argcls(&i, 1), 0, fn);
++		if (!immediate)
++			fixarg(&iarg[1], argcls(&i, 1), 0, fn);
+ 	}
+ }
+ 
+--- a/arm64/emit.c
++++ b/arm64/emit.c
+@@ -228,7 +228,10 @@
+ 				pc = &e->fn->con[r.val];
+ 				n = pc->bits.i;
+ 				assert(pc->type == CBits);
+-				if (n >> 24) {
++				if (i->op == Oand || i->op == Oor || i->op == Oxor) {
++					assert(arm64_logimm(n, k));
++					fprintf(e->f, "#%"PRIu64, n);
++				} else if (n >> 24) {
+ 					assert(arm64_logimm(n, k));
+ 					fprintf(e->f, "#%"PRIu64, n);
+ 				} else if (n & 0xfff000) {

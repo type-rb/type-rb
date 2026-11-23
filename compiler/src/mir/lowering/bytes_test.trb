@@ -1,0 +1,114 @@
+import { check, emit_qbe } from compiler
+import { control_test_output } from testing/mir/control
+import { compiler_test_instruction_with_cell } from testing/compiler
+import { managed_mir_test_fixture } from testing/mir/managed
+import { logical_checked_source } from testing/pipeline
+import { MirRootPlan, MirType } from mir/model/module
+import { mir_instruction_effects } from mir/analysis/call_effects
+import { mir_effect_allocation_failure, mir_effect_failure, mir_effect_none } from mir/model/effects
+import { mir_op_bytes_at, mir_op_bytes_concat, mir_op_bytes_size, mir_op_bytes_to_string, mir_op_bytes_valid_utf8, mir_op_string_to_bytes } from mir/model/instructions
+import { mir_type_kind_bytes } from mir/model/type_kinds
+import { verify_mir } from mir/verify/module
+import { CompilerState } from state/state
+import { load_string } from support/storage
+import { describe, expect, test } from trb/std/test
+
+def bytes_mir_test_state(): CompilerState
+	mut state := logical_checked_source("def main()\nvalue := (\"A\" + \"B\").to_bytes()\nputs(value.size())\nputs(value.at(0))\nputs(value.valid_utf8?())\nputs(value.concat(\"C\".to_bytes()).to_s())\nend\n")
+	checked := check(state)
+	if !checked
+		puts(load_string(state.diagnostics.messages, 0))
+	end
+	expect(checked).to_be_true()
+	expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	return state
+end
+
+describe("Bytes MIR") do
+	test("emits binary runtime helpers only for verified Bytes types") do
+		mut plain := logical_checked_source("def main()\nputs(3)\nend\n")
+		expect(check(plain)).to_be_true()
+		expect(control_test_output(emit_qbe(plain)).include?("$trbn_bytes_bounds_error")).to_be_false()
+		state := bytes_mir_test_state()
+		expect(control_test_output(emit_qbe(state)).include?("$trbn_bytes_bounds_error")).to_be_true()
+	end
+
+	test("retains typed binary values after erasure, block reordering and collection") do
+		managed_mir_test_fixture("managed-bytes-values", 15)
+	end
+
+	test("makes allocation and strict index failure explicit") do
+		state := bytes_mir_test_state()
+		mut found: Array<Integer> := []
+		state.scalar_mir.instructions.each do |instruction|
+			if instruction.kind >= mir_op_string_to_bytes() && instruction.kind <= mir_op_bytes_valid_utf8()
+				found.push(instruction.kind)
+				mut expected := mir_effect_none()
+				if instruction.kind == mir_op_bytes_at()
+					expected = mir_effect_failure()
+				elsif instruction.kind == mir_op_bytes_concat() || instruction.kind == mir_op_bytes_to_string()
+					expected = mir_effect_allocation_failure()
+				end
+				expect(mir_instruction_effects(state.scalar_mir, instruction)).to_equal(expected)
+			end
+		end
+		expect(found).to_equal([mir_op_string_to_bytes(), mir_op_bytes_size(), mir_op_bytes_at(), mir_op_bytes_valid_utf8(), mir_op_string_to_bytes(), mir_op_bytes_concat(), mir_op_bytes_to_string()])
+	end
+
+	test("rejects forged operand, result, payload and failure shapes") do
+		mut mutation := 0
+		while mutation < 6
+			mut state := bytes_mir_test_state()
+			mut index := 0
+			while state.scalar_mir.instructions[index].kind != mir_op_bytes_concat()
+				index += 1
+			end
+			instruction := state.scalar_mir.instructions[index]
+			mut field := mutation
+			mut value := 999999
+			if mutation == 0
+				# Reinterpret a Bytes concatenation as String conversion.
+				value = mir_op_string_to_bytes()
+			elsif mutation == 4 || mutation == 5
+				value = 1
+			end
+			state.scalar_mir.instructions[index] = compiler_test_instruction_with_cell(instruction, field, value)
+			expect(verify_mir(state.scalar_mir, true).empty?()).to_be_false()
+			mutation += 1
+		end
+	end
+
+	test("rejects a forged Bytes type descriptor") do
+		mut state := bytes_mir_test_state()
+		mut changed := false
+		state.scalar_mir.types.each.with_index do |row, index|
+			if row.kind == mir_type_kind_bytes()
+				state.scalar_mir.types[index] = MirType.new(kind: row.kind, name: row.name, element: 1, key: row.key, declaration: row.declaration)
+				changed = true
+			end
+		end
+		expect(changed).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR composite element shape differs")
+	end
+
+	test("requires live Bytes roots at allocation boundaries") do
+		mut state := bytes_mir_test_state()
+		mut changed := false
+		state.scalar_mir.root_plans.each.with_index do |plan, slot|
+			mut point := 0
+			while point < plan.instructions.size()
+				kind := state.scalar_mir.instructions[plan.instructions[point]].kind
+				if kind == mir_op_bytes_concat() || kind == mir_op_bytes_to_string()
+					expect(plan.roots[point].size() > 0).to_be_true()
+					mut roots := plan.roots
+					roots[point] = []
+					state.scalar_mir.root_plans[slot] = MirRootPlan.new(function_id: plan.function_id, instructions: plan.instructions, roots: roots, capacity: plan.capacity)
+					changed = true
+				end
+				point += 1
+			end
+		end
+		expect(changed).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR live root plan differs")
+	end
+end

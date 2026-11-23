@@ -1,0 +1,34 @@
+def capacity(): Integer
+	puts("limit")
+	return 2
+end
+
+def length(items: Array<Integer>): Integer
+	return items.size()
+end
+
+def owned(value: Integer): Integer
+	mut values := [value]
+	values.push(value + 1)
+	return values[1]
+end
+
+def main()
+	offset := 10
+	mapped := [3, 1, 2].concurrent_map(limit: capacity()) { |value| value + offset }
+	mapped.each { |value| puts(value) }
+	nested := [10, 20].concurrent_map(limit: 2) do |outer|
+		[1, 2].concurrent_map(limit: 1) { |inner| outer + inner }
+	end
+	puts(nested[0][0])
+	puts(nested[1][1])
+	values := [[1], [2, 3]].concurrent_map { |items| length(items) }
+	puts(values[0])
+	puts(values[1])
+	fresh := [1, 2].concurrent_map() { |value| owned(value) }
+	puts(fresh[0])
+	puts(fresh[1])
+	empty: Array<Integer> := []
+	unused := empty.concurrent_map(limit: capacity()) { |value| value.to_s() }
+	puts(unused.size())
+end

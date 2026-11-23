@@ -1,0 +1,31 @@
+import { enum_uppercase } from frontend/types/enum_types
+import { namespace_qualify } from frontend/types/namespace_model
+import { TypeAlias } from frontend/types/alias_model
+import { parse_generic_parameters } from frontend/syntax/generic_syntax
+import { advance, expect, expect_identifier, finish_statement, parse_type, token_is } from frontend/syntax/syntax_tokens
+import { CompilerState, diagnostic, has_diagnostic } from state/state
+import { load_integer } from support/storage
+
+def parse_type_alias(mut state: CompilerState, mut position: Array<Integer>): Boolean
+	line := load_integer(state.source_tokens.token_lines, position[0])
+	advance(position)
+	leaf := expect_identifier(state, position)
+	if !enum_uppercase(leaf)
+		diagnostic(state, "TRBN4002", line, "type alias name must start with an uppercase letter")
+		return false
+	end
+	name := namespace_qualify(state.global_bindings.declaration_owner[0], leaf)
+	mut parameters: Array<String> := []
+	if token_is(state, position[0], "<")
+		parameters = parse_generic_parameters(state, position, line)
+	end
+	if has_diagnostic(state) || !expect(state, position, "=")
+		return false
+	end
+	target := parse_type(state, position)
+	if has_diagnostic(state) || !finish_statement(state, position)
+		return false
+	end
+	state.type_resolution.type_aliases.push(TypeAlias.new(name: name, source_id: state.module_graph.active_module[0], line: line, parameters: parameters, target: target))
+	return true
+end

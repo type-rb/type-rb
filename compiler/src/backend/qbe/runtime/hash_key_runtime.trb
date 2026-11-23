@@ -1,0 +1,138 @@
+import { QbeOutput, qbe_hash_concat_reads, qbe_hash_integer_reads, qbe_hash_string_reads, qbe_output_line } from backend/qbe/output
+
+# Key flags come from verified MIR: bit 0 selects String content, and bit 2
+# retains a union object whose payload belongs to that same scalar domain.
+# Buckets keep the original object so snapshots retain its checked type and root.
+# Encoded Integers and managed keys exclude zero and their tombstone. Exact
+# identity can therefore finish a probe before empty/deleted classification.
+def emit_hash_integer_mix(mut output: QbeOutput, key: String, result: String)
+	qbe_output_line(output, " %shift1 =l shr " + key + ", 30\n %xor1 =l xor " + key + ", %shift1\n %mix1 =l mul %xor1, 13787848793156543929\n %shift2 =l shr %mix1, 27\n %xor2 =l xor %mix1, %shift2\n %mix2 =l mul %xor2, 10723151780598845931\n %shift3 =l shr %mix2, 31\n " + result + " =l xor %mix2, %shift3\n")
+end
+
+# Generic and plain String probes share this byte-for-byte FNV mixing algorithm.
+# Prefix temporaries and blocks because the typed path embeds it in the probe.
+def emit_hash_string_mix(mut output: QbeOutput, key: String, result: String, incoming: String)
+	emit_hash_string_part_mix(output, key, result, incoming, "code_", "14695981039346656037")
+end
+
+# Both fragments continue the same FNV state; no boundary byte is inserted.
+# The ordinary one-fragment path retains its original labels and algorithm.
+def emit_hash_string_part_mix(mut output: QbeOutput, key: String, result: String, incoming: String, prefix: String, initial: String)
+	value := "%" + prefix
+	block := "@" + prefix
+	qbe_output_line(output, " " + value + "length_slot =l add " + key + ", 8\n " + value + "length =l loadl " + value + "length_slot\n " + value + "data =l add " + key + ", 24\n jmp " + block + "loop\n" + block + "loop\n")
+	qbe_output_line(output, " " + value + "index =l phi @" + incoming + " 0, " + block + "byte " + value + "next\n " + value + "hash =l phi @" + incoming + " " + initial + ", " + block + "byte " + value + "next_hash\n")
+	qbe_output_line(output, " " + value + "done =w ceql " + value + "index, " + value + "length\n jnz " + value + "done, " + block + "finish, " + block + "byte\n" + block + "byte\n")
+	qbe_output_line(output, " " + value + "address =l add " + value + "data, " + value + "index\n " + value + "byte =w loadub " + value + "address\n " + value + "wide =l extuw " + value + "byte\n")
+	qbe_output_line(output, " " + value + "xored =l xor " + value + "hash, " + value + "wide\n " + value + "next_hash =l mul " + value + "xored, 1099511628211\n " + value + "next =l add " + value + "index, 1\n jmp " + block + "loop\n" + block + "finish\n")
+	qbe_output_line(output, " " + result + " =l copy " + value + "hash\n")
+end
+
+# Length checks bound both comparisons, including empty fragments and NUL.
+# Equality uses bytes exactly as ordinary String equality and Hash probing do.
+def emit_hash_concat_equal(mut output: QbeOutput)
+	qbe_output_line(output, "@strings\n %stored_length_slot =l add %stored, 8\n %stored_length =l loadl %stored_length_slot\n %query_length =l add %left_length, %right_length\n %wrong_length =w cnel %stored_length, %query_length\n jnz %wrong_length, @different, @compare_left\n")
+	qbe_output_line(output, "@compare_left\n %stored_data =l add %stored, 24\n %left_different =w call $memcmp(l %stored_data, l %left_data, l %left_length)\n jnz %left_different, @different, @compare_right\n")
+	qbe_output_line(output, "@compare_right\n %stored_right =l add %stored_data, %left_length\n %right_different =w call $memcmp(l %stored_right, l %right_data, l %right_length)\n jnz %right_different, @different, @found\n")
+end
+
+def emit_hash_key_runtime(mut output: QbeOutput)
+	qbe_output_line(output, "\nfunction l $trbn_hash_key(l %table, l %key) {\n@start\n %flags_slot =l add %table, 40\n %flags =l loadl %flags_slot\n %managed =l and %flags, 5\n %managed_nonzero =w cnel %managed, 0\n jnz %managed_nonzero, @managed, @integer\n@managed\n ret %key\n@integer\n %encoded =l add %key, 9007199254740992\n ret %encoded\n}\n")
+	qbe_output_line(output, "\nfunction l $trbn_hash_code(l %key, l %string) {\n@start\n %string_nonzero =w cnel %string, 0\n jnz %string_nonzero, @string, @integer\n@integer\n")
+	emit_hash_integer_mix(output, "%key", "%result")
+	qbe_output_line(output, " ret %result\n@string\n")
+	emit_hash_string_mix(output, "%key", "%string_result", "string")
+	qbe_output_line(output, " ret %string_result\n}\n")
+	emit_hash_probe(output, "generic")
+	if qbe_hash_integer_reads(output)
+		emit_hash_probe(output, "integer")
+	end
+	if qbe_hash_string_reads(output)
+		emit_hash_probe(output, "string")
+	end
+	if qbe_hash_concat_reads(output)
+		emit_hash_probe(output, "concat")
+	end
+end
+
+# All adapters use one probe algorithm. Verified plain key reads omit only
+# representation decoding; generic mutation and boxed paths stay intact.
+def emit_hash_probe(mut output: QbeOutput, key_mode: String)
+	integer := key_mode == "integer"
+	concat := key_mode == "concat"
+	mut strings := key_mode == "string"
+	if concat
+		strings = true
+	end
+	if concat
+		qbe_output_line(output, "\nfunction l $trbn_hash_concat_key(l %table, l %left, l %right, l %slot_result) {")
+	elsif integer
+		qbe_output_line(output, "\nfunction l $trbn_hash_slot_integer(l %table, l %raw_key) {")
+	elsif strings
+		qbe_output_line(output, "\nfunction l $trbn_hash_slot_string(l %table, l %raw_key) {")
+	else
+		qbe_output_line(output, "\nfunction l $trbn_hash_slot(l %table, l %key) {")
+	end
+	qbe_output_line(output, "\n@start\n %capacity_slot =l add %table, 16\n %capacity =l loadl %capacity_slot\n %empty =w ceql %capacity, 0\n jnz %empty, @empty, @prepare\n@empty\n")
+	if concat
+		qbe_output_line(output, " jmp @concat_missing\n")
+	else
+		qbe_output_line(output, " ret -1\n")
+	end
+	qbe_output_line(output, "@prepare\n %mask =l sub %capacity, 1\n %keys_slot =l add %table, 24\n %keys =l loadl %keys_slot\n %data_slot =l add %keys, 24\n %data =l loadl %data_slot\n")
+	if integer
+		qbe_output_line(output, " %key =l add %raw_key, 9007199254740992\n@key_ready\n")
+		emit_hash_integer_mix(output, "%key", "%hash")
+	elsif concat
+		emit_hash_string_part_mix(output, "%left", "%left_code", "prepare", "left_", "14695981039346656037")
+		emit_hash_string_part_mix(output, "%right", "%hash", "left_finish", "right_", "%left_code")
+		qbe_output_line(output, " jmp @key_ready\n@key_ready\n")
+	elsif strings
+		qbe_output_line(output, " %key =l copy %raw_key\n")
+		emit_hash_string_mix(output, "%key", "%hash", "prepare")
+		qbe_output_line(output, " jmp @key_ready\n@key_ready\n")
+	else
+		qbe_output_line(output, " %flags_slot =l add %table, 40\n %flags =l loadl %flags_slot\n %string =l and %flags, 1\n %managed =l and %flags, 5\n %boxed =l and %flags, 4\n %managed_nonzero =w cnel %managed, 0\n jnz %managed_nonzero, @managed_key, @scalar_key\n@managed_key\n jmp @key_kind\n@scalar_key\n jmp @key_kind\n@key_kind\n %tombstone =l phi @managed_key $trbn_hash_tombstone, @scalar_key -1\n %boxed_nonzero =w cnel %boxed, 0\n jnz %boxed_nonzero, @boxed_query, @direct_query\n@boxed_query\n %query_slot =l add %key, 16\n %query_payload =l loadl %query_slot\n jmp @key_ready\n@direct_query\n jmp @key_ready\n@key_ready\n %query =l phi @boxed_query %query_payload, @direct_query %key\n %hash =l call $trbn_hash_code(l %query, l %string)\n")
+	end
+	qbe_output_line(output, " %initial =l and %hash, %mask\n jmp @probe\n@probe\n %index =l phi @key_ready %initial, @advance %next\n %first =l phi @key_ready -1, @advance %next_first\n %scaled =l mul %index, 8\n %address =l add %data, %scaled\n %stored =l loadl %address\n")
+	if concat
+		qbe_output_line(output, " jmp @unmatched\n")
+	else
+		qbe_output_line(output, " %identity =w ceql %stored, %key\n jnz %identity, @found, @unmatched\n")
+	end
+	qbe_output_line(output, "@unmatched\n %vacant =w ceql %stored, 0\n jnz %vacant, @vacant, @occupied\n@occupied\n")
+	if integer
+		qbe_output_line(output, " %tomb =w ceql %stored, -1\n jnz %tomb, @deleted, @different\n")
+	elsif strings
+		qbe_output_line(output, " %tomb =w ceql %stored, $trbn_hash_tombstone\n jnz %tomb, @deleted, @strings\n")
+	else
+		qbe_output_line(output, " %tomb =w ceql %stored, %tombstone\n jnz %tomb, @deleted, @content\n")
+	end
+	qbe_output_line(output, "@deleted\n %unset =w csltl %first, 0\n jnz %unset, @remember, @retain\n@remember\n jmp @advance\n@retain\n jmp @advance\n")
+	if concat
+		emit_hash_concat_equal(output)
+	elsif strings
+		qbe_output_line(output, "@strings\n %same =l call $trbn_string_equal(l %stored, l %key)\n %same_nonzero =w cnel %same, 0\n jnz %same_nonzero, @found, @different\n")
+	elsif !integer
+		qbe_output_line(output, "@content\n %boxed_nonzero2 =w cnel %boxed, 0\n jnz %boxed_nonzero2, @boxed_stored, @direct_stored\n@boxed_stored\n %stored_slot =l add %stored, 16\n %stored_payload =l loadl %stored_slot\n jmp @values_ready\n@direct_stored\n jmp @values_ready\n@values_ready\n %stored_value =l phi @boxed_stored %stored_payload, @direct_stored %stored\n %string_nonzero =w cnel %string, 0\n jnz %string_nonzero, @strings, @integers\n@integers\n %integer_same =w ceql %stored_value, %query\n jnz %integer_same, @found, @different\n@strings\n %same =l call $trbn_string_equal(l %stored_value, l %query)\n %same_nonzero2 =w cnel %same, 0\n jnz %same_nonzero2, @found, @different\n")
+	end
+	qbe_output_line(output, "@different\n jmp @advance\n@advance\n %next_first =l phi @remember %index, @retain %first, @different %first\n %increment =l add %index, 1\n %next =l and %increment, %mask\n jmp @probe\n@found\n")
+	if concat
+		qbe_output_line(output, " storel %index, %slot_result\n ret %stored\n")
+	else
+		qbe_output_line(output, " ret %index\n")
+	end
+	qbe_output_line(output, "@vacant\n %has_deleted =w cslel 0, %first\n jnz %has_deleted, @use_deleted, @use_vacant\n@use_deleted\n %deleted_result =l sub -1, %first\n")
+	if concat
+		qbe_output_line(output, " jmp @concat_missing\n")
+	else
+		qbe_output_line(output, " ret %deleted_result\n")
+	end
+	qbe_output_line(output, "@use_vacant\n %vacant_result =l sub -1, %index\n")
+	if concat
+		qbe_output_line(output, " jmp @concat_missing\n@concat_missing\n %missing_slot =l phi @empty -1, @use_deleted %deleted_result, @use_vacant %vacant_result\n storel %missing_slot, %slot_result\n %concatenated =l call $trbn_string_concat(l %left, l %right)\n ret %concatenated\n")
+	else
+		qbe_output_line(output, " ret %vacant_result\n")
+	end
+	qbe_output_line(output, "}\n")
+end

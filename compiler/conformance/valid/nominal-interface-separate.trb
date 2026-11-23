@@ -1,0 +1,26 @@
+module First
+	interface Named<T>
+		name(): T
+	end
+end
+module Second
+	interface Named<T>
+		name(): T
+	end
+end
+class Label implements First::Named < String>
+	def name(): String
+		return "first"
+	end
+end
+class Count implements Second::Named < Integer>
+	def name(): Integer
+		return 7
+	end
+end
+def main()
+	first: First::Named<String> := Label.new()
+	second: Second::Named<Integer> := Count.new()
+	puts(first.name())
+	puts(second.name())
+end

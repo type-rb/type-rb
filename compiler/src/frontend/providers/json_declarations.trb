@@ -1,0 +1,127 @@
+import { GenericFunction, GenericParameter } from frontend/types/generic_model
+import { ObjectMethod } from frontend/types/object_model
+import { object_method_owner } from frontend/types/object_types
+import { lex_module } from frontend/syntax/lexer
+import { official_source_kind } from project/official_catalog
+import { standard_source_json } from state/standard_source_kinds
+import { token_kind_number } from state/token_kinds
+import { CompilerState } from state/state
+import { load_integer, load_string, sparse_integer_at } from support/storage
+
+def json_provider_decode(): Integer
+	return 1
+end
+
+def json_provider_encode(): Integer
+	return 2
+end
+
+def json_provider_request(): Integer
+	return 3
+end
+
+def json_provider_response(): Integer
+	return 4
+end
+
+def json_provider_parameter(name: String, type_name: String, line: Integer): GenericParameter
+	return GenericParameter.new(name: name, type_name: type_name, line: line, mutable: 0, named_only: 0, default_start: -1, default_finish: -1)
+end
+
+# Registry-owned generic signatures supplement the unchanged portable sources.
+def declare_json_codecs(mut state: CompilerState, source: Integer)
+	if sparse_integer_at(state.standard_modules, source) == standard_source_json()
+		state.type_resolution.generic_functions.push(GenericFunction.new(receiver_type: "", name: "decode", source_id: source, line: 1, type_parameters: ["T"], parameters: [json_provider_parameter("source", "String", 1)], result_type: "Result<T,JSON::Error>", body_start: 0, body_finish: 0))
+		state.type_resolution.generic_functions.push(GenericFunction.new(receiver_type: "", name: "encode", source_id: source, line: 1, type_parameters: ["T"], parameters: [json_provider_parameter("value", "T", 1)], result_type: "Result<String,JSON::Error>", body_start: 0, body_finish: 0))
+		return
+	end
+	if sparse_integer_at(state.standard_modules, source) != official_source_kind("trb/web")
+		return
+	end
+	mut owner := 0
+	while owner < state.nominal.objects.size()
+		row := state.nominal.objects[owner]
+		if row.source_id == source && !row.interface_type && row.parameters.size() == 0 && (row.name == "Request" || row.name == "Response")
+			mut parameters := [json_provider_parameter("self", "Request", row.line)]
+			mut result_type := "Result<T,RequestError>"
+			mut receiver := row.name
+			class_member := row.name == "Response"
+			if class_member
+				receiver = ""
+				# A generic default retains an ordinary literal origin, just as authored defaults do.
+				start := state.source_tokens.token_count[0]
+				lex_module(state, "200\n", source)
+				parameters = [json_provider_parameter("value", "T", row.line), GenericParameter.new(name: "status", type_name: "Integer", line: row.line, mutable: 0, named_only: 0, default_start: start, default_finish: start + 1)]
+				result_type = "Response"
+			end
+			definition := state.type_resolution.generic_functions.size()
+			state.type_resolution.generic_functions.push(GenericFunction.new(receiver_type: receiver, name: row.name + "::json", source_id: source, line: row.line, type_parameters: ["T"], parameters: parameters, result_type: result_type, body_start: row.origin, body_finish: row.origin))
+			state.nominal.objects[owner].methods.push(ObjectMethod.new(name: "json", class_member: class_member, origin: row.origin, function: -1, generic_function: definition))
+		end
+		owner += 1
+	end
+end
+
+def json_provider_parameter_matches(parameter: GenericParameter, name: String, type_name: String): Boolean
+	if parameter.name != name || parameter.type_name != type_name || parameter.mutable != 0 || parameter.named_only != 0 || parameter.default_start >= 0 || parameter.default_finish >= 0
+		return false
+	end
+	return true
+end
+
+def json_provider_kind(state: CompilerState, definition: Integer): Integer
+	if definition < 0 || definition >= state.type_resolution.generic_functions.size()
+		return 0
+	end
+	row := state.type_resolution.generic_functions[definition]
+	if row.type_parameters.size() != 1 || row.type_parameters[0] != "T" || row.body_start != row.body_finish
+		return 0
+	end
+	kind := sparse_integer_at(state.standard_modules, row.source_id)
+	if kind == standard_source_json() && row.receiver_type == "" && row.parameters.size() == 1
+		if row.name == "decode" && row.result_type == "Result<T,JSON::Error>" && json_provider_parameter_matches(row.parameters[0], "source", "String")
+			return json_provider_decode()
+		end
+		if row.name == "encode" && row.result_type == "Result<String,JSON::Error>" && json_provider_parameter_matches(row.parameters[0], "value", "T")
+			return json_provider_encode()
+		end
+	end
+	if kind != official_source_kind("trb/web")
+		return 0
+	end
+	owner := object_method_owner(state, definition)
+	if owner < 0
+		return 0
+	end
+	object := state.nominal.objects[owner]
+	if object.source_id != row.source_id || object.interface_type || object.parameters.size() != 0 || row.body_start != object.origin || row.name != object.name + "::json"
+		return 0
+	end
+	object.methods.each do |method|
+		if method.generic_function == definition && method.name == "json"
+			if object.name == "Request" && row.receiver_type == "Request" && !method.class_member && row.result_type == "Result<T,RequestError>" && row.parameters.size() == 1 && json_provider_parameter_matches(row.parameters[0], "self", "Request")
+				return json_provider_request()
+			end
+			if object.name == "Response" && row.receiver_type == "" && method.class_member && row.result_type == "Response" && row.parameters.size() == 2 && json_provider_parameter_matches(row.parameters[0], "value", "T")
+				status := row.parameters[1]
+				if status.name == "status" && status.type_name == "Integer" && status.mutable == 0 && status.named_only == 0 && status.default_start >= 0 && status.default_finish == status.default_start + 1 && load_integer(state.source_tokens.token_kinds, status.default_start) == token_kind_number() && load_string(state.source_tokens.token_texts, status.default_start) == "200"
+					return json_provider_response()
+				end
+			end
+		end
+	end
+	return 0
+end
+
+def json_provider_function(state: CompilerState, function: Integer): Integer
+	kind := sparse_integer_at(state.standard_modules, load_integer(state.declarations.function_modules, function))
+	if kind != standard_source_json() && kind != official_source_kind("trb/web")
+		return 0
+	end
+	state.type_resolution.generic_function_instances.each do |instance|
+		if instance.function == function
+			return json_provider_kind(state, instance.definition)
+		end
+	end
+	return 0
+end

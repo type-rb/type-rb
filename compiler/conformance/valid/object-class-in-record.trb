@@ -1,0 +1,13 @@
+class Label
+	@text: String
+	def initialize(text: String)
+		@text = text
+	end
+end
+record Envelope
+	label: Label
+end
+def main()
+	envelope := Envelope.new(label: Label.new("held"))
+	puts(envelope.label.text)
+end

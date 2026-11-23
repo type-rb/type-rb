@@ -1,0 +1,33 @@
+import trb/std/result
+
+def source(success: Boolean): Result<Integer, Integer>
+	if success
+		return Result<Integer, Integer>::Ok(7)
+	end
+	return Result<Integer, Integer>::Err(41)
+end
+
+def propagated(success: Boolean): Result<Integer, Integer>
+	value := try source(success)
+	return Result<Integer, Integer>::Ok(value + 1)
+end
+
+def observe(result: Result<Integer, Integer>): Integer
+	case result
+	when Result::Ok(value)
+		return value
+	when Result::Err(error)
+		return error
+	end
+end
+
+def main()
+	if observe(propagated(true)) == 8
+		if observe(propagated(false)) == 41
+			puts("recovery-aggregate-result-control-flow")
+			return
+		end
+	end
+	puts("recovery-aggregate-result-control-flow-failed")
+	return
+end

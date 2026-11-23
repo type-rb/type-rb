@@ -1,0 +1,133 @@
+import { check_expression, check_primary } from frontend/checking/body/expressions
+import { check } from compiler
+import { lex } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { CompilerState, compiler_new, has_diagnostic, local_add } from state/state
+import { locals_new } from state/local_state
+import { load_integer, load_string } from support/storage
+import { describe, expect, test } from trb/std/test
+
+describe("Native TypeRB frontend") do
+	test("carries exact checked source origins without preserving computed text") do
+		mut literal_state := compiler_new(4)
+		expect(lex(literal_state, "1")).to_be_true()
+		mut literal_position := [0]
+		mut literal_locals := locals_new(4)
+		literal := check_primary(literal_state, literal_position, literal_locals, "Integer")
+		expect(literal.origin).to_equal(0)
+		expect(load_string(literal_state.source_tokens.token_texts, literal.origin)).to_equal("1")
+
+		mut identifier_state := compiler_new(8)
+		expect(lex(identifier_state, "value")).to_be_true()
+		mut identifier_position := [0]
+		mut identifier_locals := locals_new(4)
+		expect(local_add(identifier_state, identifier_locals, "value", "Integer", 0, 1)).to_be_true()
+		identifier := check_primary(identifier_state, identifier_position, identifier_locals, "Integer")
+		expect(identifier.origin).to_equal(0)
+		expect(load_string(identifier_state.source_tokens.token_texts, identifier.origin)).to_equal("value")
+
+		mut parenthesized_state := compiler_new(8)
+		expect(lex(parenthesized_state, "(1)")).to_be_true()
+		mut parenthesized_position := [0]
+		mut parenthesized_locals := locals_new(4)
+		parenthesized := check_primary(
+			parenthesized_state,
+			parenthesized_position,
+			parenthesized_locals,
+			"Integer",
+		)
+		expect(parenthesized.origin).to_equal(1)
+
+		mut computed_state := compiler_new(8)
+		expect(lex(computed_state, "1 + 2")).to_be_true()
+		mut computed_position := [0]
+		mut computed_locals := locals_new(4)
+		computed := check_expression(computed_state, computed_position, computed_locals, 1, "Integer")
+		expect(computed.origin).to_equal(9007199254740991)
+
+		mut unary_state := compiler_new(8)
+		expect(lex(unary_state, "- 1")).to_be_true()
+		mut unary_position := [0]
+		mut unary_locals := locals_new(4)
+		unary := check_primary(unary_state, unary_position, unary_locals, "Integer")
+		expect(unary.origin).to_equal(9007199254740991)
+	end
+
+	test("defers contextual conversion until the completed expression") do
+		mut state := compiler_new(16)
+		expect(lex(state, "((7)) / 2")).to_be_true()
+		mut position := [0]
+		mut locals := locals_new(4)
+		value := check_primary(state, position, locals, "Float")
+		expect(value.type_name).to_equal("Integer")
+		expect(has_diagnostic(state)).to_be_false()
+
+		mut complete_position := [0]
+		complete := check_expression(state, complete_position, locals, 1, "Float")
+		# Analysis retains the converted semantic type without emitting instructions.
+		expect(complete.type_name).to_equal("Float")
+		expect(locals.mir_instructions.size()).to_equal(0)
+		expect(has_diagnostic(state)).to_be_false()
+	end
+
+	test("checks contextual postfix results after inferring their receivers") do
+		expressions := ["((7 / 2).to_s())", "(([7]).size()).to_s()", "(\"12\").to_i().to_s()"]
+		mut index := 0
+		while index < expressions.size()
+			mut state := compiler_new(64)
+			expect(lex(state, expressions[index])).to_be_true()
+			mut position := [0]
+			mut locals := locals_new(4)
+			value := check_expression(state, position, locals, 1, "String")
+			expect(value.type_name).to_equal("String")
+			expect(has_diagnostic(state)).to_be_false()
+			index += 1
+		end
+	end
+
+	test("rejects a local initializer type mismatch during checking") do
+		source := "def main()\n\tvalue: Integer := \"bad\"\n\treturn\nend\n"
+		mut state := compiler_new(source.size() + 1)
+		expect(lex(state, source)).to_be_true()
+		expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_false()
+		expect(load_string(state.diagnostics.codes, 0)).to_equal("TRBN4004")
+		expect(load_integer(state.diagnostics.lines, 0)).to_equal(2)
+		expect(load_string(state.diagnostics.messages, 0)).to_equal("expected Integer, found String")
+	end
+
+	test("enforces the portable Integer literal range during checking") do
+		valid_source := "def main()\n\t_value := 9007199254740991\n\treturn\nend\n"
+		mut valid := compiler_new(valid_source.size() + 1)
+		expect(lex(valid, valid_source)).to_be_true()
+		expect(parse_module(valid, 0, valid.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(valid)).to_be_true()
+		expect(check(valid)).to_be_true()
+
+		invalid_source := "def main()\n\tvalue := 9007199254740992\n\treturn\nend\n"
+		mut invalid := compiler_new(invalid_source.size() + 1)
+		expect(lex(invalid, invalid_source)).to_be_true()
+		expect(parse_module(invalid, 0, invalid.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(invalid)).to_be_true()
+		expect(check(invalid)).to_be_false()
+		expect(load_string(invalid.diagnostics.codes, 0)).to_equal("TRBN4004")
+		expect(load_integer(invalid.diagnostics.lines, 0)).to_equal(2)
+		expect(load_string(invalid.diagnostics.messages, 0)).to_equal(
+			"Integer literal is outside the portable range",
+		)
+	end
+
+	test("rejects destructive calls through immutable bindings") do
+		source := "def main()\n\tvalues: Array<Integer> := [1]\n\tvalues.push(2)\n\treturn\nend\n"
+		mut state := compiler_new(source.size() + 1)
+		expect(lex(state, source)).to_be_true()
+		expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_false()
+		expect(load_string(state.diagnostics.codes, 0)).to_equal("TRBN4004")
+		expect(load_integer(state.diagnostics.lines, 0)).to_equal(3)
+		expect(load_string(state.diagnostics.messages, 0)).to_equal("push receiver is immutable")
+	end
+end

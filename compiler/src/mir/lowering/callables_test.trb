@@ -1,0 +1,254 @@
+import { check, emit_qbe } from compiler
+import { find_function_in_module } from frontend/resolution/declaration_lookup
+import { lex } from frontend/syntax/lexer
+import { MirCallable, MirInstruction, MirRootPlan, MirSignature, MirType } from mir/model/module
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { compiler_new } from state/state
+import { store_string } from support/storage
+import { control_test_output } from testing/mir/control
+import { logical_run_qbe } from testing/qbe_runner
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { managed_mir_test_fixture } from testing/mir/managed
+import { verify_mir } from mir/verify/module
+import { describe, expect, test } from trb/std/test
+import { callable_capture_state, callable_forced_collection, callable_mir_state } from testing/mir/callables
+import trb/std/process
+import trb/std/result
+
+describe("MIR callable foundation") do
+	test("retains authored named and nullable function values without source or block order") do
+		managed_mir_test_fixture("named-function-values", 6)
+	end
+	test("executes verified indirect calls and containers after frontend erasure under forced collection") do
+		mut state := callable_mir_state()
+		before := control_test_output(emit_qbe(state))
+		intrinsic_mir_erase(state)
+		mut index := 0
+		while index < state.declarations.function_count[0]
+			store_string(state.declarations.function_names, index, "erased")
+			store_string(state.declarations.function_result_types, index, "Invalid")
+			index += 1
+		end
+		index = 0
+		while index < state.declarations.parameter_count[0]
+			store_string(state.declarations.parameter_types, index, "Invalid")
+			index += 1
+		end
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			forced := callable_forced_collection(before)
+			case logical_run_qbe(qbe, forced)
+			when Result::Ok(actual)
+				expect(actual).to_equal("array value!\nhash value!\nfield value!\n5\nvoid\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("keeps escaped captures and shared mutable storage alive across nested calls and containers") do
+		mut state := callable_capture_state()
+		before := control_test_output(emit_qbe(state))
+		intrinsic_mir_erase(state)
+		mut index := 0
+		while index < state.declarations.function_count[0]
+			store_string(state.declarations.function_names, index, "erased")
+			store_string(state.declarations.function_result_types, index, "Invalid")
+			index += 1
+		end
+		index = 0
+		while index < state.declarations.parameter_count[0]
+			store_string(state.declarations.parameter_types, index, "Invalid")
+			index += 1
+		end
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, callable_forced_collection(before))
+			when Result::Ok(actual)
+				expect(actual).to_equal("one!\n12\ntwo!\n16\none!\n20\nother!\n107\n9\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("rejects invalid capture counts, spans, types and unavailable captured values") do
+		mut mode := 0
+		while mode < 7
+			mut state := callable_capture_state()
+			mut selected := 0
+			while state.scalar_mir.instructions[selected].kind != 41
+				selected += 1
+			end
+			old := state.scalar_mir.instructions[selected]
+			mut first := old.first
+			mut second := old.second
+			if mode == 0
+				first = -1
+			elsif mode == 1
+				first = 9007199254740991
+			elsif mode == 2
+				second = -1
+			elsif mode == 3
+				second = 9007199254740991
+			elsif mode == 4
+				second -= 1
+			elsif mode == 5
+				state.scalar_mir.arguments[first] = state.scalar_mir.arguments[first + 1]
+			else
+				state.scalar_mir.arguments[first] = old.result
+			end
+			state.scalar_mir.instructions[selected] = MirInstruction.new(kind: old.kind, result: old.result, first: first, second: second, payload: old.payload, failure: old.failure, source_id: old.source_id, line: old.line)
+			expect(verify_mir(state.scalar_mir, true).empty?()).to_be_false()
+			mode += 1
+		end
+	end
+
+	test("requires capture roots at allocation and the environment root at indirect calls") do
+		mut mode := 0
+		while mode < 2
+			mut state := callable_capture_state()
+			mut selected := -1
+			mut value := -1
+			mut index := 0
+			while selected < 0 && index < state.scalar_mir.instructions.size()
+				instruction := state.scalar_mir.instructions[index]
+				if mode == 0 && instruction.kind == 41
+					selected = index
+					value = state.scalar_mir.arguments[instruction.first]
+				elsif mode == 1 && instruction.kind == 42
+					selected = index
+					value = instruction.first
+				end
+				index += 1
+			end
+			expect(selected >= 0).to_be_true()
+			mut removed := false
+			index = 0
+			while index < state.scalar_mir.root_plans.size()
+				plan := state.scalar_mir.root_plans[index]
+				mut roots: Array<Array<Integer>> := []
+				mut point := 0
+				while point < plan.instructions.size()
+					mut kept: Array<Integer> := []
+					plan.roots[point].each do |root|
+						if plan.instructions[point] == selected && root == value
+							removed = true
+						else
+							kept.push(root)
+						end
+					end
+					roots.push(kept)
+					point += 1
+				end
+				state.scalar_mir.root_plans[index] = MirRootPlan.new(function_id: plan.function_id, instructions: plan.instructions, roots: roots, capacity: plan.capacity)
+				index += 1
+			end
+			expect(removed).to_be_true()
+			expect(verify_mir(state.scalar_mir, true).empty?()).to_be_false()
+			mode += 1
+		end
+	end
+
+	test("rejects malformed callable catalogs, code references and indirect operands") do
+		mut mode := 0
+		while mode < 16
+			mut state := callable_mir_state()
+			mut selected := 0
+			while state.scalar_mir.instructions[selected].kind != 42
+				selected += 1
+			end
+			if mode < 7
+				old := state.scalar_mir.instructions[selected]
+				mut first := old.first
+				mut second := old.second
+				mut payload := old.payload
+				mut result := old.result
+				mut failure := old.failure
+				if mode == 0
+					first = 9007199254740991
+				elsif mode == 1
+					first = state.scalar_mir.arguments[payload]
+				elsif mode == 2
+					second += 1
+				elsif mode == 3
+					payload = 9007199254740991
+				elsif mode == 4
+					state.scalar_mir.arguments[payload] = first
+				elsif mode == 5
+					result = -1
+				else
+					failure = 0
+				end
+				state.scalar_mir.instructions[selected] = MirInstruction.new(kind: old.kind, result: result, first: first, second: second, payload: payload, failure: failure, source_id: old.source_id, line: old.line)
+			elsif mode < 10 || mode == 15
+				selected = 0
+				while state.scalar_mir.instructions[selected].kind != 41
+					selected += 1
+				end
+				old := state.scalar_mir.instructions[selected]
+				mut payload := old.payload
+				mut first := old.first
+				if mode == 15
+					target := state.scalar_mir.signatures[payload]
+					payload = state.scalar_mir.signatures.size()
+					state.scalar_mir.signatures.push(MirSignature.new(id: payload, kind: 0, name: "missing_body", adapter: 0, source_id: target.source_id, line: target.line, parameter_types: target.parameter_types, parameter_mutable: target.parameter_mutable, result_type: target.result_type))
+				elsif mode == 7
+					payload = 9007199254740991
+				elsif mode == 8
+					payload = find_function_in_module(state, state.module_graph.entry_module[0], "nothing")
+				else
+					first = 9007199254740991
+				end
+				state.scalar_mir.instructions[selected] = MirInstruction.new(kind: old.kind, result: old.result, first: first, second: old.second, payload: payload, failure: old.failure, source_id: old.source_id, line: old.line)
+			else
+				old := state.scalar_mir.callables[0]
+				mut parameters := old.parameters
+				mut result := old.result
+				mut type_id := old.type_id
+				if mode == 10
+					parameters = [0]
+				elsif mode == 11
+					result = 9007199254740991
+				elsif mode == 12
+					type_id = 1
+				elsif mode == 13
+					state.scalar_mir.callables.push(old)
+				else
+					row := state.scalar_mir.types[type_id - 9]
+					state.scalar_mir.types[type_id - 9] = MirType.new(kind: row.kind, name: row.name, element: 1, key: row.key, declaration: row.declaration)
+				end
+				state.scalar_mir.callables[0] = MirCallable.new(type_id: type_id, parameters: parameters, result: result)
+			end
+			error := verify_mir(state.scalar_mir, true)
+			if error == ""
+				puts(mode)
+			end
+			expect(error.empty?()).to_be_false()
+			mode += 1
+		end
+	end
+	test("checks callback signatures and rejects invalid calls even in unused functions") do
+		sources := ["def invoke(callback: (Integer) -> Integer): Integer\nreturn callback()\nend\n", "def invoke(callback: (Integer) -> Integer): Integer\nreturn callback(1, 2)\nend\n", "def invoke(callback: (Integer) -> Integer): Integer\nreturn callback(\"bad\")\nend\n", "def invoke(callback: (Integer) -> Integer): String\nreturn callback(1)\nend\n", "def invoke(callback: (Integer) -> Integer): Integer\nreturn callback(value: 1)\nend\n", "def invoke(callback: () -> Void): Integer\nreturn callback()\nend\n", "def invoke(callback: (Void) -> Integer): Integer\nreturn 0\nend\n", "def invoke(callback: (Missing) -> Integer): Integer\nreturn 0\nend\n", "def invoke(callback: (Integer) -> Missing): Integer\nreturn 0\nend\n", "alias Callback<T> = (Void) -> T\n", "alias Callback = (Integer) -> Missing\n"]
+		sources.each do |declarations|
+			source := declarations + "def main()\nend\n"
+			mut state := compiler_new(source.size() * 4 + 64)
+			valid := lex(state, source) && parse_module(state, 0, state.module_graph.entry_module[0]) && resolve(state) && check(state)
+			if valid
+				puts(source)
+			end
+			expect(valid).to_be_false()
+		end
+	end
+
+end
+
+# Inspect lexical projections produced by the complete interactive checking path.
+# Negative cases inspect their diagnostics; positive cases also materialize bodies.

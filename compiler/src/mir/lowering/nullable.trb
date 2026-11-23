@@ -1,0 +1,249 @@
+import { mir_nil_test_equal, mir_nil_test_not_equal } from mir/model/operation_modes
+import { checked_category_value } from frontend/types/value_categories
+import { mir_control_parameter_count_slot } from state/local_slots
+import { mir_type_boolean, mir_type_none } from mir/model/type_ids
+import { mir_op_nil_test, mir_op_nullable_extract, mir_op_nullable_inject, mir_op_nullable_none, mir_op_union_extract, mir_op_union_inject, mir_op_union_test } from mir/model/instructions
+import { mir_object_coerce } from mir/lowering/object_dispatch
+import { object_value_assignable } from frontend/types/object_types
+import { literal_scalar_type } from frontend/checking/nominal/literal_cases
+import { literal_type_base } from frontend/types/literal_types
+import { mir_literal_widen } from mir/lowering/literals
+import { union_parts } from frontend/types/union_types
+import { mir_union_operation } from mir/lowering/unions
+import { mir_control_active, mir_control_allocate, mir_control_arguments, mir_control_branch, mir_control_enter, mir_control_jump_arguments, mir_control_prepare } from mir/build/control
+import { CheckedValue, checked_flow, checked_mir_value, checked_value, checked_view, mir_add_value, mir_checked_value, scalar_mir_convert_float, scalar_mir_instruction, scalar_mir_value } from frontend/checking/body/values
+import { MirBlock, MirFunction, MirInstruction, MirModule } from mir/model/module
+import { MirFlow, mir_flow_type, mir_value_available } from mir/analysis/flow
+import { mir_nullable_element, mir_semantic_type_id, mir_semantic_type_name } from mir/model/types
+import { nullable_assignable, nullable_element } from frontend/types/nullable_types
+import { CompilerState } from state/state
+import { CheckedLocals } from state/local_state
+import { load_integer } from support/storage
+
+# Explicit operations retain semantics before optional representation lowering:
+# None, present, nil testing and checked payload extraction have distinct opcodes.
+def mir_checked_nullable(mut state: CompilerState, mut locals: CheckedLocals, kind: Integer, value: CheckedValue, type_name: String, payload: Integer, origin: Integer): CheckedValue
+	result := scalar_mir_value(state, locals, mir_semantic_type_id(state.scalar_mir, type_name), origin)
+	if result < 0
+		return checked_value(type_name, checked_category_value(), origin, value.mutable)
+	end
+	mut first := checked_mir_value(value)
+	if kind == mir_op_nullable_none()
+		first = -1
+	end
+	scalar_mir_instruction(state, locals, kind, result, first, -1, payload, -1, load_integer(state.source_tokens.token_lines, origin))
+	return mir_checked_value(type_name, result, origin, value.mutable)
+end
+
+def mir_nullable_coerce(mut state: CompilerState, mut locals: CheckedLocals, mut value: CheckedValue, expected: String, origin: Integer): CheckedValue
+	value = mir_object_coerce(state, locals, value, expected, origin)
+	if value.type_name == expected || expected == "" || value.type_name == "Never"
+		return value
+	end
+	if literal_type_base(value.type_name) != "" && literal_type_base(expected) == "" && union_parts(expected).size() == 0 && nullable_element(expected) == ""
+		return mir_nullable_coerce(state, locals, mir_literal_widen(state, locals, value, origin), expected, origin)
+	end
+	if expected == "Float" && value.type_name == "Integer"
+		return scalar_mir_convert_float(state, locals, value, origin)
+	end
+	if expected == "Any"
+		return mir_union_operation(state, locals, mir_op_union_inject(), value, value.type_name, expected, origin)
+	end
+	# Inferred collections can retain an exact optional or Nil alternative even
+	# where the reference rejects the same outer annotated argument conversion.
+	alternatives := union_parts(expected)
+	if union_parts(value.type_name).size() == 0 && alternatives.size() > 0
+		mut selected := ""
+		alternatives.each do |alternative|
+			if selected == "" && nullable_assignable(value.type_name, alternative)
+				selected = alternative
+			end
+		end
+		if selected != ""
+			converted := mir_nullable_coerce(state, locals, value, selected, origin)
+			return mir_union_operation(state, locals, mir_op_union_inject(), converted, selected, expected, origin)
+		end
+	end
+	if !object_value_assignable(state, value.type_name, expected)
+		return value
+	end
+	if union_parts(value.type_name).size() > 0
+		return mir_union_coerce(state, locals, value, expected, origin)
+	end
+	if nullable_element(expected) == "" || !object_value_assignable(state, value.type_name, expected)
+		return value
+	end
+	if nullable_element(value.type_name) != "" || value.type_name == "Any"
+		return mir_nullable_widen(state, locals, value, expected, origin)
+	end
+	if value.type_name == "Nil"
+		result := mir_checked_nullable(state, locals, mir_op_nullable_none(), value, expected, 0, origin)
+		return checked_flow(checked_view(value, expected, result.category), "Nil")
+	end
+	present := mir_nullable_coerce(state, locals, value, nullable_element(expected), origin)
+	result := mir_checked_nullable(state, locals, mir_op_nullable_inject(), present, expected, 0, origin)
+	return checked_flow(checked_view(value, expected, result.category), present.type_name)
+end
+
+def mir_nullable_instruction_error(flow: MirFlow, native_module: MirModule, function: MirFunction, block: MirBlock, index: Integer, instruction: MirInstruction): String
+	result := mir_flow_type(flow, instruction.result)
+	first := mir_flow_type(flow, instruction.first)
+	if instruction.second != -1 || instruction.failure != -1
+		return "MIR nullable instruction shape differs"
+	end
+	if instruction.kind == mir_op_nullable_none()
+		if instruction.first != -1 || instruction.payload != 0
+			return "MIR none instruction shape differs"
+		end
+		if mir_nullable_element(native_module, result) == mir_type_none() && mir_semantic_type_name(native_module, result) != "Nil"
+			return "MIR none result type differs"
+		end
+		return ""
+	end
+	if !mir_value_available(flow, block, index, instruction.first)
+		return "MIR nullable operand is unavailable"
+	end
+	if instruction.kind == mir_op_nil_test()
+		if result != mir_type_boolean() || instruction.payload < mir_nil_test_equal() || instruction.payload > mir_nil_test_not_equal()
+			return "MIR nil test result or mode differs"
+		end
+		if mir_nullable_element(native_module, first) == mir_type_none() && mir_semantic_type_name(native_module, first) != "Nil"
+			return "MIR nil test operand type differs"
+		end
+		return ""
+	end
+	if instruction.payload != mir_nil_test_equal()
+		return "MIR nullable payload mode differs"
+	end
+	if instruction.kind == mir_op_nullable_inject()
+		if mir_nullable_element(native_module, result) != first || first == mir_type_none()
+			return "MIR nullable injection payload type differs"
+		end
+	elsif instruction.kind == mir_op_nullable_extract()
+		if mir_nullable_element(native_module, first) != result || result == mir_type_none()
+			return "MIR nullable extraction payload type differs"
+		end
+	else
+		return "MIR nullable operation is invalid"
+	end
+	return ""
+end
+
+# Widening maps the present payload through ordinary typed CFG edges. A dynamic
+# Nil tag is absence, while a boxed typed optional retains its own identity.
+# Absence does not run a conversion or allocate another box.
+def mir_nullable_widen(mut state: CompilerState, mut locals: CheckedLocals, value: CheckedValue, expected: String, origin: Integer): CheckedValue
+	mir_control_prepare(state, locals)
+	if !mir_control_active(locals)
+		return checked_view(value, expected, checked_category_value())
+	end
+	line := load_integer(state.source_tokens.token_lines, origin)
+	mut condition := checked_value("Boolean", checked_category_value(), origin, 0)
+	if value.type_name == "Any"
+		condition = mir_union_operation(state, locals, mir_op_union_test(), value, "Nil", "Boolean", origin)
+	else
+		condition = mir_checked_nullable(state, locals, mir_op_nil_test(), value, "Boolean", mir_nil_test_equal(), origin)
+	end
+	alternate := mir_control_branch(state, locals, condition, line)
+	absent := mir_checked_nullable(state, locals, mir_op_nullable_none(), value, expected, 0, origin)
+	join := mir_control_allocate(locals)
+	none_arguments := mir_control_arguments(locals, locals.count[0])
+	locals.mir_arguments.push(checked_mir_value(absent))
+	mir_control_jump_arguments(state, locals, join, none_arguments, locals.count[0] + 1)
+	mir_control_enter(state, locals, alternate, line)
+	mut payload := checked_view(value, value.type_name, value.category)
+	if nullable_element(value.type_name) != ""
+		payload = mir_checked_nullable(state, locals, mir_op_nullable_extract(), value, nullable_element(value.type_name), 0, origin)
+	end
+	converted := mir_nullable_coerce(state, locals, payload, nullable_element(expected), origin)
+	present := mir_checked_nullable(state, locals, mir_op_nullable_inject(), converted, expected, 0, origin)
+	arguments := mir_control_arguments(locals, locals.count[0])
+	locals.mir_arguments.push(checked_mir_value(present))
+	mir_control_jump_arguments(state, locals, join, arguments, locals.count[0] + 1)
+	mir_control_enter(state, locals, join, line)
+	result := mir_add_value(state, locals, mir_semantic_type_id(state.scalar_mir, expected), line)
+	locals.mir_arguments.push(result)
+	locals.mir_control[mir_control_parameter_count_slot()] += 1
+	return checked_view(value, expected, -result - 1)
+end
+
+# Retagging a union is explicit typed control flow. Conversions such as Integer
+# to Float and optional injection execute only for the selected alternative.
+def mir_union_coerce(mut state: CompilerState, mut locals: CheckedLocals, value: CheckedValue, expected: String, origin: Integer): CheckedValue
+	mir_control_prepare(state, locals)
+	if !mir_control_active(locals)
+		return checked_view(value, expected, checked_category_value())
+	end
+	line := load_integer(state.source_tokens.token_lines, origin)
+	join := mir_control_allocate(locals)
+	alternatives := union_parts(value.type_name)
+	mut index := 0
+	while index < alternatives.size()
+		alternative := alternatives[index]
+		mut next_branch := -1
+		if index + 1 < alternatives.size()
+			condition := mir_union_operation(state, locals, mir_op_union_test(), value, alternative, "Boolean", origin)
+			next_branch = mir_control_branch(state, locals, condition, line)
+		end
+		payload := mir_union_operation(state, locals, mir_op_union_extract(), value, alternative, alternative, origin)
+		converted := mir_nullable_coerce(state, locals, payload, expected, origin)
+		arguments := mir_control_arguments(locals, locals.count[0])
+		locals.mir_arguments.push(checked_mir_value(converted))
+		mir_control_jump_arguments(state, locals, join, arguments, locals.count[0] + 1)
+		if next_branch >= 0
+			mir_control_enter(state, locals, next_branch, line)
+		end
+		index += 1
+	end
+	mir_control_enter(state, locals, join, line)
+	result := mir_add_value(state, locals, mir_semantic_type_id(state.scalar_mir, expected), line)
+	locals.mir_arguments.push(result)
+	locals.mir_control[mir_control_parameter_count_slot()] += 1
+	return checked_view(value, expected, -result - 1)
+end
+
+def mir_literal_scalar(mut state: CompilerState, mut locals: CheckedLocals, value: CheckedValue, origin: Integer): CheckedValue
+	base := literal_scalar_type(value.type_name)
+	if base == ""
+		return value
+	end
+	return mir_nullable_coerce(state, locals, value, base, origin)
+end
+
+# Branch facts authorize a subset; extraction still checks its runtime tag.
+# The narrowed representation retains every overlapping alternative.
+def mir_union_narrow(mut state: CompilerState, mut locals: CheckedLocals, value: CheckedValue, expected: String, origin: Integer): CheckedValue
+	mir_control_prepare(state, locals)
+	if !mir_control_active(locals)
+		return checked_view(value, expected, checked_category_value())
+	end
+	alternatives := union_parts(expected)
+	if alternatives.size() == 0
+		return mir_union_operation(state, locals, mir_op_union_extract(), value, expected, expected, origin)
+	end
+	line := load_integer(state.source_tokens.token_lines, origin)
+	join := mir_control_allocate(locals)
+	mut index := 0
+	while index < alternatives.size()
+		alternative := alternatives[index]
+		mut next_branch := -1
+		if index + 1 < alternatives.size()
+			condition := mir_union_operation(state, locals, mir_op_union_test(), value, alternative, "Boolean", origin)
+			next_branch = mir_control_branch(state, locals, condition, line)
+		end
+		payload := mir_union_operation(state, locals, mir_op_union_extract(), value, alternative, alternative, origin)
+		converted := mir_union_operation(state, locals, mir_op_union_inject(), payload, alternative, expected, origin)
+		arguments := mir_control_arguments(locals, locals.count[0])
+		locals.mir_arguments.push(checked_mir_value(converted))
+		mir_control_jump_arguments(state, locals, join, arguments, locals.count[0] + 1)
+		if next_branch >= 0
+			mir_control_enter(state, locals, next_branch, line)
+		end
+		index += 1
+	end
+	mir_control_enter(state, locals, join, line)
+	result := mir_add_value(state, locals, mir_semantic_type_id(state.scalar_mir, expected), line)
+	locals.mir_arguments.push(result)
+	locals.mir_control[mir_control_parameter_count_slot()] += 1
+	return checked_view(value, expected, -result - 1)
+end

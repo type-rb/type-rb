@@ -1,0 +1,125 @@
+import { decode_recovery_aggregate_snapshot } from aggregate/snapshot
+import { build_recovery_aggregate_executable } from aggregate/toolchain
+import { emit_recovery_aggregate_qbe } from aggregate/qbe
+import { native_create_directory, native_read_text } from support/file_system
+import trb/std/process
+import trb/std/result
+import { describe, expect, test } from trb/std/test
+
+def _recovery_aggregate_snapshot_fixture(): String
+	root := Process.environment("TYPE_RB_NATIVE_ROOT")
+	if root == nil
+		return ""
+	end
+	case native_read_text(root + "/fixtures/recovery-aggregate/valid/aggregate.json")
+	when Result::Ok(source)
+		return source
+	when Result::Err(_error)
+		return ""
+	end
+end
+
+describe("Aggregate recovery snapshot v3") do
+	test("strictly decodes aggregate type and instruction definitions") do
+		case decode_recovery_aggregate_snapshot(_recovery_aggregate_snapshot_fixture())
+		when Result::Ok(native_module)
+			expect(native_module.id).to_equal("example")
+			expect(native_module.types.size()).to_equal(2)
+			expect(native_module.functions.size()).to_equal(1)
+		when Result::Err(diagnostic)
+			puts(diagnostic.path + ": " + diagnostic.message)
+			expect(false).to_be_true()
+		end
+	end
+
+	test("reproduces Aggregate recovery QBE output after strict decoding") do
+		case decode_recovery_aggregate_snapshot(_recovery_aggregate_snapshot_fixture())
+		when Result::Ok(native_module)
+			first := emit_recovery_aggregate_qbe(native_module)
+			second := emit_recovery_aggregate_qbe(native_module)
+			expect(first).to_equal(second)
+		when Result::Err(_diagnostic)
+			expect(false).to_be_true()
+		end
+	end
+
+	test("rejects version and unknown root fields deterministically") do
+		source := _recovery_aggregate_snapshot_fixture()
+		case decode_recovery_aggregate_snapshot(source.replace_all("\"version\": 3", "\"version\": 4"))
+		when Result::Ok(_native_module)
+			expect(false).to_be_true()
+		when Result::Err(diagnostic)
+			expect(diagnostic.code).to_equal("TRBN0003")
+			expect(diagnostic.path).to_equal("/version")
+		end
+		unknown := source.replace_all("\"functions\": [", "\"unexpected\": true, \"functions\": [")
+		case decode_recovery_aggregate_snapshot(unknown)
+		when Result::Ok(_native_module)
+			expect(false).to_be_true()
+		when Result::Err(diagnostic)
+			expect(diagnostic.code).to_equal("TRBN0002")
+			expect(diagnostic.path).to_equal("/unexpected")
+		end
+	end
+
+	test("rejects unsupported operations and Void fields") do
+		source := _recovery_aggregate_snapshot_fixture()
+		unsupported := source.replace_all("\"op\": \"record_construct\"", "\"op\": \"record_build\"")
+		case decode_recovery_aggregate_snapshot(unsupported)
+		when Result::Ok(_native_module)
+			expect(false).to_be_true()
+		when Result::Err(diagnostic)
+			expect(diagnostic.code).to_equal("TRBN0003")
+			expect(diagnostic.message).to_equal("unsupported Aggregate recovery instruction")
+		end
+		void_field := source.replace_all(
+			"{ \"name\": \"x\", \"type\": \"Integer\" }",
+			"{ \"name\": \"x\", \"type\": \"Void\" }",
+		)
+		case decode_recovery_aggregate_snapshot(void_field)
+		when Result::Ok(_native_module)
+			expect(false).to_be_true()
+		when Result::Err(diagnostic)
+			expect(diagnostic.code).to_equal("TRBN0003")
+			expect(diagnostic.message).to_equal("unsupported Aggregate recovery value type")
+		end
+	end
+
+	test("builds and executes the version 3 fixture when QBE is configured") do
+		qbe_command := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe_command == nil
+			expect(true).to_be_true()
+		else
+			case decode_recovery_aggregate_snapshot(_recovery_aggregate_snapshot_fixture())
+			when Result::Ok(native_module)
+				workspace := "/tmp/type-rb-native-recovery-aggregate-snapshot"
+				case native_create_directory(workspace)
+				when Result::Ok(_unit)
+				when Result::Err(_error)
+				end
+				case build_recovery_aggregate_executable(
+						native_module,
+						qbe_command,
+						"/usr/bin/cc",
+						workspace,
+						workspace + "/sample",
+					)
+				when Result::Ok(report)
+					case Process.run(report.output_path, [])
+					when Result::Ok(process)
+						expect(process.success).to_be_true()
+						expect(process.stdout).to_equal("recovery-aggregate-snapshot\n")
+						expect(process.stderr).to_equal("")
+					when Result::Err(_error)
+						expect(false).to_be_true()
+					end
+				when Result::Err(error)
+					puts(error.phase + ": " + error.message + "\n" + error.stderr)
+					expect(false).to_be_true()
+				end
+			when Result::Err(_diagnostic)
+				expect(false).to_be_true()
+			end
+		end
+	end
+end

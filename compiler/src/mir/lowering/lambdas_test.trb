@@ -1,0 +1,119 @@
+import { check } from compiler
+import { captured_storage_execute } from testing/storage
+import { logical_checked_source } from testing/pipeline
+import { load_string } from support/storage
+import { describe, expect, test } from trb/std/test
+
+describe("Authored anonymous MIR bodies") do
+	test("rechecks a diverging Hash initializer without an allocation type") do
+		source := "def early(): Integer\nvalue := {\"key\" => if true; return 7; else; return 8; end}\nreturn value.size()\nend\ndef main()\ncallback := fn(): Integer; return early(); end\nputs(callback())\nend\n"
+		mut state := logical_checked_source(source)
+		valid := check(state)
+		if !valid
+			puts(load_string(state.diagnostics.messages, 0))
+		end
+		expect(valid).to_be_true()
+		if valid
+			captured_storage_execute(state, "7\n")
+		end
+	end
+	test("executes positional and higher order calls") do
+		source := "alias Callback = (Integer) -> Integer\ndef apply(callback: Callback, value: Integer): Integer\nreturn callback(value)\nend\ndef main()\ncallback := fn(value: Integer): Integer; return value + 2; end\nputs(apply(callback, 40))\nend\n"
+		mut state := logical_checked_source(source)
+		valid := check(state)
+		if !valid
+			puts(load_string(state.diagnostics.messages, 0))
+		end
+		expect(valid).to_be_true()
+		if valid
+			captured_storage_execute(state, "42\n")
+		end
+	end
+	test("preserves sparse lexical identities through nested shared captures") do
+		source := "alias Counter = () -> Integer\ndef factory(mut value: Integer): () -> Counter\n_unused := 100\nlabel := \"counter\"\nreturn fn(): Counter\nputs(label)\nmut delta := 2\nreturn fn(): Integer\nvalue += delta\ndelta += 1\nreturn value\nend\nend\nend\ndef main()\nouter := factory(10)\na := outer()\nb := outer()\nother := factory(100)()\nputs(a())\nputs(a())\nputs(b())\nputs(other())\nend\n"
+		mut state := logical_checked_source(source)
+		valid := check(state)
+		if !valid
+			puts(load_string(state.diagnostics.messages, 0))
+		end
+		expect(valid).to_be_true()
+		if valid
+			captured_storage_execute(state, "counter\ncounter\ncounter\n12\n15\n17\n102\n")
+		end
+	end
+	test("allocates distinct iteration bindings and replaces managed captured payloads") do
+		source := "alias Read = () -> String\ndef main()\nmut callbacks: Array<Read> := []\n[1, 2, 3].each do |i|\nmut value := i.to_s()\ncallback := fn(): String\nvalue = value + \"!\"\nreturn value\nend\ncallbacks.push(callback)\nend\nputs(callbacks[0]())\nputs(callbacks[1]())\nputs(callbacks[0]())\nputs(callbacks[2]())\nend\n"
+		mut state := logical_checked_source(source)
+		valid := check(state)
+		if !valid
+			puts(load_string(state.diagnostics.messages, 0))
+		end
+		expect(valid).to_be_true()
+		if valid
+			captured_storage_execute(state, "1!\n2!\n1!!\n3!\n")
+		end
+	end
+	test("materializes concrete generics and defaults discovered inside anonymous bodies") do
+		source := "def identity<T>(value: T): T; return value; end\ndef factory<T>(value: T): () -> T\nreturn fn(): T; return identity<T>(value); end\nend\ndef apply(callback: () -> Integer = factory<Integer>(7)): Integer\nreturn callback()\nend\ndef main()\ninteger := factory<Integer>(42)\ntext := factory<String>(\"text\")\nputs(integer())\nputs(text())\nputs(apply())\nend\n"
+		mut state := logical_checked_source(source)
+		valid := check(state)
+		if !valid
+			puts(load_string(state.diagnostics.messages, 0))
+		end
+		expect(valid).to_be_true()
+		if valid
+			captured_storage_execute(state, "42\ntext\n7\n")
+		end
+	end
+	test("retains immutable nullable proofs and mixed capture representations") do
+		source := "def factory(value: String?, amount: Float, enabled: Boolean): () -> String\nif value != nil\nreturn fn(): String\nif enabled\nputs(amount.to_i())\nreturn value + \"!\"\nend\nreturn value\nend\nend\nreturn fn(): String; return \"empty\"; end\nend\ndef main()\ncallback := factory(\"hello\", 2.5, true)\nputs(callback())\nend\n"
+		mut state := logical_checked_source(source)
+		valid := check(state)
+		if !valid
+			puts(load_string(state.diagnostics.messages, 0))
+		end
+		expect(valid).to_be_true()
+		if valid
+			captured_storage_execute(state, "2\nhello!\n")
+		end
+	end
+	test("invalidates mutable capture proofs across calls and repeated regions") do
+		bodies := [
+			"if value != nil; reset(); puts(value + 1); end",
+			"if value != nil; if true; reset(); end; puts(value + 1); end",
+			"if value != nil; while true; puts(value + 1); reset(); break; end; end",
+		]
+		bodies.each do |body|
+			source := "def main(); mut value: Integer? := 1; reset := fn(); value = nil; end; " + body + "; end\n"
+			mut state := logical_checked_source(source)
+			expect(check(state)).to_be_false()
+			expect(load_string(state.diagnostics.messages, 0)).to_equal("operator + does not support Integer? and Integer")
+		end
+	end
+	test("retains captured nominal Hash and Result values") do
+		source := "import trb/std/result\nalias Read = () -> String\nrecord Box\nvalue: String\nend\ndef factory(): Read\nmut value := Box.new(value: \"one\")\nmut table := {}\ntable[\"value\"] = \"two\"\nanswer: Result<String, String> := Result<String, String>::Ok(\"ok\")\nreturn fn(): String\nvalue = Box.new(value: value.value + \"!\")\ntable[\"value\"] = table[\"value\"] + \"?\"\ncase answer\nwhen Result::Ok(text)\nreturn value.value + table[\"value\"] + text\nwhen Result::Err(error)\nreturn error\nend\nend\nend\ndef main()\ncallback := factory()\nputs(callback())\nputs(callback())\nend\n"
+		mut state := logical_checked_source(source)
+		valid := check(state)
+		if !valid
+			puts(load_string(state.diagnostics.messages, 0))
+		end
+		expect(valid).to_be_true()
+		if valid
+			captured_storage_execute(state, "one!two?ok\none!!two??ok\n")
+		end
+	end
+
+	test("discovers omitted generic defaults used only inside anonymous bodies") do
+		source := "def pick<T>(value: T, count: Integer = 2): T\nputs(count)\nreturn value\nend\ndef main()\ncallback := fn(): Integer\nreturn pick<Integer>(7)\nend\nputs(callback())\nend\n"
+		mut state := logical_checked_source(source)
+		valid := check(state)
+		if !valid
+			puts(load_string(state.diagnostics.messages, 0))
+		end
+		expect(valid).to_be_true()
+		if valid
+			captured_storage_execute(state, "2\n7\n")
+		end
+	end
+
+end

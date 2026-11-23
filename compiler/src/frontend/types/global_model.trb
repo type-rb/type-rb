@@ -1,0 +1,13 @@
+# Parsed globals retain canonical declaration identity and initializer origins.
+# Checked types and executable initialization belong to later semantic stages.
+record GlobalDeclaration
+	constant: Boolean
+	mutable: Boolean
+	name: String
+	source_id: Integer
+	line: Integer
+	origin: Integer
+	start: Integer
+	finish: Integer
+	annotation: String
+end

@@ -1,0 +1,705 @@
+import { cli_lsp_command } from lsp/server
+import { cli_test_command } from test_command
+import { cli_jobs_command } from jobs_command
+import { cli_format_command } from format_command
+import { cli_package_command, cli_package_install, cli_package_save } from packages
+import { project_packages_lock } from project/packages
+import { cli_diagnostic } from diagnostics
+import { CompilerState, has_diagnostic } from state/state
+import { resolve } from frontend/checking/program/resolution
+import { web_client_source } from frontend/checking/program/web_client
+import { web_openapi_document } from frontend/checking/program/web_openapi
+import { load_string } from support/storage
+import trb/std/process
+import { compiler_main as core_main, compiler_file_exists, compiler_read_source, load_configured_project, load_file_root, check, emit_qbe } from compiler
+import { compiler_source_slice } from frontend/syntax/lexer
+import { parse_project_config, project_config_declared_mode } from project/config
+import { path_directory, path_basename, path_join, path_normalize, string_ends_with, string_starts_with, string_without_suffix } from support/path
+import { native_cli_env, native_cli_cwd, native_cli_program, native_cli_tty, native_cli_write, native_cli_mkdir, native_cli_remove, native_cli_temp, native_cli_execute, native_cli_signals, native_cli_package_signals, native_cli_interrupt, native_cli_target, native_cli_emit, native_cli_tempfile, native_cli_rename, native_cli_save, native_cli_chmod } from host
+import { repl_run } from repl/session
+
+# The entry adapters preserve the internal bootstrap protocol without exposing
+# its positional tool arguments as the user-facing command contract.
+def compiler_main(source: String, mode: String, file_mode: Boolean): Integer
+	return core_main(source, mode, file_mode)
+end
+
+def compiler_file_main(source: String, path: String, mode: String, file_mode: Boolean): Integer
+	if !string_ends_with(path, ".trb")
+		mut state := load_configured_project(source, path)
+		return cli_compile_state(state, path, mode, file_mode)
+	end
+	mut state := load_file_root(source, path)
+	return cli_compile_state(state, path, mode, file_mode)
+end
+
+def cli_compile_state(mut state: CompilerState, path: String, mode: String, file_mode: Boolean): Integer
+	if !has_diagnostic(state)
+		resolve(state)
+	end
+	if !has_diagnostic(state)
+		check(state)
+	end
+	if !has_diagnostic(state)
+		if mode == "check"
+			puts("ok")
+			return 0
+		end
+		if mode == "emit-qbe"
+			output := emit_qbe(state)
+			if !has_diagnostic(state)
+				mut index := 0
+				while index < output.lines.used[0]
+					puts(load_string(output.lines, index))
+					index += 1
+				end
+				return 0
+			end
+		else
+			return cli_error("unsupported compiler mode " + mode)
+		end
+	end
+	message := cli_diagnostic(state, path, 0)
+	if file_mode
+		native_cli_write(message + "\n", 2)
+	else
+		puts(message)
+	end
+	return 1
+end
+
+# Record fields are immutable; parser state lives in scalar array cells.
+# Boolean flags use 0/1 within the current Native array subset.
+record CliOptions
+	command: Array<String>
+	source: Array<String>
+	config: Array<String>
+	mode: Array<String>
+	output: Array<String>
+	compile: Array<Integer>
+	stdout: Array<Integer>
+	frozen: Array<Integer>
+	offline: Array<Integer>
+	arguments: Array<String>
+	error: Array<String>
+end
+
+def cli_name(): String
+	return path_basename(native_cli_program())
+end
+
+def cli_error(message: String): Integer
+	native_cli_write(cli_name() + ": " + message + "\n", 2)
+	return 1
+end
+
+def cli_usage(): Integer
+	tool := cli_name()
+	puts("Usage: " + tool + " [COMMAND] [OPTIONS] [SOURCE]")
+	puts("  " + tool + "                         Start a REPL in an interactive terminal")
+	puts("  " + tool + " FILE.trb [-- ARGS...]    Build and run a file")
+	puts("  " + tool + " check [SOURCE]          Check a file or project")
+	puts("  " + tool + " build [SOURCE]          Emit native QBE source")
+	puts("  " + tool + " build --compile [SOURCE] Build an executable")
+	puts("  " + tool + " run [SOURCE] [-- ARGS...] Build and run")
+	puts("  " + tool + " test [PATHS...]         Run project tests selected by file or directory")
+	puts("  " + tool + " jobs start [--once] [--queue NAME] Run a SQLite Jobs worker")
+	puts("  " + tool + " jobs list                        List persisted SQLite jobs")
+	puts("  " + tool + " jobs retry ID                    Reset a failed job for another attempt")
+	puts("  " + tool + " jobs discard ID                  Remove a job unless it is running")
+	puts("  " + tool + " lsp [--config PATH | FILE.trb] Serve the language server on standard I/O")
+	puts("  " + tool + " fmt [--check] [PATHS...] Format source files; use - for stdin")
+	puts("  " + tool + " install [--frozen] [--offline] Resolve TypeRB path and Git packages")
+	puts("  " + tool + " add/remove/update       Manage TypeRB package requirements and locks")
+	puts("  " + tool + " repl                   Start a stateful REPL")
+	puts("  " + tool + " web client             Generate a typed browser client from endpoint contracts")
+	puts("  " + tool + " web openapi            Generate OpenAPI 3.1 from endpoint contracts")
+	puts("Options: --mode trb, --config PATH, --outfile PATH, --stdout")
+	puts("TypeRB Native is under development. Execution and QBE emission currently require mode trb.")
+	return 0
+end
+
+def cli_parse_argument(mut options: CliOptions, arguments: Array<String>, mut index: Array<Integer>)
+	mut argument := arguments[index[0]]
+	mut inline_value := ""
+	mut has_inline := false
+	mut separator := 0
+	while separator < argument.size()
+		if argument[separator] == "="
+			inline_value = compiler_source_slice(argument, separator + 1, argument.size())
+			argument = compiler_source_slice(argument, 0, separator)
+			has_inline = true
+		end
+		separator += 1
+	end
+	if has_inline
+		if !cli_any(cli_any(cli_any(argument == "--mode", argument == "--config"), argument == "--outfile"), cli_any(argument == "--frozen", argument == "--offline"))
+			options.error[0] = "unexpected option value for " + argument
+			return
+		end
+	end
+	index[0] += 1
+	if cli_any(argument == "--frozen", argument == "--offline")
+		mut value := 1
+		if has_inline
+			if cli_any(cli_any(cli_any(inline_value == "false", inline_value == "False"), cli_any(inline_value == "FALSE", inline_value == "f")), cli_any(inline_value == "F", inline_value == "0"))
+				value = 0
+			elsif !cli_any(cli_any(cli_any(inline_value == "true", inline_value == "True"), cli_any(inline_value == "TRUE", inline_value == "t")), cli_any(inline_value == "T", inline_value == "1"))
+				options.error[0] = "invalid Boolean value for " + argument
+				return
+			end
+		end
+		if argument == "--frozen"
+			options.frozen[0] = value
+		else
+			options.offline[0] = value
+		end
+		return
+	end
+	if argument == "--"
+		while index[0] < arguments.size()
+			options.arguments.push(arguments[index[0]])
+			index[0] += 1
+		end
+		return
+	end
+	if argument == "--compile"
+		options.compile[0] = 1
+		return
+	end
+	if argument == "--stdout"
+		options.stdout[0] = 1
+		return
+	end
+	if cli_any(argument == "--help", argument == "-h")
+		options.command[0] = "help"
+		return
+	end
+	if argument == "--version"
+		options.command[0] = "version"
+		return
+	end
+	if cli_any(cli_any(argument == "--mode", argument == "--config"), argument == "--outfile")
+		mut value := inline_value
+		if !has_inline
+			if index[0] >= arguments.size()
+				options.error[0] = "missing value for " + argument
+				return
+			end
+			value = arguments[index[0]]
+			index[0] += 1
+		end
+		if cli_any(value == "", string_starts_with(value, "--"))
+			options.error[0] = "missing value for " + argument
+			return
+		end
+		if argument == "--mode"
+			options.mode[0] = value
+		end
+		if argument == "--config"
+			options.config[0] = value
+		end
+		if argument == "--outfile"
+			options.output[0] = value
+		end
+		return
+	end
+	if string_starts_with(argument, "-")
+		options.error[0] = "unknown option " + argument
+		return
+	end
+	if options.command[0] == ""
+		if argument == "install"
+			options.command[0] = argument
+			return
+		end
+		if cli_any(cli_any(cli_any(argument == "check", argument == "build"), cli_any(argument == "run", argument == "repl")), cli_any(argument == "help", argument == "version"))
+			options.command[0] = argument
+			return
+		end
+		if !string_ends_with(argument, ".trb")
+			if !compiler_file_exists(argument)
+				options.error[0] = "unknown command " + argument
+				return
+			end
+		end
+		options.command[0] = "run"
+	end
+	if options.source[0] == ""
+		options.source[0] = argument
+		return
+	end
+	options.error[0] = "unexpected argument " + argument
+	return
+end
+
+def cli_parse(arguments: Array<String>): CliOptions
+	mut options := CliOptions.new(command: [""], source: [""], config: [""], mode: [""], output: [""], compile: [0], stdout: [0], frozen: [-1], offline: [-1], arguments: [], error: [""])
+	mut index := [0]
+	while index[0] < arguments.size()
+		cli_parse_argument(options, arguments, index)
+		if options.error[0] != ""
+			return options
+		end
+	end
+	return options
+end
+
+def cli_absolute(path: String, root: String): String
+	if string_starts_with(path, "/")
+		return path
+	end
+	if cli_any(path == ".", path == "")
+		return root
+	end
+	return path_join(root, path)
+end
+
+def cli_find_config(start: String): String
+	mut root := start
+	while root != ""
+		candidate := path_join(root, "trbconfig.jsonc")
+		if compiler_file_exists(candidate)
+			return candidate
+		end
+		parent := path_directory(root)
+		if root == parent
+			return ""
+		end
+		root = parent
+	end
+	return ""
+end
+
+def cli_program_path(cwd: String): String
+	program := native_cli_program()
+	if program != path_basename(program)
+		return cli_absolute(program, cwd)
+	end
+	paths := native_cli_env("PATH")
+	mut start := 0
+	mut index := 0
+	while index <= paths.size()
+		mut delimiter := index == paths.size()
+		if !delimiter
+			delimiter = paths[index] == ":"
+		end
+		if delimiter
+			directory := cli_absolute(compiler_source_slice(paths, start, index), cwd)
+			candidate := path_join(directory, program)
+			if compiler_file_exists(candidate)
+				return candidate
+			end
+			start = index + 1
+		end
+		index += 1
+	end
+	return cli_absolute(program, cwd)
+end
+
+def cli_create_directory(path: String): Boolean
+	if compiler_file_exists(path)
+		return true
+	end
+	parent := path_directory(path)
+	if parent == path
+		return false
+	end
+	if !cli_create_directory(parent)
+		return false
+	end
+	return native_cli_mkdir(path) == 0
+end
+
+def native_cli_main(): Integer
+	arguments := Process.argv()
+	if arguments.size() > 0 && arguments[0] == "lsp"
+		return cli_lsp_command(arguments)
+	end
+	if arguments.size() > 0 && arguments[0] == "jobs"
+		return cli_jobs_command(arguments)
+	end
+	if arguments.size() > 0 && arguments[0] == "fmt"
+		return cli_format_command(arguments)
+	end
+	if arguments.size() > 0 && arguments[0] == "test"
+		return cli_test_command(arguments)
+	end
+	if arguments.size() > 0 && (arguments[0] == "add" || arguments[0] == "remove" || arguments[0] == "update")
+		return cli_package_command(arguments)
+	end
+	if arguments.size() > 0 && arguments[0] == "web"
+		return cli_web_contract(arguments)
+	end
+	if arguments.size() > 0
+		if arguments[0] == "--internal-driver"
+			native_cli_target()
+			mut driver := ["compiler"]
+			mut index := 1
+			while index < arguments.size()
+				driver.push(arguments[index])
+				index += 1
+			end
+			return native_cli_execute(driver, 1)
+		end
+	end
+	options := cli_parse(arguments)
+	if options.error[0] != ""
+		return cli_error(options.error[0])
+	end
+	mut command := options.command[0]
+	if command == "help"
+		return cli_usage()
+	end
+	if command == "version"
+		puts(cli_name() + " 0.5.0-alpha.1 (development; default mode: trb)")
+		return 0
+	end
+	if command == ""
+		if native_cli_tty() == 0
+			return cli_usage()
+		end
+		command = "repl"
+	end
+	if command != "run"
+		if options.arguments.size() > 0
+			return cli_error("program arguments are only accepted by run")
+		end
+	end
+	if command != "install"
+		if cli_any(options.frozen[0] >= 0, options.offline[0] >= 0)
+			return cli_error("--frozen and --offline require the install command")
+		end
+	elsif options.source[0] != ""
+		return cli_error("install does not accept package arguments")
+	end
+	if command != "build"
+		if cli_any(cli_any((options.compile[0] != 0), (options.stdout[0] != 0)), options.output[0] != "")
+			return cli_error("build options require the build command")
+		end
+	end
+	if cli_both((options.compile[0] != 0), (options.stdout[0] != 0))
+		return cli_error("--compile cannot be combined with --stdout")
+	end
+	cwd := native_cli_cwd()
+	if cwd == ""
+		return cli_error("cannot resolve the working directory")
+	end
+	mut source := cli_absolute(options.source[0], cwd)
+	if options.source[0] != ""
+		if !compiler_file_exists(source)
+			return cli_error("cannot read source " + source)
+		end
+	end
+	mut config := options.config[0]
+	if config != ""
+		config = cli_absolute(config, cwd)
+		if !compiler_file_exists(config)
+			return cli_error("cannot read configuration " + config)
+		end
+	else
+		mut start := source
+		if string_ends_with(source, ".trb")
+			start = path_directory(source)
+		end
+		config = cli_find_config(start)
+	end
+	mut mode := "trb"
+	mut project_name := string_without_suffix(path_basename(source), ".trb")
+	mut output_root := path_directory(source)
+	mut source_output := "build"
+	if config != ""
+		project := parse_project_config(compiler_read_source(config))
+		if project.error != ""
+			return cli_error(project.error)
+		end
+		if project.mode != ""
+			mode = project.mode
+		end
+		project_name = project.name
+		source_output = project.out_dir
+		output_root = path_directory(config)
+		source = config
+	end
+	if options.mode[0] != ""
+		if cli_both(config != "", command != "repl")
+			return cli_error("--mode cannot override a project configuration")
+		end
+		mode = options.mode[0]
+	end
+	if !project_config_declared_mode(mode)
+		return cli_error("mode must be go, ruby, typescript, or trb")
+	end
+	if command == "install"
+		if config == ""
+			return cli_error("no trbconfig.jsonc found")
+		end
+		project := parse_project_config(compiler_read_source(config))
+		native_cli_package_signals()
+		resolved := cli_package_install(project, config, options.frozen[0] > 0, options.offline[0] > 0, false, [])
+		if native_cli_interrupt(0) != 0
+			return cli_error("package operation interrupted")
+		end
+		packages := resolved.packages
+		if packages.error[0] != ""
+			return cli_error(packages.error[0])
+		end
+		if project.packages.size() == 0
+			puts("no TypeRB packages to install")
+			return 0
+		end
+		lock_path := path_join(path_directory(config), "trb.lock")
+		if resolved.changed
+			error := cli_package_save(lock_path, project_packages_lock(packages))
+			if error != ""
+				return cli_error(error)
+			end
+		end
+		puts("resolved " + packages.packages.size().to_s() + " TypeRB package(s) -> " + lock_path)
+		return 0
+	end
+	# Every declared mode is analyzed; only mode trb has a backend here.
+	if cli_both(mode != "trb", command != "check")
+		return cli_error(command + " is not available for mode " + mode + " in this compiler")
+	end
+	native_cli_signals()
+	profile := native_cli_target()
+	if profile == ""
+		return cli_error("unsupported host platform")
+	end
+	if command == "repl"
+		return repl_run(config)
+	end
+	if !compiler_file_exists(source)
+		return cli_error("cannot read source " + source)
+	end
+	if cli_both(!string_ends_with(source, ".trb"), config == "")
+		return cli_error("no trbconfig.jsonc found; specify a .trb entry file")
+	end
+	if command == "check"
+		return compiler_file_main(compiler_read_source(source), source, "check", true)
+	end
+	if cli_both(command == "build", !(options.compile[0] != 0))
+		if (options.stdout[0] != 0)
+			return compiler_file_main(compiler_read_source(source), source, "emit-qbe", true)
+		end
+		if options.output[0] != ""
+			return cli_error("--outfile requires --compile")
+		end
+		directory := cli_absolute(source_output, output_root)
+		if !cli_create_directory(directory)
+			return cli_error("cannot create output directory")
+		end
+		output := path_join(directory, project_name + ".ssa")
+		temporary := native_cli_tempfile(output)
+		if temporary == ""
+			return cli_error("cannot create intermediate output")
+		end
+		status := native_cli_emit(source, temporary)
+		if status != 0
+			native_cli_remove(temporary, 0)
+			return status
+		end
+		if native_cli_rename(temporary, output) != 0
+			native_cli_remove(temporary, 0)
+			return cli_error("cannot publish output")
+		end
+		return 0
+	end
+	mut qbe := native_cli_env("TRBN_QBE")
+	if qbe == ""
+		qbe = path_join(path_directory(cli_program_path(cwd)), "qbe")
+	end
+	qbe = cli_absolute(qbe, cwd)
+	mut cc := native_cli_env("TRBN_CC")
+	if cc == ""
+		cc = "/usr/bin/cc"
+	end
+	cc = cli_absolute(cc, cwd)
+	if !compiler_file_exists(qbe)
+		return cli_error("QBE is missing; place qbe beside trbn or set TRBN_QBE")
+	end
+	mut temporary := ""
+	mut output := options.output[0]
+	if command == "run"
+		temporary = native_cli_temp()
+		if temporary == ""
+			return cli_error("cannot create a temporary build directory")
+		end
+		output = path_join(temporary, "program")
+	else
+		if output == ""
+			output = "bin/" + project_name
+		end
+		output = cli_absolute(output, output_root)
+	end
+	if !cli_create_directory(path_directory(output))
+		return cli_error("cannot create output directory")
+	end
+	status := native_cli_execute(["compiler", "build", source, "--output", output, "--qbe", qbe, "--cc", cc], 1)
+	mut result := status
+	if cli_both(result == 0, command == "run")
+		mut child_arguments := [output]
+		mut index := 0
+		while index < options.arguments.size()
+			child_arguments.push(options.arguments[index])
+			index += 1
+		end
+		result = native_cli_execute(child_arguments, 0)
+	end
+	if temporary != ""
+		native_cli_remove(output, 0)
+		native_cli_remove(temporary, 1)
+	end
+	return result
+end
+
+def main()
+	return
+end
+
+def cli_any(left: Boolean, right: Boolean): Boolean
+	if left
+		return true
+	end
+	return right
+end
+
+def cli_both(left: Boolean, right: Boolean): Boolean
+	if left
+		return right
+	end
+	return false
+end
+
+# Contract generation is a target-neutral command. It never asks for a host
+# target, QBE, or a linker. The pinned Web integration requires a main entry.
+def cli_web_contract(arguments: Array<String>): Integer
+	if arguments.size() < 2 || (arguments[1] != "openapi" && arguments[1] != "client")
+		return cli_error("expected web client or openapi")
+	end
+	client := arguments[1] == "client"
+	command := "web " + arguments[1]
+	mut name := "ApiClient"
+	mut config := ""
+	mut output := "-"
+	mut title := ""
+	mut version := ""
+	mut index := 2
+	while index < arguments.size()
+		mut option := arguments[index]
+		mut value := ""
+		mut inline := false
+		mut character := 0
+		while character < option.size()
+			if option[character] == "="
+				value = compiler_source_slice(option, character + 1, option.size())
+				option = compiler_source_slice(option, 0, character)
+				inline = true
+			end
+			character += 1
+		end
+		if option != "--config" && option != "--output" && !(!client && (option == "--title" || option == "--api-version")) && !(client && option == "--name")
+			return cli_error(command + ": unexpected argument " + option)
+		end
+		index += 1
+		if !inline
+			if index >= arguments.size()
+				return cli_error("missing value for " + option)
+			end
+			value = arguments[index]
+			index += 1
+		end
+		if option == "--config"
+			config = value
+		elsif option == "--output"
+			output = value
+		elsif option == "--name"
+			name = value
+		elsif option == "--title"
+			title = value.strip()
+		else
+			version = value.strip()
+		end
+	end
+	cwd := native_cli_cwd()
+	if cwd == ""
+		return cli_error("cannot resolve the working directory")
+	end
+	if config == ""
+		config = cli_find_config(cwd)
+	else
+		config = cli_absolute(config, cwd)
+	end
+	if config == "" || !compiler_file_exists(config)
+		return cli_error("cannot read project configuration " + config)
+	end
+	config_source := compiler_read_source(config)
+	project := parse_project_config(config_source)
+	if project.error != ""
+		return cli_error(project.error)
+	end
+	if title == ""
+		title = project.name.strip()
+	end
+	if version == ""
+		version = project.version.strip()
+	end
+	mut state := load_configured_project(config_source, config)
+	if !has_diagnostic(state)
+		resolve(state)
+	end
+	if !has_diagnostic(state)
+		check(state)
+	end
+	mut document := ""
+	if !has_diagnostic(state)
+		if client
+			document = web_client_source(state, name)
+		else
+			document = web_openapi_document(state, title, version)
+		end
+	end
+	if has_diagnostic(state)
+		native_cli_write(cli_diagnostic(state, config, 0) + "\n", 2)
+		return 1
+	end
+	mut artifact := "OpenAPI"
+	if client
+		artifact = "browser client"
+	end
+	if document == ""
+		return cli_error("cannot encode " + artifact + " document")
+	end
+	if output.strip() == "" || output == "-"
+		if native_cli_write(document, 1) < 0
+			return cli_error("cannot write " + artifact + " document")
+		end
+		return 0
+	end
+	if string_starts_with(output, "/")
+		return cli_error(command + " --output: path must be relative to the project root")
+	end
+	clean := path_normalize(output)
+	if clean == ".." || string_starts_with(clean, "../")
+		return cli_error(command + " --output: path cannot escape the project root")
+	end
+	path := path_normalize(path_join(path_directory(config), clean))
+	if !cli_create_directory(path_directory(path))
+		return cli_error("cannot create output directory")
+	end
+	temporary := native_cli_tempfile(path)
+	if temporary == ""
+		return cli_error("cannot create temporary " + artifact + " output")
+	end
+	if native_cli_save(temporary, document, 0) != 0 || native_cli_chmod(temporary, 420) != 0
+		native_cli_remove(temporary, 0)
+		return cli_error("cannot write " + artifact + " output")
+	end
+	if native_cli_rename(temporary, path) != 0
+		native_cli_remove(temporary, 0)
+		return cli_error("cannot publish " + artifact + " output")
+	end
+	puts(path)
+	return 0
+end

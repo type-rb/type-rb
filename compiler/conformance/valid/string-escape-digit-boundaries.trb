@@ -1,0 +1,13 @@
+def probe()
+	puts("\x414")
+	puts("\u00411")
+	puts("\1010")
+	puts("\x22quoted\x22")
+	puts("\x5c#{"after"}")
+	puts("\u0023{missing}")
+
+end
+
+def main()
+	probe()
+end

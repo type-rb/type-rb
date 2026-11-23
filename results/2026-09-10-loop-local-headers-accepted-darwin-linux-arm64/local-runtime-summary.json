@@ -1,0 +1,114 @@
+{
+  "pass_controls": true,
+  "rows": 117,
+  "warmups": 18,
+  "retained": 99,
+  "elapsed": 246.87241120799445,
+  "summary": [
+    {
+      "case": "n-body",
+      "medians": {
+        "control": {
+          "wall": 3.67752725,
+          "cpu": 3.649568,
+          "rss": 1409024
+        },
+        "candidate": {
+          "wall": 3.677012125,
+          "cpu": 3.652424,
+          "rss": 1409024
+        },
+        "cumulative": {
+          "wall": 5.04107425,
+          "cpu": 5.006120999999999,
+          "rss": 1409024
+        }
+      },
+      "ratios": {
+        "control": {
+          "wall": 0.9998599262588742,
+          "cpu": 1.0007825583740322,
+          "rss": 1.0
+        },
+        "cumulative": {
+          "wall": 0.7294104277476174,
+          "cpu": 0.7295916339217531,
+          "rss": 1.0
+        }
+      },
+      "control_pass": true,
+      "catastrophic": [],
+      "useful_gain": false
+    },
+    {
+      "case": "fannkuch-redux",
+      "medians": {
+        "control": {
+          "wall": 0.349091125,
+          "cpu": 0.33604,
+          "rss": 1409024
+        },
+        "candidate": {
+          "wall": 0.308360042,
+          "cpu": 0.296077,
+          "rss": 1392640
+        },
+        "cumulative": {
+          "wall": 0.34917,
+          "cpu": 0.336531,
+          "rss": 1409024
+        }
+      },
+      "ratios": {
+        "control": {
+          "wall": 0.8833224906534075,
+          "cpu": 0.8810766575407689,
+          "rss": 0.9883720930232558
+        },
+        "cumulative": {
+          "wall": 0.8831229544348026,
+          "cpu": 0.8797911633697935,
+          "rss": 0.9883720930232558
+        }
+      },
+      "control_pass": true,
+      "catastrophic": [],
+      "useful_gain": true
+    },
+    {
+      "case": "spectral-norm",
+      "medians": {
+        "control": {
+          "wall": 1.620519,
+          "cpu": 1.602129,
+          "rss": 2441216
+        },
+        "candidate": {
+          "wall": 1.620372042,
+          "cpu": 1.602422,
+          "rss": 2441216
+        },
+        "cumulative": {
+          "wall": 2.21964,
+          "cpu": 2.197646,
+          "rss": 2441216
+        }
+      },
+      "ratios": {
+        "control": {
+          "wall": 0.9999093142382163,
+          "cpu": 1.0001828816531004,
+          "rss": 1.0
+        },
+        "cumulative": {
+          "wall": 0.7300156971400767,
+          "cpu": 0.7291538309627664,
+          "rss": 1.0
+        }
+      },
+      "control_pass": true,
+      "catastrophic": [],
+      "useful_gain": false
+    }
+  ]
+}

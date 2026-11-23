@@ -1,0 +1,16 @@
+newtype Label = String do
+	def repeat<T>(item: T, count: Integer): T
+		if count == 0
+			return item
+		end
+		return self.repeat<T>(item, count - 1)
+	end
+end
+def probe_newtype()
+	puts(Label.new("held").repeat<String>("done", 4))
+	puts(Label.new("other").repeat<Integer>(7, 3))
+end
+
+def main()
+	probe_newtype()
+end

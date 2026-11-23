@@ -1,0 +1,78 @@
+import { RawEnumValue } from frontend/types/enum_model
+import { check, emit_qbe } from compiler
+import { compiler_test_instruction_with_cell } from testing/compiler
+import { control_test_output } from testing/mir/control
+import { managed_mir_test_fixture } from testing/mir/managed
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { logical_checked_source } from testing/pipeline
+import { MirRootPlan } from mir/model/module
+import { verify_mir } from mir/verify/module
+import { CompilerState } from state/state
+import { describe, expect, test } from trb/std/test
+
+def raw_enum_mir_test_state(): CompilerState
+	mut state := logical_checked_source("enum Status\nReady = \"ready\"\nDone = \"done\"\ndef label(): String\nreturn self.raw_value()\nend\nend\ndef main()\ncase Status.from_raw(\"missing\" + \" value\")\nwhen Result::Ok(value)\nputs(value.label())\nwhen Result::Err(error)\nputs(error.message)\nend\nend\n")
+	expect(check(state)).to_be_true()
+	expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	return state
+end
+
+describe("Raw enum conversion MIR") do
+	test("retains implicit receivers and ordinary methods named like collection transforms") do
+		managed_mir_test_fixture("enum-method-captures", 1)
+	end
+
+	test("preserves both conversions methods and error lifetimes after source erasure") do
+		managed_mir_test_fixture("raw-enum-conversions", 1)
+	end
+
+	test("emits solely from MIR after raw declarations and method projections are erased") do
+		mut state := raw_enum_mir_test_state()
+		before := control_test_output(emit_qbe(state))
+		intrinsic_mir_erase(state)
+		mut index := 0
+		while index < state.nominal.raw_enum_values.size()
+			state.nominal.raw_enum_values[index] = RawEnumValue.new(variant: -1, type_name: "Invalid", text: "unavailable", origin: -1)
+			index += 1
+		end
+		state.nominal.raw_enum_results.used[0] = 0
+		state.nominal.function_receivers.used[0] = 0
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	end
+
+	test("rejects forged conversion payload nominal and union identities") do
+		mut state := raw_enum_mir_test_state()
+		mut changed := 0
+		state.scalar_mir.instructions.each.with_index do |instruction, index|
+			if instruction.kind == 25 || instruction.kind == 37 || instruction.kind == 38 || instruction.kind == 52
+				state.scalar_mir.instructions[index] = compiler_test_instruction_with_cell(instruction, 4, 999999)
+				expect(verify_mir(state.scalar_mir, true).empty?()).to_be_false()
+				state.scalar_mir.instructions[index] = instruction
+				changed += 1
+			end
+		end
+		expect(changed > 4).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	end
+
+	test("requires error payloads to remain rooted across conversion allocations") do
+		mut state := raw_enum_mir_test_state()
+		mut changed := false
+		state.scalar_mir.root_plans.each.with_index do |plan, slot|
+			mut point := 0
+			while point < plan.instructions.size()
+				instruction := state.scalar_mir.instructions[plan.instructions[point]]
+				if instruction.kind == 25 && plan.roots[point].size() > 0 && !changed
+					mut roots := plan.roots
+					roots[point] = []
+					state.scalar_mir.root_plans[slot] = MirRootPlan.new(function_id: plan.function_id, instructions: plan.instructions, roots: roots, capacity: plan.capacity)
+					changed = true
+				end
+				point += 1
+			end
+		end
+		expect(changed).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR live root plan differs")
+	end
+end

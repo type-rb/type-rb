@@ -1,0 +1,21 @@
+def show_points(value: String)
+	points := value.codepoints()
+	puts(points.size())
+	points.each { |point| puts(point) }
+end
+
+def probe()
+	show_points("A日本😀")
+	show_points("é é")
+	show_points("👩‍💻")
+	puts("A日本😀".reverse())
+	puts("👩‍💻".reverse())
+	chars := "A日本😀".chars()
+	puts(chars.size())
+	chars.each { |value| puts(value) }
+
+end
+
+def main()
+	probe()
+end

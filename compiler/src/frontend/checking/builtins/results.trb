@@ -1,0 +1,84 @@
+import { standard_source_errors, standard_source_result } from state/standard_source_kinds
+import { result_method_float, result_method_index, result_method_integer, result_method_key, result_method_none, result_method_slice } from frontend/types/method_kinds
+import { token_kind_identifier } from state/token_kinds
+import { find_generic_in_module, find_record_in_module } from frontend/resolution/declaration_lookup
+import { find_enum_type, find_enum_variant } from frontend/types/enum_types
+import { hash_key_type, hash_value_type } from frontend/types/hash_types
+import { load_standard_source } from project/standard_library
+import { array_element_type, instantiate_generic_nominal, record_type } from frontend/resolution/type_resolution
+import { CompilerState, find_module } from state/state
+import { load_integer, load_string } from support/storage
+
+def builtin_result_method(receiver: String, method: String): Integer
+	if receiver == "String"
+		if method == "try_to_i"
+			return result_method_integer()
+		end
+		if method == "try_to_f"
+			return result_method_float()
+		end
+	end
+	if method == "try_fetch"
+		if receiver == "String" || array_element_type(receiver) != ""
+			return result_method_index()
+		end
+		if hash_key_type(receiver) != ""
+			return result_method_key()
+		end
+	end
+	if method == "try_slice" && (receiver == "String" || array_element_type(receiver) != "")
+		return result_method_slice()
+	end
+	return result_method_none()
+end
+
+# Discover implicit declaration dependencies before ordinary type resolution.
+# String contents never trigger an extra body-analysis pass in the compiler itself.
+def builtin_result_source(state: CompilerState): Boolean
+	mut index := 0
+	while index < state.source_tokens.token_count[0]
+		if load_integer(state.source_tokens.token_kinds, index) == token_kind_identifier()
+			name := load_string(state.source_tokens.token_texts, index)
+			if name == "try_fetch" || name == "try_slice" || name == "try_to_i" || name == "try_to_f"
+				return true
+			end
+		end
+		index += 1
+	end
+	return false
+end
+
+def builtin_result_type(mut state: CompilerState, success: String, error: String): String
+	result_source := load_standard_source(state, standard_source_result(), 1)
+	mut error_source := -1
+	if error == "DbError"
+		error_source = find_module(state, "trb/orm/index")
+	else
+		error_source = load_standard_source(state, standard_source_errors(), 1)
+	end
+	definition := find_generic_in_module(state, result_source, "Result")
+	error_type := record_type(find_record_in_module(state, error_source, error))
+	return instantiate_generic_nominal(state, definition, [success, error_type])
+end
+
+def builtin_lookup_result(mut state: CompilerState, receiver: String, kind: Integer): String
+	if kind == result_method_slice()
+		return builtin_result_type(state, receiver, "SliceRangeError")
+	end
+	if kind == result_method_key()
+		return builtin_result_type(state, hash_value_type(receiver), "KeyLookupError")
+	end
+	mut success := "String"
+	if receiver != "String"
+		success = array_element_type(receiver)
+	end
+	return builtin_result_type(state, success, "IndexLookupError")
+end
+
+def builtin_result_variant(state: CompilerState, type_name: String, ok: Boolean): Integer
+	mut name := "Err"
+	if ok
+		name = "Ok"
+	end
+	return find_enum_variant(state, find_enum_type(state, type_name), name)
+end

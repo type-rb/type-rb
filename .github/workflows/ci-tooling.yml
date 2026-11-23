@@ -1,0 +1,82 @@
+name: CI tooling controls
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - name: Verify bootstrap seed tooling
+        run: |
+          python3 tools/ci-linux-prerequisites-test.py
+          python3 tools/build-reference-test.py
+          python3 tools/official-sources-test.py
+          python3 tools/compiler_sources_test.py
+          python3 tools/bootstrap_snapshot_size_test.py
+          python3 tools/compiler_layout_test.py
+          python3 tools/migrate_compiler_layout_test.py
+          python3 tools/compiler_layout.py
+          python3 tools/source-names-check.py
+          python3 -m unittest tools.source_names_test
+          /bin/sh -n tools/bootstrap-seed.sh
+          /bin/sh -n tools/bootstrap-seed-arguments-test.sh
+          /bin/sh -n tools/bootstrap-seed-manifest.sh
+          /bin/sh -n tools/bootstrap-seed-manifest-test.sh
+          /bin/sh -n tools/bootstrap-seed-download.sh
+          /bin/sh -n tools/bootstrap-seed-refresh.sh
+          python3 tools/bootstrap-seed-release-test.py
+          /bin/sh -n tools/external-qbe-build.sh
+          /bin/sh -n tools/linux-amd64-targets.sh
+          /bin/sh -n tools/benchmarksgame-context-verify.sh
+          /bin/sh -n tools/benchmarksgame-formal/cache-control-linux.sh
+          /bin/sh -n tools/benchmarksgame-formal/delegate-cpuset-linux.sh
+          /bin/sh -n tools/benchmarksgame-formal/prepare-runtime.sh
+          /bin/sh -n tools/benchmarksgame-formal/runtime-controller.sh
+          /bin/sh -n tools/benchmarksgame-formal/runtime-controller-test.sh
+          /bin/sh -n tools/compiler-project.sh
+          /bin/sh -n tools/compiler-project-test.sh
+          /bin/sh -n tools/benchmarksgame-build-formal/build-controller.sh
+          /bin/sh -n tools/benchmarksgame-build-formal/build-controller-test.sh
+          awk -f tools/benchmarksgame-build-formal/trace-executables.awk /dev/null
+          /bin/sh -n tools/runtime-memory-soak/analyze-rss-test.sh
+          /bin/sh -n tools/runtime-memory-soak/runtime-memory-soak.sh
+          /bin/sh -n tools/runtime-worker-soak/analyze-gc-trace-test.sh
+          /bin/sh -n tools/runtime-worker-soak/analyze-process-series-test.sh
+          /bin/sh -n tools/runtime-worker-soak/runtime-worker-soak.sh
+          /bin/sh -n tools/benchmarksgame-verify.sh
+          /bin/sh tools/bootstrap-seed-manifest-test.sh
+          /bin/sh tools/bootstrap-seed-arguments-test.sh
+          python3 tools/measure-command-test.py
+          /bin/sh tools/benchmarksgame-formal/runtime-controller-test.sh
+          /bin/sh tools/compiler-cost-test.sh
+          /bin/sh tools/compiler-project-test.sh
+          /bin/sh tools/benchmarksgame-build-formal/build-controller-test.sh
+          /bin/sh tools/runtime-memory-soak/analyze-rss-test.sh
+          /bin/sh tools/runtime-worker-soak/analyze-gc-trace-test.sh
+          /bin/sh tools/runtime-worker-soak/analyze-process-series-test.sh
+
+      - name: Verify suite controller and workspace ownership on macOS
+        run: |
+          node --test tools/ci-run-suites-test.mjs tools/recovery-workspace-test.mjs
+          python3 tools/complete_compiler_units_test.py
+
+      - name: Verify recovery stage evidence
+        run: python3 -m unittest tools/recovery_stage_test.py
+
+      - name: Verify release scenario evidence controls
+        run: python3 tools/release-scenarios-test.py
+
+      - name: Verify daily measurement state and failure handling
+        run: python3 -m unittest discover -s tools/daily-performance -p 'test_*.py'
+
+      - name: Verify cumulative qualification source selection and assessment
+        run: python3 -m unittest discover -s tools/cumulative-performance -p 'test_*.py'
+
+      - name: Verify representative measurement failure handling
+        run: python3 -m unittest discover -s tools/representative-performance -p 'test_*.py'

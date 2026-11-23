@@ -1,0 +1,13 @@
+import { suffix } from shared
+
+def normalize(value: String): String
+	return value
+end
+
+def prefix(): String
+	return "file-root"
+end
+
+def label(): String
+	return normalize(prefix() + suffix())
+end

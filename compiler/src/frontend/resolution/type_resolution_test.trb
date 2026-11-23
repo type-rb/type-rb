@@ -1,0 +1,109 @@
+import { import_path_value } from frontend/resolution/import_resolution
+import { array_element_type, array_type, builtin_type_exists, common_array_element_type, find_field, find_record_type, generic_instance_for_type, record_type, resolve_type_name, type_display } from frontend/resolution/type_resolution
+import { resolve_declarations } from frontend/checking/program/resolution
+import { lex } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { compiler_new, has_diagnostic } from state/state
+import { load_string } from support/storage
+import { describe, expect, test } from trb/std/test
+
+describe("Declaration and type resolution") do
+	test("retains nested nominal arguments across sibling resolution and canonical reuse") do
+		source := "record Box<T>\nvalue: T\nend\nrecord Pair<A, B>\nleft: A\nright: B\nend\nalias Wrapped<T> = Box<T>\ndef main()\nend\n"
+		mut state := compiler_new(1024)
+		expect(lex(state, source)).to_be_true()
+		expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve_declarations(state)).to_be_true()
+		first := resolve_type_name(state, 0, "Pair<Wrapped<String>,Array<Integer>>", false)
+		expect(type_display(state, first)).to_equal("Pair<Box<String>, Array<Integer>>")
+		first_instance := generic_instance_for_type(state, first)
+		first_arguments := state.type_resolution.generic_instances[first_instance].arguments
+		second := resolve_type_name(state, 0, "Pair<Box<Integer>,Array<String>>", false)
+		expect(first == second).to_be_false()
+		expect(type_display(state, second)).to_equal("Pair<Box<Integer>, Array<String>>")
+		count := state.type_resolution.generic_instances.size()
+		expect(resolve_type_name(state, 0, "Pair<Box<String>,Array<Integer>>", false)).to_equal(first)
+		expect(state.type_resolution.generic_instances.size()).to_equal(count)
+		expect(type_display(state, first_arguments[0])).to_equal("Box<String>")
+		expect(first_arguments[1]).to_equal("Array<Integer>")
+		first_record := find_record_type(state, first)
+		expect(load_string(state.declarations.field_types, find_field(state, first_record, "left"))).to_equal(first_arguments[0])
+		expect(load_string(state.declarations.field_types, find_field(state, first_record, "right"))).to_equal(first_arguments[1])
+		expect(has_diagnostic(state)).to_be_false()
+	end
+
+	test("rejects invalid nominal arguments without publishing an instance") do
+		source := "record Box<T>\nvalue: T\nend\ndef main()\nend\n"
+		mut state := compiler_new(1024)
+		expect(lex(state, source)).to_be_true()
+		expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve_declarations(state)).to_be_true()
+		["Box", "Box<>", "Box<Void>", "Box<Missing>", "Box<Integer,String>", "Box<Array<Missing>>"].each do |name|
+			expect(resolve_type_name(state, 0, name, false)).to_equal("")
+		end
+		expect(state.type_resolution.generic_instances.size()).to_equal(0)
+		valid := resolve_type_name(state, 0, "Box<Array<Integer>>", false)
+		expect(type_display(state, valid)).to_equal("Box<Array<Integer>>")
+		expect(resolve_type_name(state, 0, "Box<Array<Integer>>", false)).to_equal(valid)
+		expect(state.type_resolution.generic_instances.size()).to_equal(1)
+		expect(has_diagnostic(state)).to_be_false()
+	end
+
+	test("preserves the first failing nested argument and restores resolution scope") do
+		source := "record First<T>\nvalue: MissingFirst\nend\nrecord Second<T>\nvalue: MissingSecond\nend\nrecord Pair<A, B>\nleft: A\nright: B\nend\n"
+		applications := ["Pair<First<Integer>,Second<String>>", "Pair<Second<String>,First<Integer>>"]
+		messages := ["invalid instantiated field type MissingFirst", "invalid instantiated field type MissingSecond"]
+		mut index := 0
+		applications.each do |application|
+			mut state := compiler_new(1024)
+			expect(lex(state, source)).to_be_true()
+			expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+			# Exercise instantiation before template validation to observe argument order.
+			resolved := resolve_type_name(state, 0, application, false)
+			expect(resolved != "").to_be_true()
+			expect(has_diagnostic(state)).to_be_true()
+			expect(load_string(state.diagnostics.messages, 0)).to_equal(messages[index])
+			expect(state.diagnostics.codes.used[0]).to_equal(1)
+			expect(state.type_resolution.generic_depth[0]).to_equal(0)
+			expect(state.callables.checked[0].generic_binding[0]).to_equal(0)
+			expect(state.global_bindings.declaration_owner[0]).to_equal("")
+			index += 1
+		end
+	end
+	test("retains exact Array elements and canonical common types") do
+		expect(array_element_type("Array<Float>")).to_equal("Float")
+		expect(array_element_type("Array<Array<Integer>>")).to_equal("Array<Integer>")
+		expect(array_type("Boolean")).to_equal("Array<Boolean>")
+		expect(array_type("Integer")).to_equal("Array<Integer>")
+		expect(array_element_type("Array<Array<Boolean>>")).to_equal("Array<Boolean>")
+		expect(array_element_type("Array<Array<Array<Boolean>>>")).to_equal("Array<Array<Boolean>>")
+		expect(array_element_type("Array<Array<Array<Array<Boolean>>>>")).to_equal("Array<Array<Array<Boolean>>>")
+		expect(common_array_element_type("Boolean", "Integer")).to_equal("$Union<Boolean,Integer>")
+		expect(common_array_element_type("Integer", "Boolean")).to_equal("$Union<Boolean,Integer>")
+		expect(common_array_element_type("Integer", "Float")).to_equal("Float")
+		expect(common_array_element_type("Float", "Integer")).to_equal("Float")
+		expect(common_array_element_type("String", "Integer")).to_equal("$Union<Integer,String>")
+		expect(builtin_type_exists("Void", false)).to_be_false()
+		expect(builtin_type_exists("Void", true)).to_be_true()
+	end
+
+	test("preserves declaration spelling and canonical import paths without the loader") do
+		expect(record_type(17)).to_equal("Record#17")
+		expect(import_path_value("shared/item.trb")).to_equal("shared/item")
+		expect(import_path_value("/shared/item.trb")).to_equal("")
+		expect(import_path_value("../shared/item.trb")).to_equal("")
+	end
+	test("requires canonical record identity through recursive Array types") do
+		expect(array_type("Record#0")).to_equal("Array<Record#0>")
+		expect(array_element_type("Array<Array<Array<Record#1234>>>")).to_equal("Array<Array<Record#1234>>")
+		expect(array_element_type("Array<Array<Array<Array<Record#0>>>>")).to_equal("Array<Array<Array<Record#0>>>")
+		expect(array_element_type("Array<Record#>")).to_equal("")
+		expect(array_element_type("Array<Record#01>")).to_equal("")
+		expect(array_element_type("Array<Record#-1>")).to_equal("")
+		expect(array_element_type("Array<Record#0junk>")).to_equal("")
+		expect(array_element_type("Array<Array<Void>>")).to_equal("")
+		expect(array_element_type("Array<Entry>")).to_equal("")
+		expect(array_element_type("Array<Record#0>>")).to_equal("")
+	end
+
+end

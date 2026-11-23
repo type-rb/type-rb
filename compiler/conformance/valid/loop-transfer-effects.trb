@@ -1,0 +1,53 @@
+def leave(selected: Boolean): Integer
+	while true
+		if selected
+			return 4
+		else
+			break
+		end
+		puts("unreachable")
+	end
+	return 5
+end
+
+def condition(mut calls: Array<Integer>): Boolean
+	calls[0] += 1
+	return calls[0] < 5
+end
+
+def main()
+	mut calls := [0]
+	mut total := 0
+	while condition(calls)
+		if calls[0] == 2
+			next
+		end
+		total += calls[0]
+	end
+	puts(calls[0])
+	puts(total)
+	mut rounds := 0
+	while true
+		rounds += 1
+		if rounds < 3
+			next
+		else
+			break
+		end
+		puts("unreachable")
+	end
+	puts(rounds)
+	puts(leave(true))
+	puts(leave(false))
+	mut values := [10]
+	mut cursor := 0
+	while cursor < values.size()
+		if cursor == 0
+			values.push(20)
+			cursor += 1
+			next
+		end
+		puts(values[cursor])
+		break
+	end
+end

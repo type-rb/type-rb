@@ -1,0 +1,87 @@
+import { generic_application, generic_arguments, generic_base } from frontend/types/generic_arguments
+
+# Anonymous parameters never occupy the surrounding declaration's parameter
+# table. Parsed regions are immutable and may be shared by generic instances.
+record LambdaParameter
+	name: String
+	type_name: String
+	origin: Integer
+	mutable: Integer
+end
+
+# Statement-owned trailing bodies are not first-class function syntax. The
+# checker grants resource parameters only after resolving the called owner.
+record CallBlockSyntax
+	origin: Integer
+	call_start: Integer
+	parameters: Array<LambdaParameter>
+	body_start: Integer
+	body_finish: Integer
+	finish: Integer
+end
+
+record LambdaSyntax
+	origin: Integer
+	parameters: Array<LambdaParameter>
+	result_type: String
+	body_start: Integer
+	body_finish: Integer
+	finish: Integer
+end
+
+# A capture names a declaration in the immediate lexical parent, never its
+# reusable lookup slot. Mutable bindings will require shared storage lowering.
+record LambdaCapture
+	identity: Integer
+	child_identity: Integer
+	name: String
+	type_name: String
+	flow_type: String
+	mutable: Integer
+end
+
+record CheckedLambda
+	origin: Integer
+	type_name: String
+	body: Integer
+	inherited_count: Integer
+	function: Array<Integer>
+	captures: Array<LambdaCapture>
+end
+
+# A synchronous acquisition body has a known ordinary function. It has no
+# callable type or closure value and cannot escape its owning MIR operation.
+record CheckedFileBody
+	origin: Integer
+	resource_type: String
+	result_type: String
+	yield_type: String
+	body: Integer
+	inherited_count: Integer
+	function: Array<Integer>
+	captures: Array<LambdaCapture>
+end
+
+# This spelling is internal and cannot be authored as an identifier. Result is
+# first so zero-argument and higher-order signatures use the same structure.
+def callable_type(parameters: Array<String>, result: String): String
+	mut parts := [result]
+	parameters.each do |parameter|
+		parts.push(parameter)
+	end
+	return generic_application("$Callable", parts)
+end
+
+def callable_parts(name: String): Array<String>
+	if name.size() == 0 || name[0] != "$"
+		return []
+	end
+	# Optional callables are containers; only their narrowed payload is callable.
+	if name[name.size() - 1] != ">"
+		return []
+	end
+	if generic_base(name) == "$Callable"
+		return generic_arguments(name)
+	end
+	return []
+end

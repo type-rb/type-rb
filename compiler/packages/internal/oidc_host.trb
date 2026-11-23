@@ -1,0 +1,36 @@
+module OidcHost
+end
+
+# Only the loader-owned OIDC provider may import this foreign boundary.
+# Fetch copies body/error into the three preallocated Bytes slots after all
+# foreign callbacks finish; it closes every handle before managed allocation.
+def fetch(uri: String, proxy: String, timeout: Integer, mut output: Array<Bytes>): Integer
+end
+
+# Inputs are already base64-decoded and key constraints are checked by TypeRB.
+# This boundary owns all EVP/RSA contexts and releases them before returning.
+def verify_rs256(modulus: Bytes, exponent: Bytes, message: Bytes, signature: Bytes): Boolean
+end
+
+# Compatibility with the reference's machine int64 conversion of JSON dates.
+# This does not expose machine integers to authored TypeRB code.
+def timestamp(value: Float): Float
+end
+
+# Mechanical URL/IP parsing; redirect and proxy selection stay in TypeRB.
+def describe_uri(uri: String, mut parts: Array<String>): Boolean
+end
+
+def monotonic_millis(): Float
+end
+
+def ip_address(address: String, mut bytes: Array<Integer>): Integer
+end
+
+def environment(name: String): String
+end
+
+# Strict Unicode 17 UTS46 conversion. Empty output means an invalid DNS name;
+# URL authority, root-dot and numeric-host policy remain in TypeRB.
+def ascii_hostname(name: String): String
+end

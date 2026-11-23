@@ -1,0 +1,288 @@
+import { concurrent_mutation } from frontend/checking/body/concurrency
+import { checked_category_value } from frontend/types/value_categories
+import { mir_control_parameter_count_slot, nullable_state_head_slot } from state/local_slots
+import { binary_add_assign } from frontend/types/operators
+import { mir_op_object_store, mir_op_union_extract, mir_op_union_test } from mir/model/instructions
+import { literal_type_base } from frontend/types/literal_types
+import { literal_branch_types } from frontend/checking/nominal/literal_cases
+import { union_parts, union_type } from frontend/types/union_types
+import { mir_union_operation } from mir/lowering/unions
+import { mir_nullable_coerce } from mir/lowering/nullable
+import { nullable_fact, nullable_lookup } from frontend/checking/nominal/nullable_flow
+import { mir_control_active, mir_control_allocate, mir_control_arguments, mir_control_branch, mir_control_enter, mir_control_jump, mir_control_jump_arguments, mir_control_prepare } from mir/build/control
+import { mir_checked_record_field } from mir/lowering/records
+import { mir_checked_object_field } from frontend/checking/nominal/object_fields
+import { find_object_type, object_field_index } from frontend/types/object_types
+import { CheckedValue, checked_bound_value, checked_mir_value, checked_view, mir_add_value, scalar_mir_disable, scalar_mir_instruction } from frontend/checking/body/values
+import { MirUnionTarget } from mir/model/module
+import { mir_semantic_type_id } from mir/model/types
+import { find_field, find_record_type } from frontend/resolution/type_resolution
+import { CompilerState, diagnostic } from state/state
+import { ControlSyntax } from state/source_state
+import { CheckedLocals, local_find } from state/local_state
+import { load_integer, load_string } from support/storage
+import { binary_operator_id } from frontend/syntax/syntax_forms
+import { token_is } from frontend/syntax/syntax_tokens
+
+# A common member must use the same storage model in every alternative. Class
+# and record layouts stay distinct even when their visible field names match.
+def union_member_storage(state: CompilerState, name: String): Integer
+	if find_record_type(state, name) >= 0
+		return 1
+	end
+	owner := find_object_type(state, name)
+	if owner >= 0 && !state.nominal.objects[state.nominal.object_instances[owner].definition].interface_type
+		return 2
+	end
+	return 0
+end
+
+def union_member_field_type(state: CompilerState, name: String, member: String, readonly: Boolean): String
+	record_owner := find_record_type(state, name)
+	if record_owner >= 0
+		field := find_field(state, record_owner, member)
+		if field >= 0
+			return load_string(state.declarations.field_types, field)
+		end
+	else
+		owner := find_object_type(state, name)
+		if owner >= 0 && member.size() > 0 && member[0] != "_"
+			field := object_field_index(state, owner, "@" + member)
+			if field >= 0
+				row := state.nominal.object_instances[owner].fields[field]
+				if !readonly || row.readonly
+					return row.type_name
+				end
+			end
+		end
+	end
+	return ""
+end
+
+def union_member_type(state: CompilerState, name: String, member: String): String
+	mut types: Array<String> := []
+	mut storage := 0
+	union_parts(name).each do |alternative|
+		model := union_member_storage(state, alternative)
+		if model == 0 || (storage != 0 && model != storage)
+			return ""
+		end
+		storage = model
+		type_name := union_member_field_type(state, alternative, member, false)
+		if type_name == ""
+			return ""
+		end
+		types.push(type_name)
+	end
+	if types.size() == 0
+		return ""
+	end
+	return union_type(types)
+end
+
+# A common store has one exact field type and a writable class layout in every
+# alternative. The checked target keeps the receiver selected before the RHS.
+def union_member_write_type(mut state: CompilerState, name: String, member: String, origin: Integer): String
+	mut common := ""
+	line := load_integer(state.source_tokens.token_lines, origin)
+	union_parts(name).each do |alternative|
+		if union_member_storage(state, alternative) != 2 || member.size() == 0 || member[0] == "_"
+			diagnostic(state, "TRBN4004", line, "union assignment requires a public class field in every alternative")
+			return ""
+		end
+		owner := find_object_type(state, alternative)
+		field := object_field_index(state, owner, "@" + member)
+		if field < 0
+			diagnostic(state, "TRBN4004", line, "union assignment requires a common class field " + member)
+			return ""
+		end
+		row := state.nominal.object_instances[owner].fields[field]
+		if row.readonly
+			diagnostic(state, "TRBN4004", line, "union field " + member + " is readonly")
+			return ""
+		end
+		if common != "" && common != row.type_name
+			diagnostic(state, "TRBN4004", line, "union field " + member + " has different types in its alternatives")
+			return ""
+		end
+		common = row.type_name
+	end
+	return common
+end
+
+def mir_checked_union_member(mut state: CompilerState, mut locals: CheckedLocals, value: CheckedValue, member: String, origin: Integer): CheckedValue
+	record_owner := find_record_type(state, value.type_name)
+	if record_owner >= 0
+		field := find_field(state, record_owner, member)
+		return mir_checked_record_field(state, locals, value, field, load_string(state.declarations.field_types, field), origin)
+	end
+	field := object_field_index(state, find_object_type(state, value.type_name), "@" + member)
+	return mir_checked_object_field(state, locals, value, field, origin)
+end
+
+def check_union_member(mut state: CompilerState, mut locals: CheckedLocals, value: CheckedValue, member: String, origin: Integer): CheckedValue
+	expected := union_member_type(state, value.type_name, member)
+	line := load_integer(state.source_tokens.token_lines, origin)
+	if expected == ""
+		diagnostic(state, "TRBN4004", line, "union alternatives do not expose a common data field " + member)
+		return checked_view(value, "Invalid", checked_category_value())
+	end
+	assignment := token_is(state, origin + 1, "=")
+	compound := binary_operator_id(load_string(state.source_tokens.token_texts, origin + 1)) >= binary_add_assign()
+	if assignment || compound
+		concurrent_mutation(state, locals, value, origin)
+		writable := union_member_write_type(state, value.type_name, member, origin)
+		if writable == ""
+			return checked_view(value, "Invalid", checked_category_value())
+		end
+		operand := checked_mir_value(value)
+		if mir_control_active(locals) && operand >= 0
+			locals.mir_union_targets.push(MirUnionTarget.new(origin: origin, owner: operand, type_name: value.type_name, member: member))
+		end
+		if assignment
+			return checked_bound_value(writable, checked_category_value(), origin, value.mutable, value.binding)
+		end
+	end
+	mir_control_prepare(state, locals)
+	if !mir_control_active(locals)
+		if assignment || compound
+			return checked_bound_value(expected, checked_category_value(), origin, value.mutable, value.binding)
+		end
+		return checked_view(value, expected, checked_category_value())
+	end
+	join := mir_control_allocate(locals)
+	alternatives := union_parts(value.type_name)
+	mut index := 0
+	while index < alternatives.size()
+		alternative := alternatives[index]
+		mut next_branch := -1
+		if index + 1 < alternatives.size()
+			condition := mir_union_operation(state, locals, mir_op_union_test(), value, alternative, "Boolean", origin)
+			next_branch = mir_control_branch(state, locals, condition, line)
+		end
+		payload := mir_union_operation(state, locals, mir_op_union_extract(), value, alternative, alternative, origin)
+		projected := mir_checked_union_member(state, locals, payload, member, origin)
+		converted := mir_nullable_coerce(state, locals, projected, expected, origin)
+		arguments := mir_control_arguments(locals, locals.count[0])
+		locals.mir_arguments.push(checked_mir_value(converted))
+		mir_control_jump_arguments(state, locals, join, arguments, locals.count[0] + 1)
+		if next_branch >= 0
+			mir_control_enter(state, locals, next_branch, line)
+		end
+		index += 1
+	end
+	mir_control_enter(state, locals, join, line)
+	result := mir_add_value(state, locals, mir_semantic_type_id(state.scalar_mir, expected), line)
+	locals.mir_arguments.push(result)
+	locals.mir_control[mir_control_parameter_count_slot()] += 1
+	mut result_origin := 9007199254740991
+	mut result_readonly := true
+	if assignment || compound
+		result_origin = origin
+		result_readonly = false
+	end
+	return CheckedValue.new(concurrent_borrowed: value.concurrent_borrowed, presentation: "", type_name: expected, category: -result - 1, origin: result_origin, mutable: value.mutable, binding: value.binding, readonly: result_readonly, immutable_reference: false, nullable_binding: -1, nullable_field: -1, truth: -1, falsity: -1, flow_type: expected)
+end
+
+def mir_checked_union_store(mut state: CompilerState, mut locals: CheckedLocals, target: CheckedValue, value: CheckedValue): Boolean
+	mut index := locals.mir_union_targets.size() - 1
+	while index >= 0
+		row := locals.mir_union_targets[index]
+		if row.origin == target.origin
+			if mir_control_active(locals)
+				operand := checked_mir_value(value)
+				if operand < 0
+					scalar_mir_disable(locals)
+					return true
+				end
+				receiver := checked_bound_value(row.type_name, -row.owner - 1, row.origin, 1, true)
+				join := mir_control_allocate(locals)
+				alternatives := union_parts(row.type_name)
+				mut alternative_index := 0
+				while alternative_index < alternatives.size()
+					alternative := alternatives[alternative_index]
+					mut next_branch := -1
+					if alternative_index + 1 < alternatives.size()
+						condition := mir_union_operation(state, locals, mir_op_union_test(), receiver, alternative, "Boolean", row.origin)
+						next_branch = mir_control_branch(state, locals, condition, load_integer(state.source_tokens.token_lines, row.origin))
+					end
+					payload := mir_union_operation(state, locals, mir_op_union_extract(), receiver, alternative, alternative, row.origin)
+					field := object_field_index(state, find_object_type(state, alternative), "@" + row.member)
+					scalar_mir_instruction(state, locals, mir_op_object_store(), -1, checked_mir_value(payload), operand, field, -1, load_integer(state.source_tokens.token_lines, row.origin))
+					mir_control_jump(state, locals, join, locals.count[0])
+					if next_branch >= 0
+						mir_control_enter(state, locals, next_branch, load_integer(state.source_tokens.token_lines, row.origin))
+					end
+					alternative_index += 1
+				end
+				mir_control_enter(state, locals, join, load_integer(state.source_tokens.token_lines, row.origin))
+			end
+			return true
+		end
+		index -= 1
+	end
+	return false
+end
+
+# Only a direct lexical receiver supplies a reusable discriminant fact. Record
+# fields and readonly class fields cannot change through another alias;
+# replacing the binding invalidates this versioned fact.
+def narrow_union_discriminant(state: CompilerState, mut locals: CheckedLocals, control: ControlSyntax, branch_index: Integer)
+	mut first := control.selector
+	mut finish := control.selector_finish
+	while finish - first > 3 && load_string(state.source_tokens.token_texts, first) == "(" && load_string(state.source_tokens.token_texts, finish - 1) == ")"
+		first += 1
+		finish -= 1
+	end
+	if finish - first != 3 || load_string(state.source_tokens.token_texts, first + 1) != "."
+		return
+	end
+	binding := local_find(locals, load_string(state.source_tokens.token_texts, first))
+	if binding < 0
+		return
+	end
+	declared := load_string(locals.types, binding)
+	actual := nullable_lookup(locals, binding, -1, declared)
+	alternatives := union_parts(actual)
+	if alternatives.size() == 0
+		return
+	end
+	member := load_string(state.source_tokens.token_texts, first + 2)
+	branch := control.branches[branch_index]
+	mut matched: Array<String> := []
+	mut values: Array<String> := []
+	if branch.condition >= 0
+		values = literal_branch_types(state, branch.condition, branch.condition_finish)
+	else
+		mut previous := 0
+		while previous < branch_index
+			row := control.branches[previous]
+			literal_branch_types(state, row.condition, row.condition_finish).each do |value|
+				values.push(value)
+			end
+			previous += 1
+		end
+	end
+	alternatives.each do |alternative|
+		type_name := union_member_field_type(state, alternative, member, true)
+		if literal_type_base(type_name) == ""
+			return
+		end
+		mut present := false
+		values.each do |value|
+			if value == type_name
+				present = true
+			end
+		end
+		mut selected := present
+		if branch.condition < 0
+			selected = !selected
+		end
+		if selected
+			matched.push(alternative)
+		end
+	end
+	if matched.size() > 0
+		locals.nullable_state[nullable_state_head_slot()] = nullable_fact(locals, binding, -1, union_type(matched), locals.nullable_state[nullable_state_head_slot()])
+	end
+end

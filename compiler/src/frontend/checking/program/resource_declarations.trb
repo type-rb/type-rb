@@ -1,0 +1,174 @@
+import { find_visible_declaration } from frontend/resolution/declaration_lookup
+import { declaration_object } from frontend/types/declaration_kinds
+import { callable_parts } from frontend/types/callable_types
+import { generic_arguments } from frontend/types/generic_arguments
+import { namespace_parent } from frontend/types/namespace_model
+import { nullable_element } from frontend/types/nullable_types
+import { object_abstract_function, object_abstract_method } from frontend/types/object_types
+import { scoped_resource_declaration_name } from frontend/types/resource_types
+import { union_parts } from frontend/types/union_types
+import { CompilerState, diagnostic, has_diagnostic } from state/state
+import { load_integer, load_string, sparse_integer_at } from support/storage
+
+# Check authored types before nominal expansion so unused generic declarations
+# cannot hide resource storage. Alias declarations are checked independently.
+def authored_scoped_resource(mut state: CompilerState, source: Integer, name: String, parameters: Array<String>): String
+	mut symbolic := false
+	parameters.each do |parameter|
+		if parameter == name
+			symbolic = true
+		end
+	end
+	if symbolic
+		return ""
+	end
+	optional := nullable_element(name)
+	if optional != ""
+		return authored_scoped_resource(state, source, optional, parameters)
+	end
+	mut parts := union_parts(name)
+	if parts.size() == 0
+		parts = callable_parts(name)
+	end
+	if parts.size() == 0
+		parts = generic_arguments(name)
+	end
+	mut index := 0
+	while index < parts.size()
+		resource := authored_scoped_resource(state, source, parts[index], parameters)
+		if resource != ""
+			return resource
+		end
+		index += 1
+	end
+	if parts.size() > 0
+		return ""
+	end
+	return scoped_resource_declaration_name(state, find_visible_declaration(state, source, name, declaration_object()))
+end
+
+def reject_stored_resource(mut state: CompilerState, source: Integer, name: String, parameters: Array<String>, line: Integer): Boolean
+	resource := authored_scoped_resource(state, source, name, parameters)
+	if resource == ""
+		return false
+	end
+	state.module_graph.active_module[0] = source
+	diagnostic(state, "TRBN4003", line, "scoped resource " + resource + " cannot be stored in a declaration or returned")
+	return true
+end
+
+def validate_resource_parameter(mut state: CompilerState, source: Integer, name: String, parameters: Array<String>, mutable: Integer, optional: Boolean, line: Integer): Boolean
+	resource := authored_scoped_resource(state, source, name, parameters)
+	if resource == ""
+		return true
+	end
+	direct := scoped_resource_declaration_name(state, find_visible_declaration(state, source, name, declaration_object()))
+	if direct == resource && mutable == 0 && !optional
+		return true
+	end
+	state.module_graph.active_module[0] = source
+	diagnostic(state, "TRBN4003", line, "scoped resource " + resource + " requires a direct immutable required parameter")
+	return false
+end
+
+def validate_resource_declarations(mut state: CompilerState): Boolean
+	mut owner := 0
+	mut owns_resources := false
+	while owner < state.nominal.objects.size()
+		if scoped_resource_declaration_name(state, owner) != ""
+			owns_resources = true
+		end
+		owner += 1
+	end
+	if !owns_resources
+		return true
+	end
+	state.resource_calls.enabled[0] = true
+	state.type_resolution.type_aliases.each do |row|
+		state.global_bindings.declaration_owner[0] = namespace_parent(row.name)
+		reject_stored_resource(state, row.source_id, row.target, row.parameters, row.line)
+	end
+	state.type_resolution.generic_definitions.each do |row|
+		state.global_bindings.declaration_owner[0] = namespace_parent(row.name)
+		row.variants.each do |variant|
+			variant.fields.each do |field|
+				reject_stored_resource(state, row.source_id, field.type_name, row.parameters, field.line)
+			end
+		end
+	end
+	state.nominal.objects.each do |row|
+		state.global_bindings.declaration_owner[0] = row.name
+		row.fields.each do |field|
+			reject_stored_resource(state, row.source_id, field.type_name, row.parameters, field.line)
+		end
+		state.global_bindings.declaration_owner[0] = namespace_parent(row.name)
+		reject_stored_resource(state, row.source_id, row.superclass, row.parameters, row.line)
+		row.interfaces.each do |contract|
+			reject_stored_resource(state, row.source_id, contract, row.parameters, row.line)
+		end
+	end
+	state.nominal.newtypes.each do |row|
+		state.global_bindings.declaration_owner[0] = namespace_parent(row.name)
+		reject_stored_resource(state, row.source_id, row.target, [], row.line)
+	end
+	state.nominal.enums.each do |row|
+		state.global_bindings.declaration_owner[0] = namespace_parent(row.name)
+		mut variant := row.variant_start
+		while variant < row.variant_start + row.variant_count
+			entry := state.nominal.enum_variants[variant]
+			mut field := entry.field_start
+			while field < entry.field_start + entry.field_count
+				value := state.nominal.enum_fields[field]
+				reject_stored_resource(state, row.source_id, value.type_name, [], value.line)
+				field += 1
+			end
+			variant += 1
+		end
+	end
+	mut record_index := 0
+	while record_index < state.declarations.record_count[0]
+		source := load_integer(state.declarations.record_modules, record_index)
+		state.global_bindings.declaration_owner[0] = namespace_parent(load_string(state.declarations.record_names, record_index))
+		mut field := load_integer(state.declarations.record_field_starts, record_index)
+		finish := field + load_integer(state.declarations.record_field_counts, record_index)
+		while field < finish
+			reject_stored_resource(state, source, load_string(state.declarations.field_types, field), [], load_integer(state.declarations.field_lines, field))
+			field += 1
+		end
+		record_index += 1
+	end
+	mut template := 0
+	state.type_resolution.generic_functions.each do |row|
+		state.global_bindings.declaration_owner[0] = namespace_parent(row.name)
+		reject_stored_resource(state, row.source_id, row.result_type, row.type_parameters, row.line)
+		row.parameters.each do |parameter|
+			if object_abstract_method(state, template)
+				reject_stored_resource(state, row.source_id, parameter.type_name, row.type_parameters, parameter.line)
+			end
+			validate_resource_parameter(state, row.source_id, parameter.type_name, row.type_parameters, parameter.mutable, parameter.default_start >= 0, parameter.line)
+		end
+		template += 1
+	end
+	mut function_index := 0
+	while function_index < state.declarations.function_count[0]
+		source := load_integer(state.declarations.function_modules, function_index)
+		state.global_bindings.declaration_owner[0] = namespace_parent(load_string(state.declarations.function_names, function_index))
+		reject_stored_resource(state, source, load_string(state.declarations.function_result_types, function_index), [], load_integer(state.declarations.function_lines, function_index))
+		mut parameter := load_integer(state.declarations.function_parameter_starts, function_index)
+		finish := parameter + load_integer(state.declarations.function_parameter_counts, function_index)
+		while parameter < finish
+			if object_abstract_function(state, function_index)
+				reject_stored_resource(state, source, load_string(state.declarations.parameter_types, parameter), [], load_integer(state.declarations.parameter_lines, parameter))
+			end
+			validate_resource_parameter(
+				state, source, load_string(state.declarations.parameter_types, parameter), [],
+				load_integer(state.declarations.parameter_mutable, parameter),
+				sparse_integer_at(state.parsed.parameter_defaults, parameter) > 0,
+				load_integer(state.declarations.parameter_lines, parameter),
+			)
+			parameter += 1
+		end
+		function_index += 1
+	end
+	return !has_diagnostic(state)
+end

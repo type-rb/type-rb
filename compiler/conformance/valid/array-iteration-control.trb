@@ -1,0 +1,50 @@
+def selected(values: Array<Integer>): Integer
+	values.each do |value|
+		if value == 2
+			return value
+		end
+	end
+	return 0
+end
+
+def stopped()
+	[1].each { |_value| return }
+	puts("unreachable")
+end
+
+def main()
+	puts(selected([1, 2, 3]))
+	stopped()
+	mut visits := 0
+	[1, 2, 3].each do |outer|
+		if outer == 1
+			next
+		end
+		[4, 5, 6].each do |inner|
+			if inner == 6
+				break
+			end
+			visits += 1
+		end
+	end
+	puts(visits)
+	mut index := 0
+	while index < 2
+		index += 1
+		[10, 20].each { |_value| next }
+		[30, 40].each { |_value| break }
+		puts(index)
+	end
+	[1].each do |_value|
+		mut inner := 0
+		while inner < 2
+			inner += 1
+			next
+		end
+		puts(inner)
+		break
+		[99].each do |unreachable|
+			puts(unreachable)
+		end
+	end
+end

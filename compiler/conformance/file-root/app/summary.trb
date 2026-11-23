@@ -1,0 +1,10 @@
+import { label } from app/label
+import { Score, build_score } from domain/score
+
+def report(iterations: Integer): String
+	score: Score := build_score(iterations)
+	if score.total > 0
+		return label()
+	end
+	return "file-root-bad"
+end

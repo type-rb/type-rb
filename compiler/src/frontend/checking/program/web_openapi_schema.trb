@@ -1,0 +1,322 @@
+import { time_codec_name } from frontend/providers/time_codecs
+import { find_import_binding, find_visible_alias } from frontend/resolution/declaration_lookup
+import { array_element_type, find_record_type, generic_instance_for_type, resolve_type_name, type_display } from frontend/resolution/type_resolution
+import { generic_arguments, generic_base } from frontend/types/generic_arguments
+import { namespace_parent } from frontend/types/namespace_model
+import { attribute_record_field } from frontend/types/attribute_kinds
+import { find_enum_type } from frontend/types/enum_types
+import { hash_key_type, hash_value_type } from frontend/types/hash_types
+import { find_newtype_type } from frontend/types/newtype_types
+import { nullable_element } from frontend/types/nullable_types
+import { raw_enum_type, raw_enum_value } from frontend/types/raw_enum_types
+import { package_json_quote } from project/package_json
+import { openapi_object, openapi_strings } from project/web_openapi_json
+import { CompilerState, diagnostic, has_diagnostic } from state/state
+import { token_kind_string } from state/token_kinds
+import { load_integer, load_string } from support/storage
+
+record OpenAPISchemas
+	names: Array<String>
+	types: Array<String>
+	values: Array<String>
+	states: Array<Integer>
+end
+
+# Keep generation's authored alias restrictions after ordinary type erasure.
+# Resolving an alias for execution does not qualify it as an OpenAPI schema.
+def openapi_authored_type_valid(mut state: CompilerState, source: Integer, raw: String, line: Integer, depth: Integer): Boolean
+	if depth >= 128
+		openapi_schema_error(state, line, "type contains a recursive or generic alias")
+		return false
+	end
+	optional := nullable_element(raw)
+	if optional != ""
+		return openapi_authored_type_valid(state, source, optional, line, depth + 1)
+	end
+	# The pinned project schema loses nested declaration identity across an
+	# imported namespace. Local qualified types and shared aliases still work.
+	name := generic_base(raw)
+	parts := name.split("::")
+	if parts.size() > 1 && find_import_binding(state, source, parts[0]) >= 0
+		openapi_schema_error(state, line, "JSON schema type " + name + " must be a record, raw-value enum, newtype, or JSON-compatible built-in type")
+		return false
+	end
+	alias_index := find_visible_alias(state, source, generic_base(raw))
+	if alias_index >= 0
+		row := state.type_resolution.type_aliases[alias_index]
+		if row.parameters.size() > 0
+			openapi_schema_error(state, line, "type contains a recursive or generic alias")
+			return false
+		end
+		previous := state.global_bindings.declaration_owner[0]
+		state.global_bindings.declaration_owner[0] = namespace_parent(row.name)
+		valid := openapi_authored_type_valid(state, row.source_id, row.target, line, depth + 1)
+		state.global_bindings.declaration_owner[0] = previous
+		return valid
+	end
+	arguments := generic_arguments(raw)
+	if arguments.size() > 0
+		arguments.each do |argument|
+			if !openapi_authored_type_valid(state, source, argument, line, depth + 1)
+				return false
+			end
+		end
+		return true
+	end
+	target := resolve_type_name(state, source, raw, false)
+	temporal := time_codec_name(state, target)
+	if temporal != "" && raw != temporal
+		openapi_schema_error(state, line, "renamed time scalar " + raw + " is not supported")
+		return false
+	end
+	return !has_diagnostic(state)
+end
+
+def openapi_schemas_new(): OpenAPISchemas
+	return OpenAPISchemas.new(names: [], types: [], values: [], states: [])
+end
+
+def openapi_schema_error(mut state: CompilerState, line: Integer, message: String): String
+	diagnostic(state, "TRBN4003", line, "OpenAPI " + message)
+	return ""
+end
+
+def openapi_integer_schema(): String
+	return "{\"type\":\"integer\",\"minimum\":-9007199254740991,\"maximum\":9007199254740991}"
+end
+
+def openapi_field_type_valid(mut state: CompilerState, record_index: Integer, field: Integer): Boolean
+	previous_source := state.module_graph.active_module[0]
+	previous_owner := state.global_bindings.declaration_owner[0]
+	source := load_integer(state.declarations.record_modules, record_index)
+	state.module_graph.active_module[0] = source
+	state.global_bindings.declaration_owner[0] = namespace_parent(load_string(state.declarations.record_names, record_index))
+	valid := openapi_authored_type_valid(state, source, load_string(state.parsed.field_type_names, field), load_integer(state.declarations.field_lines, field), 0)
+	state.module_graph.active_module[0] = previous_source
+	state.global_bindings.declaration_owner[0] = previous_owner
+	return valid
+end
+
+def openapi_time_schema(name: String): String
+	if name == "Date"
+		return "{\"type\":\"string\",\"format\":\"date\"}"
+	end
+	if name == "Instant"
+		return "{\"type\":\"string\",\"format\":\"date-time\"}"
+	end
+	if name == "Duration"
+		return "{\"type\":\"string\",\"format\":\"duration\"}"
+	end
+	if name == "TimeZone"
+		return "{\"type\":\"string\"}"
+	end
+	mut pattern := "^(?:[01][0-9]|2[0-3]):[0-5][0-9](?::[0-5][0-9](?:\\.[0-9]{1,9})?)?$"
+	if name == "DateTime"
+		pattern = "^[0-9]{4}-[0-9]{2}-[0-9]{2}T(?:[01][0-9]|2[0-3]):[0-5][0-9](?::[0-5][0-9](?:\\.[0-9]{1,9})?)?$"
+	end
+	return openapi_object(["type", "pattern"], ["\"string\"", package_json_quote(pattern)], false)
+end
+
+# OpenAPI rejects an explicitly empty wire name, unlike runtime JSON's
+# default-name convention. Keep this generation-only contract separate.
+def openapi_wire_name(state: CompilerState, record_index: Integer, member: String): String
+	source := load_integer(state.declarations.record_modules, record_index)
+	name := load_string(state.declarations.record_names, record_index)
+	state.parsed.attributes.each do |attribute|
+		if attribute.source_id == source && attribute.kind == attribute_record_field() && attribute.owner == name && attribute.member == member && attribute.name == "@json" && attribute.arguments.size() > 0
+			argument := attribute.arguments[0]
+			if argument.finish == argument.start + 1 && load_integer(state.source_tokens.token_kinds, argument.start) == token_kind_string()
+				raw := load_string(state.source_tokens.token_texts, argument.start)
+				mut result := ""
+				mut index := 0
+				while index < raw.size() && raw[index] != ","
+					result += raw[index]
+					index += 1
+				end
+				return result
+			end
+		end
+	end
+	return member
+end
+
+def openapi_schema(mut state: CompilerState, mut schemas: OpenAPISchemas, target: String, line: Integer, depth: Integer): String
+	if has_diagnostic(state)
+		return ""
+	end
+	if depth >= 128
+		return openapi_schema_error(state, line, "schema exceeds the nesting limit")
+	end
+	optional := nullable_element(target)
+	if optional != ""
+		return "{\"anyOf\":[" + openapi_schema(state, schemas, optional, line, depth + 1) + ",{\"type\":\"null\"}]}"
+	end
+	if target == "Boolean"
+		return "{\"type\":\"boolean\"}"
+	end
+	if target == "Integer"
+		return openapi_integer_schema()
+	end
+	if target == "Float"
+		return "{\"type\":\"number\",\"format\":\"double\"}"
+	end
+	if target == "String"
+		return "{\"type\":\"string\"}"
+	end
+	temporal := time_codec_name(state, target)
+	if temporal != ""
+		return openapi_time_schema(temporal)
+	end
+	array := array_element_type(target)
+	if array != ""
+		return "{\"type\":\"array\",\"items\":" + openapi_schema(state, schemas, array, line, depth + 1) + "}"
+	end
+	hash := hash_value_type(target)
+	if hash != ""
+		if hash_key_type(target) != "String"
+			return openapi_schema_error(state, line, "JSON schema requires Hash<String, V>")
+		end
+		return "{\"type\":\"object\",\"additionalProperties\":" + openapi_schema(state, schemas, hash, line, depth + 1) + "}"
+	end
+	if generic_instance_for_type(state, target) >= 0
+		return openapi_schema_error(state, line, "schema does not support generic type " + type_display(state, target) + " yet")
+	end
+	nominal := find_newtype_type(state, target)
+	record_index := find_record_type(state, target)
+	enum_index := find_enum_type(state, target)
+	mut name := ""
+	if nominal >= 0
+		name = state.nominal.newtypes[nominal].name
+	elsif record_index >= 0
+		name = load_string(state.declarations.record_names, record_index)
+	elsif enum_index >= 0
+		name = state.nominal.enums[enum_index].name
+	else
+		return openapi_schema_error(state, line, "JSON schema type " + type_display(state, target) + " is not supported")
+	end
+	mut previous := 0
+	while previous < schemas.names.size()
+		if schemas.names[previous] == name
+			if schemas.types[previous] != target
+				return openapi_schema_error(state, line, "component name " + name + " is shared by different declarations")
+			end
+			if schemas.states[previous] != 2
+				return openapi_schema_error(state, line, "recursive OpenAPI record " + name + " is not supported yet")
+			end
+			return "{\"$ref\":" + package_json_quote("#/components/schemas/" + name) + "}"
+		end
+		previous += 1
+	end
+	index := schemas.names.size()
+	schemas.names.push(name)
+	schemas.types.push(target)
+	schemas.values.push("")
+	schemas.states.push(1)
+	mut schema := ""
+	if nominal >= 0
+		declaration := state.nominal.newtypes[nominal]
+		previous := state.global_bindings.declaration_owner[0]
+		state.global_bindings.declaration_owner[0] = namespace_parent(declaration.name)
+		valid := openapi_authored_type_valid(state, declaration.source_id, declaration.target, line, 0)
+		state.global_bindings.declaration_owner[0] = previous
+		if !valid
+			return ""
+		end
+		schema = openapi_schema(state, schemas, state.nominal.newtypes[nominal].representation, line, depth + 1)
+	elsif record_index >= 0
+		mut names: Array<String> := []
+		mut values: Array<String> := []
+		mut required: Array<String> := []
+		mut seen: Hash<String, Integer> := {}
+		mut field := load_integer(state.declarations.record_field_starts, record_index)
+		finish := field + load_integer(state.declarations.record_field_counts, record_index)
+		while field < finish && !has_diagnostic(state)
+			if !openapi_field_type_valid(state, record_index, field)
+				return ""
+			end
+			wire := openapi_wire_name(state, record_index, load_string(state.declarations.field_names, field))
+			if wire == "" || wire == "-" || seen.key?(wire)
+				return openapi_schema_error(state, line, "record " + name + " has an unsupported or duplicate JSON field name")
+			end
+			seen[wire] = 1
+			type_name := load_string(state.declarations.field_types, field)
+			names.push(wire)
+			previous_source := state.module_graph.active_module[0]
+			state.module_graph.active_module[0] = load_integer(state.declarations.record_modules, record_index)
+			values.push(openapi_schema(state, schemas, type_name, load_integer(state.declarations.field_lines, field), depth + 1))
+			state.module_graph.active_module[0] = previous_source
+			if nullable_element(type_name) == ""
+				required.push(wire)
+			end
+			field += 1
+		end
+		mut keys := ["type"]
+		mut properties := ["\"object\""]
+		if names.size() > 0
+			keys.push("properties")
+			properties.push(openapi_object(names, values, true))
+		end
+		if required.size() > 0
+			keys.push("required")
+			properties.push(openapi_strings(required))
+		end
+		schema = openapi_object(keys, properties, false)
+	else
+		raw := raw_enum_type(state, enum_index)
+		if raw != "String" && raw != "Integer"
+			return openapi_schema_error(state, line, "JSON schema enum " + name + " must use String or Integer raw values")
+		end
+		row := state.nominal.enums[enum_index]
+		mut variant := row.variant_start
+		mut values: Array<String> := []
+		while variant < row.variant_start + row.variant_count
+			value := raw_enum_value(state, variant)
+			if raw == "String"
+				values.push(package_json_quote(value.text))
+			else
+				values.push(value.text)
+			end
+			variant += 1
+		end
+		if raw == "String"
+			schema = "{\"type\":\"string\",\"enum\":[" + values.join(",") + "]}"
+		else
+			schema = "{\"type\":\"integer\",\"enum\":[" + values.join(",") + "],\"minimum\":-9007199254740991,\"maximum\":9007199254740991}"
+		end
+	end
+	schemas.values[index] = schema
+	schemas.states[index] = 2
+	return "{\"$ref\":" + package_json_quote("#/components/schemas/" + name) + "}"
+end
+
+# The normalized shape determines requiredness, while the original nominal
+# schema remains the public representation (including newtype components).
+def openapi_parameter_shape(state: CompilerState, target: String, allow_array: Boolean, depth: Integer): String
+	if depth >= 128
+		return ""
+	end
+	mut base := target
+	optional := nullable_element(target)
+	if optional != ""
+		base = optional
+	end
+	if base == "Boolean" || base == "Integer" || base == "Float" || base == "String" || time_codec_name(state, base) != "" || raw_enum_type(state, find_enum_type(state, base)) != ""
+		return target
+	end
+	array := array_element_type(base)
+	if array != ""
+		if !allow_array || nullable_element(array) != "" || array_element_type(array) != "" || openapi_parameter_shape(state, array, false, depth + 1) == ""
+			return ""
+		end
+		return target
+	end
+	nominal := find_newtype_type(state, base)
+	if nominal >= 0
+		mut representation := state.nominal.newtypes[nominal].representation
+		if optional != "" && nullable_element(representation) == ""
+			representation += "?"
+		end
+		return openapi_parameter_shape(state, representation, allow_array, depth + 1)
+	end
+	return ""
+end

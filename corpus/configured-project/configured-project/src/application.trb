@@ -1,0 +1,10 @@
+import { configured_value } from lib/value
+
+def main()
+	if configured_value() == 42
+		puts("configured-project-ok")
+	else
+		puts("configured-project-bad")
+	end
+	return
+end

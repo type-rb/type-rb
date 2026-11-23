@@ -1,0 +1,51 @@
+import { web_context_primitive_target } from frontend/resolution/web_context_intrinsics
+import { CompilerState } from state/state
+import { ReplStore, repl_boolean, repl_type, repl_value } from repl/model
+import { repl_coerce } from repl/values
+
+# Preserve typed boxes and pool identities across retained program catalogs.
+# Context list updates and lookup still execute the checked TypeRB helper body.
+def repl_web_context_primitive(state: CompilerState, function: Integer, kind: Integer, arguments: Array<Integer>, mut store: ReplStore): Integer
+	target := web_context_primitive_target(state, function)
+	if kind == 1
+		if target == "Any"
+			return arguments[0]
+		end
+		value := repl_coerce(store, arguments[0], target)
+		return repl_value(store, "Any", 0, 0.0, "", [value])
+	end
+	if kind == 2 || kind == 3
+		if target == "Any"
+			if kind == 2
+				return repl_boolean(store, true)
+			end
+			return arguments[0]
+		end
+		mut value := arguments[0]
+		if repl_type(store, value) == "Any" && store.children[value].size() == 1
+			value = store.children[value][0]
+		end
+		if kind == 2
+			return repl_boolean(store, repl_type(store, value) == target)
+		end
+		if repl_type(store, value) != target
+			store.error[0] = "panic: union payload is unavailable"
+			store.failed[0] = true
+			return 0
+		end
+		return value
+	end
+	if kind == 4
+		return repl_boolean(store, arguments[0] == arguments[1])
+	end
+	mut children: Array<Integer> := []
+	store.children[arguments[0]].each do |value|
+		children.push(value)
+	end
+	mut field := 2
+	if kind == 6
+		field = 0
+	end
+	children[field] = arguments[1]
+	return repl_value(store, target, 0, 0.0, "", children)
+end

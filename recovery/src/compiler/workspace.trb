@@ -1,0 +1,92 @@
+import { native_read_text, native_write_text } from support/file_system
+import trb/std/process
+import trb/std/result
+
+def compiler_recovery_workspace_valid(workspace: String): Boolean
+	prefix := "/tmp/trbn-recovery."
+	if !workspace.start_with?(prefix) || workspace.size() != prefix.size() + 6
+		return false
+	end
+	mut index := prefix.size()
+	while index < workspace.size()
+		if !"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789".include?(workspace[index])
+			return false
+		end
+		index += 1
+	end
+	return true
+end
+
+def compiler_recovery_workspace_receipt(workspace: String): String
+	return "trbn-recovery-workspace-v1\n" + workspace + "\n"
+end
+
+# Roll back only the still-empty directory just allocated by this invocation.
+# Populated workspaces are retained for the separate validated cleanup tool.
+def discard_empty_compiler_recovery_workspace(workspace: String): Boolean
+	if !compiler_recovery_workspace_valid(workspace)
+		return false
+	end
+	marker := workspace + "/.trbn-recovery-owner"
+	case native_read_text(marker)
+	when Result::Ok(contents)
+		if contents != compiler_recovery_workspace_receipt(workspace)
+			return false
+		end
+	when Result::Err(_error)
+		return false
+	end
+	case Process.run("/bin/rm", [marker])
+	when Result::Ok(process)
+		if !process.success
+			return false
+		end
+	when Result::Err(_error)
+		return false
+	end
+	case Process.run("/bin/rmdir", [workspace])
+	when Result::Ok(process)
+		if process.success
+			return true
+		end
+	when Result::Err(_error)
+	end
+	# Retain ownership if unexpected contents prevented empty-directory removal.
+	case native_write_text(marker, compiler_recovery_workspace_receipt(workspace))
+	when Result::Ok(_unit)
+	when Result::Err(_error)
+	end
+	return false
+end
+
+def allocate_compiler_recovery_workspace(receipt_path: String): Result<String, String>
+	allocation := case Process.run("/usr/bin/mktemp", ["-d", "/tmp/trbn-recovery.XXXXXX"])
+	when Result::Ok(process)
+		process
+	when Result::Err(error)
+		return Result<String, String>::Err("cannot allocate recovery workspace: " + error.message)
+	end
+	lines := allocation.stdout.split("\n")
+	if !allocation.success || !allocation.stderr.empty?() || lines.size() != 2
+		return Result<String, String>::Err("cannot allocate recovery workspace")
+	end
+	workspace := lines[0]
+	if !lines[1].empty?() || !compiler_recovery_workspace_valid(workspace)
+		return Result<String, String>::Err("allocated recovery workspace path differs")
+	end
+	receipt := compiler_recovery_workspace_receipt(workspace)
+	case native_write_text(workspace + "/.trbn-recovery-owner", receipt)
+	when Result::Ok(_unit)
+	when Result::Err(error)
+		return Result<String, String>::Err("cannot mark recovery workspace " + workspace + ": " + error.message)
+	end
+	if !receipt_path.empty?()
+		case native_write_text(receipt_path, receipt)
+		when Result::Ok(_unit)
+		when Result::Err(error)
+			cleaned := discard_empty_compiler_recovery_workspace(workspace)
+			return Result<String, String>::Err("cannot write recovery receipt for " + workspace + ": " + error.message + "; empty workspace cleanup=" + cleaned.to_s())
+		end
+	end
+	return Result<String, String>::Ok(workspace)
+end

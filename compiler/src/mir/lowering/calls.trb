@@ -1,0 +1,422 @@
+import { standard_sqlite_host } from frontend/resolution/sqlite_intrinsics
+import { sqlite_adapter_start, sqlite_names } from mir/model/sqlite_contract
+import { standard_process } from frontend/resolution/process_intrinsics
+import { process_adapter, process_names } from mir/model/process_contract
+import { concurrent_source_call } from frontend/checking/body/concurrency
+import { standard_runtime_deadline } from frontend/resolution/standard_intrinsics
+import { mir_adapter_runtime_deadline, mir_adapter_sqrt } from mir/model/call_kinds
+import { standard_test_capture, standard_test_equal, standard_test_fail, standard_test_finish, standard_test_inspect, standard_test_scalar_kind } from frontend/resolution/test_intrinsics
+import { test_adapter_capture, test_adapter_equal, test_adapter_fail, test_adapter_finish, test_adapter_inspect, test_adapter_scalar_kind } from mir/model/test_contract
+import { filesystem_adapter_start, filesystem_names } from mir/model/filesystem_contract
+import { standard_filesystem_host } from frontend/resolution/filesystem_intrinsics
+import { resource_source_call, resource_unknown_call } from frontend/checking/body/resource_calls
+import { oidc_adapter, oidc_names } from mir/model/oidc_contract
+import { standard_oidc_host } from frontend/resolution/oidc_intrinsics
+import { crypto_adapter_start, crypto_signature_name } from mir/model/crypto_contract
+import { standard_crypto } from frontend/resolution/crypto_intrinsics
+import { standard_compression } from frontend/resolution/compression_intrinsics
+import { mir_adapter_gzip } from mir/model/call_kinds
+import { standard_string_builder } from frontend/resolution/string_builder_intrinsics
+import { builder_adapter_start, builder_signature_name } from mir/model/string_builder_contract
+import { network_adapter_start, network_names } from mir/model/network_contract
+import { standard_network_host } from frontend/resolution/network_intrinsics
+import { standard_entropy } from frontend/resolution/secure_random_intrinsics
+import { mir_adapter_entropy } from mir/model/call_kinds
+import { standard_time_host } from frontend/resolution/time_intrinsics
+import { mir_adapter_time_clock, mir_adapter_time_zone_data, mir_adapter_time_zone_environment } from mir/model/call_kinds
+import { standard_runtime_fail, standard_runtime_recover } from frontend/resolution/standard_intrinsics
+import { checked_category_value } from frontend/types/value_categories
+import { mir_state_enabled_slot } from state/local_slots
+import { mir_adapter_host, mir_adapter_none, mir_adapter_runtime_fail, mir_adapter_runtime_recover, mir_signature_compiler_runtime, mir_signature_host, mir_signature_interface, mir_signature_ordinary, mir_signature_standard } from mir/model/call_kinds
+import { mir_function_fixture } from mir/model/control
+import { mir_op_direct_call } from mir/model/instructions
+import { object_abstract_function } from frontend/types/object_types
+import { mir_semantic_type_id, mir_semantic_type_name, mir_semantic_value_type } from mir/model/types
+import { nullable_capture_call } from frontend/checking/nominal/nullable_flow
+import { MirFlow, mir_flow_type, mir_value_available } from mir/analysis/flow
+import { CheckedValue, checked_mir_value, checked_value, mir_checked_value, scalar_mir_disable, scalar_mir_instruction, scalar_mir_value } from frontend/checking/body/values
+import { MirBlock, MirCall, MirFunction, MirInstruction, MirModule, MirSignature, mir_origin_valid, mir_table_span_valid, mir_type_id, mir_value_type } from mir/model/module
+import { mir_control_active, mir_control_prepare } from mir/build/control
+import { mir_intrinsic_signature_error, mir_runtime_adapter } from mir/model/intrinsics
+import { mir_call_effects } from mir/analysis/call_effects
+import { compiler_host_intrinsic, compiler_runtime_intrinsic } from frontend/resolution/entry_resolution
+import { CompilerState } from state/state
+import { CheckedLocals } from state/local_state
+import { load_integer, load_string } from support/storage
+import { ArgumentBindings } from frontend/resolution/argument_binding
+import { default_call_arguments } from frontend/resolution/default_arguments
+
+# Capture declaration identity and portable types before checking any body.
+# Every ordinary callee, including a private default initializer, owns verified
+# MIR. Recursive and forward calls need no body/order inference here.
+def mir_declare_signatures(mut state: CompilerState)
+	mut source_count := state.module_graph.module_count[0]
+	if source_count == 0
+		source_count = 1
+	end
+	state.scalar_mir.source_count[0] = source_count
+	mut index := 0
+	while index < state.declarations.function_count[0]
+		start := load_integer(state.declarations.function_parameter_starts, index)
+		count := load_integer(state.declarations.function_parameter_counts, index)
+		mut types: Array<String> := []
+		mut mutable: Array<Integer> := []
+		mut parameter := 0
+		while parameter < count
+			types.push(load_string(state.declarations.parameter_types, start + parameter))
+			mir_semantic_type_id(state.scalar_mir, load_string(state.declarations.parameter_types, start + parameter))
+			mutable.push(load_integer(state.declarations.parameter_mutable, start + parameter))
+			parameter += 1
+		end
+		source := load_integer(state.declarations.function_modules, index)
+		mut kind := mir_signature_ordinary()
+		mut adapter := mir_adapter_none()
+		if object_abstract_function(state, index)
+			kind = mir_signature_interface()
+			mut method_index := 0
+			state.scalar_mir.object_methods.each do |method|
+				if method.function == index
+					adapter = method_index
+				end
+				method_index += 1
+			end
+		end
+		mut name := load_string(state.declarations.function_names, index)
+		if standard_runtime_fail(state, index)
+			kind = mir_signature_standard()
+			adapter = mir_adapter_runtime_fail()
+			name = "trb/internal/runtime.fail"
+		end
+		if standard_runtime_deadline(state, index)
+			kind = mir_signature_standard()
+			adapter = mir_adapter_runtime_deadline()
+			name = "trb/internal/runtime.deadline"
+		end
+		if standard_runtime_recover(state, index)
+			kind = mir_signature_standard()
+			adapter = mir_adapter_runtime_recover()
+			name = "trb/internal/runtime.recover"
+		end
+		if standard_test_finish(state, index)
+			kind = mir_signature_standard()
+			adapter = test_adapter_finish()
+			name = "trb/internal/test.finish"
+		end
+		if standard_test_scalar_kind(state, index)
+			kind = mir_signature_standard()
+			adapter = test_adapter_scalar_kind()
+			name = "trb/internal/test.scalar_kind"
+		end
+		if standard_test_inspect(state, index)
+			kind = mir_signature_standard()
+			adapter = test_adapter_inspect()
+			name = "trb/internal/test.inspect_value"
+		end
+		if standard_test_equal(state, index)
+			kind = mir_signature_standard()
+			adapter = test_adapter_equal()
+			name = "trb/internal/test.deep_equal"
+		end
+		if standard_test_capture(state, index)
+			kind = mir_signature_standard()
+			adapter = test_adapter_capture()
+			name = "trb/internal/test.capture"
+		end
+		if standard_test_fail(state, index)
+			kind = mir_signature_standard()
+			adapter = test_adapter_fail()
+			name = "trb/internal/test.fail"
+		end
+		process := standard_process(state, index)
+		if process >= 0
+			kind = mir_signature_standard()
+			adapter = process_adapter(process)
+			name = "trb/internal/process." + process_names()[process]
+		end
+		sqlite := standard_sqlite_host(state, index)
+		if sqlite >= 0
+			kind = mir_signature_standard()
+			adapter = sqlite_adapter_start() + sqlite
+			name = "trb/internal/sqlite." + sqlite_names()[sqlite]
+		end
+		filesystem := standard_filesystem_host(state, index)
+		if filesystem >= 0
+			kind = mir_signature_standard()
+			adapter = filesystem_adapter_start() + filesystem
+			name = "trb/internal/filesystem_host." + filesystem_names()[filesystem]
+		end
+		oidc := standard_oidc_host(state, index)
+		if oidc >= 0
+			kind = mir_signature_standard()
+			adapter = oidc_adapter(oidc)
+			name = "trb/internal/auth/oidc_host." + oidc_names()[oidc]
+		end
+		crypto := standard_crypto(state, index)
+		if crypto >= 0
+			kind = mir_signature_standard()
+			adapter = crypto_adapter_start() + crypto
+			name = crypto_signature_name(crypto)
+		end
+		if standard_compression(state, index)
+			kind = mir_signature_standard()
+			adapter = mir_adapter_gzip()
+			name = "trb/internal/web/compression.gzip"
+		end
+		network := standard_network_host(state, index)
+		if network >= 0
+			kind = mir_signature_standard()
+			adapter = network_adapter_start() + network
+			name = "trb/internal/network_host." + network_names()[network]
+		end
+		time_host := standard_time_host(state, index)
+		if time_host > 0
+			kind = mir_signature_standard()
+			if time_host == 1
+				adapter = mir_adapter_time_clock()
+				name = "trb/internal/time_host.clock"
+			elsif time_host == 2
+				adapter = mir_adapter_time_zone_data()
+				name = "trb/internal/time_host.zone_data"
+			else
+				adapter = mir_adapter_time_zone_environment()
+				name = "trb/internal/time_host.zone_environment"
+			end
+		end
+		builder := standard_string_builder(state, index)
+		if builder >= 0
+			kind = mir_signature_standard()
+			adapter = builder_adapter_start() + builder
+			name = builder_signature_name(builder)
+		end
+		if standard_entropy(state, index)
+			kind = mir_signature_standard()
+			adapter = mir_adapter_entropy()
+			name = "trb/internal/entropy.read"
+		end
+		if compiler_runtime_intrinsic(state, index)
+			kind = mir_signature_compiler_runtime()
+			adapter = mir_runtime_adapter(name)
+		end
+		if compiler_host_intrinsic(state, index)
+			kind = mir_signature_host()
+			adapter = mir_adapter_host()
+		end
+		mir_semantic_type_id(state.scalar_mir, load_string(state.declarations.function_result_types, index))
+		state.scalar_mir.signatures.push(MirSignature.new(id: index, kind: kind, name: name, adapter: adapter, source_id: source, line: load_integer(state.declarations.function_lines, index), parameter_types: types, parameter_mutable: mutable, result_type: load_string(state.declarations.function_result_types, index)))
+		index += 1
+	end
+end
+
+def mir_call_value_type(native_module: MirModule, name: String): Boolean
+	if name == "Void" || name == "Address" || name == "Invalid"
+		return false
+	end
+	if mir_semantic_value_type(native_module, mir_type_id(name))
+		return true
+	end
+	native_module.types.each do |row|
+		if row.name == name
+			return true
+		end
+	end
+	return false
+end
+
+# The resolver has already bound the package identity, including import aliases.
+# Standard APIs have their own signature kind, separate from compiler privileges.
+def mir_checked_standard_call(mut state: CompilerState, mut locals: CheckedLocals, arguments: Array<Integer>, result_type: String, origin: Integer): CheckedValue
+	resource_unknown_call(state, locals)
+	if locals.mir_state[mir_state_enabled_slot()] == 0
+		return checked_value(result_type, checked_category_value(), 9007199254740991, 0)
+	end
+	adapter := mir_adapter_sqrt()
+	mut callee := state.declarations.function_count[0]
+	while callee < state.scalar_mir.signatures.size()
+		if state.scalar_mir.signatures[callee].kind == mir_signature_standard() && state.scalar_mir.signatures[callee].adapter == adapter
+			break
+		end
+		callee += 1
+	end
+	if callee == state.scalar_mir.signatures.size()
+		mir_semantic_type_id(state.scalar_mir, result_type)
+		state.scalar_mir.signatures.push(MirSignature.new(id: callee, kind: mir_signature_standard(), name: "trb/std/math.sqrt", adapter: adapter, source_id: state.module_graph.active_module[0], line: load_integer(state.source_tokens.token_lines, origin), parameter_types: ["Float"], parameter_mutable: [0], result_type: result_type))
+	end
+	return mir_checked_call(state, locals, callee, arguments, result_type, origin)
+end
+
+def mir_checked_call(mut state: CompilerState, mut locals: CheckedLocals, callee: Integer, arguments: Array<Integer>, result_type: String, origin: Integer): CheckedValue
+	return mir_checked_source_call(state, locals, callee, arguments, result_type, origin, false)
+end
+
+def mir_checked_constructor_call(mut state: CompilerState, mut locals: CheckedLocals, callee: Integer, arguments: Array<Integer>, result_type: String, origin: Integer): CheckedValue
+	return mir_checked_source_call(state, locals, callee, arguments, result_type, origin, true)
+end
+
+def mir_checked_source_call(mut state: CompilerState, mut locals: CheckedLocals, callee: Integer, arguments: Array<Integer>, result_type: String, origin: Integer, constructor: Boolean): CheckedValue
+	concurrent_source_call(state, locals, callee, origin, constructor)
+	resource_source_call(state, locals, callee)
+	nullable_capture_call(state, locals)
+	if callee < 0 || callee >= state.scalar_mir.signatures.size()
+		scalar_mir_disable(locals)
+		return checked_value(result_type, checked_category_value(), 9007199254740991, 0)
+	end
+	signature := state.scalar_mir.signatures[callee]
+	if result_type != "Void" && !mir_call_value_type(state.scalar_mir, result_type)
+		scalar_mir_disable(locals)
+	end
+	signature.parameter_types.each do |type_name|
+		if !mir_call_value_type(state.scalar_mir, type_name)
+			scalar_mir_disable(locals)
+		end
+	end
+	arguments.each do |value|
+		if value < 0
+			scalar_mir_disable(locals)
+		end
+	end
+	mir_control_prepare(state, locals)
+	if !mir_control_active(locals)
+		return checked_value(result_type, checked_category_value(), 9007199254740991, 0)
+	end
+	start := locals.mir_arguments.size()
+	arguments.each do |value|
+		locals.mir_arguments.push(value)
+	end
+	call := locals.mir_calls.size()
+	locals.mir_calls.push(MirCall.new(callee: callee, argument_start: start, argument_count: arguments.size(), effects: mir_call_effects(signature)))
+	mut result := -1
+	if result_type != "Void"
+		result = scalar_mir_value(state, locals, mir_semantic_type_id(state.scalar_mir, result_type), origin)
+	end
+	scalar_mir_instruction(state, locals, mir_op_direct_call(), result, -1, -1, call, -1, load_integer(state.source_tokens.token_lines, origin))
+	if result < 0
+		return checked_value(result_type, checked_category_value(), 9007199254740991, 0)
+	end
+	return mir_checked_value(result_type, result, 9007199254740991, 0)
+end
+
+# Explicit expressions already occupy declaration slots. Finish omitted slots
+# in declaration order using ordinary calls; no absent operand reaches MIR.
+def mir_complete_arguments(mut state: CompilerState, mut locals: CheckedLocals, mut bindings: ArgumentBindings, origin: Integer): Boolean
+	mut index := 0
+	while index < bindings.values.size()
+		if !bindings.provided[index] && bindings.defaults[index] < 0
+			return false
+		end
+		index += 1
+	end
+	index = 0
+	while index < bindings.values.size()
+		if !bindings.provided[index]
+			callee := bindings.defaults[index]
+			arguments := default_call_arguments(state, callee, bindings.values, index)
+			result_type := load_string(state.declarations.function_result_types, callee)
+			value := mir_checked_call(state, locals, callee, arguments, result_type, origin)
+			bindings.values[index] = checked_mir_value(value)
+			bindings.provided[index] = true
+		end
+		index += 1
+	end
+	return true
+end
+
+def mir_signatures_error(native_module: MirModule): String
+	mut index := 0
+	while index < native_module.signatures.size()
+		signature := native_module.signatures[index]
+		if signature.id != index || signature.kind < mir_signature_ordinary() || signature.kind > mir_signature_interface()
+			return "MIR declaration identity is invalid"
+		end
+		if !mir_origin_valid(signature.source_id, signature.line, native_module.source_count[0])
+			return "MIR declaration origin is invalid"
+		end
+		if signature.parameter_types.size() != signature.parameter_mutable.size() || signature.result_type == ""
+			return "MIR declaration types are invalid"
+		end
+		mut parameter := 0
+		while parameter < signature.parameter_types.size()
+			if signature.parameter_types[parameter] == "" || signature.parameter_types[parameter] == "Void"
+				return "MIR declaration parameter type is invalid"
+			end
+			mutable := signature.parameter_mutable[parameter]
+			if mutable != 0 && mutable != 1
+				return "MIR declaration parameter mutability is invalid"
+			end
+			parameter += 1
+		end
+		external_error := mir_intrinsic_signature_error(native_module, signature)
+		if external_error != ""
+			return external_error
+		end
+		index += 1
+	end
+	return ""
+end
+
+def mir_function_signature_error(native_module: MirModule, function: MirFunction): String
+	if function.kind == mir_function_fixture()
+		return ""
+	end
+	if function.id < 0 || function.id >= native_module.signatures.size()
+		return "MIR function declaration is missing"
+	end
+	signature := native_module.signatures[function.id]
+	if signature.kind == mir_signature_standard() || signature.kind == mir_signature_interface()
+		return "MIR abstract or standard call cannot have a function body"
+	end
+	if function.source_id != signature.source_id || function.line != signature.line || function.result_type != signature.result_type || function.parameter_count != signature.parameter_types.size()
+		return "MIR function declaration differs"
+	end
+	mut index := 0
+	while index < function.parameter_count
+		value := native_module.arguments[function.parameter_start + index]
+		if mir_semantic_type_name(native_module, mir_value_type(native_module, function.id, value)) != signature.parameter_types[index]
+			return "MIR function parameter type differs"
+		end
+		index += 1
+	end
+	return ""
+end
+
+def mir_call_error(flow: MirFlow, native_module: MirModule, function: MirFunction, block: MirBlock, instruction_index: Integer, instruction: MirInstruction, effects: Array<Integer>): String
+	if instruction.payload < 0 || instruction.payload >= native_module.calls.size()
+		return "MIR call record is missing"
+	end
+	if instruction.first != -1 || instruction.second != -1 || instruction.failure != -1
+		return "MIR call instruction shape differs"
+	end
+	call := native_module.calls[instruction.payload]
+	if call.callee < 0 || call.callee >= native_module.signatures.size()
+		return "MIR call declaration is missing"
+	end
+	signature := native_module.signatures[call.callee]
+	if call.effects != effects[call.callee]
+		return "MIR call effects or adapter differ"
+	end
+	if !mir_table_span_valid(call.argument_start, call.argument_count, native_module.arguments.size())
+		return "MIR call argument range is invalid"
+	end
+	if call.argument_count != signature.parameter_types.size()
+		return "MIR call argument arity differs"
+	end
+	mut index := 0
+	while index < call.argument_count
+		value := native_module.arguments[call.argument_start + index]
+		if !mir_value_available(flow, block, instruction_index, value)
+			return "MIR call argument is undefined"
+		end
+		type_name := signature.parameter_types[index]
+		if !mir_call_value_type(native_module, type_name) || mir_semantic_type_name(native_module, mir_flow_type(flow, value)) != type_name
+			return "MIR call argument type differs"
+		end
+		index += 1
+	end
+	if signature.result_type == "Void"
+		if instruction.result != -1
+			return "MIR Void call cannot define a value"
+		end
+	elsif !mir_call_value_type(native_module, signature.result_type) || mir_semantic_type_name(native_module, mir_flow_type(flow, instruction.result)) != signature.result_type
+		return "MIR call result type differs"
+	end
+	return ""
+end

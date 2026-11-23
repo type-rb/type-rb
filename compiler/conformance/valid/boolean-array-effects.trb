@@ -1,0 +1,31 @@
+def value(label: String, result: Boolean): Boolean
+	puts(label)
+	return result
+end
+
+def index(label: String, result: Integer): Integer
+	puts(label)
+	return result
+end
+
+def grow(mut values: Array<Boolean>): Boolean
+	mut offset := 0
+	while offset < 64
+		values.push(true)
+		offset += 1
+	end
+	puts("grow")
+	return false
+end
+
+def main()
+	mut values := [value("first", true), value("second", false)]
+	values[index("index", 0)] = value("replacement", false)
+	values.push(value("push", true))
+	values[index("growth index", -1)] = grow(values)
+	puts(values[0])
+	puts(values[1])
+	puts(values[2])
+	puts(values[3])
+	puts(values.size())
+end

@@ -1,0 +1,248 @@
+import { MirTestInspectionNode, mir_test_inspection_plan } from mir/analysis/test_inspection
+import { emit_test_inspection_helpers } from backend/qbe/runtime/test_inspection_helpers
+import { mir_test_value_id, test_adapter_inspect } from mir/model/test_contract
+import { mir_signature_standard } from mir/model/call_kinds
+import { mir_managed_type, mir_storage_name } from mir/model/types
+import { MirModule } from mir/model/module
+import { integer_string } from support/literals
+import { compiler_string_bytes } from support/compiler_bytes
+import { QbeOutput, qbe_output_line } from backend/qbe/output
+import { qbe_runtime_float_string_slot, qbe_runtime_hash_mode_slot, qbe_runtime_process_slot } from backend/qbe/runtime_slots
+
+def test_inspection_symbol(type_id: Integer): String
+	return "$trbn_inspect_type" + integer_string(type_id)
+end
+
+def emit_inspection_data(name: String, text: String, mut output: QbeOutput)
+	mut data := "data " + name + " = { "
+	compiler_string_bytes(text).each do |byte|
+		data += "b " + integer_string(byte) + ", "
+	end
+	qbe_output_line(output, data + "b 0 }")
+end
+
+def inspection_label(type_id: Integer, variant: Integer): String
+	return "$trbn_inspect_label" + integer_string(type_id) + "_" + integer_string(variant)
+end
+
+def emit_inspection_text(name: String, mut output: QbeOutput)
+	qbe_output_line(output, " call $trbn_inspect_text(l %context, l " + name + ")")
+end
+
+def emit_inspection_fields(fields: Array<Integer>, offset: Integer, prefix: String, label: String, names: Boolean, mut output: QbeOutput)
+	emit_inspection_text(label, output)
+	emit_inspection_text("$trbn_inspect_open", output)
+	mut index := 0
+	while index < fields.size() && index < 16
+		if index > 0
+			emit_inspection_text("$trbn_inspect_comma", output)
+		end
+		if names
+			emit_inspection_text(label + "_field" + integer_string(index), output)
+		end
+		id := prefix + integer_string(index)
+		qbe_output_line(output, " %slot" + id + " =l add %value, " + integer_string(offset + index * 8) + "\n %child" + id + " =l loadl %slot" + id + "\n call " + test_inspection_symbol(fields[index]) + "(l %context, l %child" + id + ", l %next_depth, l %path)")
+		index += 1
+	end
+	if index < fields.size()
+		emit_inspection_text("$trbn_inspect_comma", output)
+		emit_inspection_text("$trbn_inspect_ellipsis", output)
+	end
+	emit_inspection_text("$trbn_inspect_close", output)
+	qbe_output_line(output, " ret")
+end
+
+def emit_inspection_sequence(node: MirTestInspectionNode, mut output: QbeOutput)
+	mut opener := "$trbn_inspect_array"
+	if node.kind == "bytes"
+		opener = "$trbn_inspect_bytes"
+	end
+	emit_inspection_text(opener, output)
+	qbe_output_line(output, " %sp =l add %value, 8\n %size =l loadl %sp\n %dp =l add %value, 24")
+	if node.kind == "bytes"
+		qbe_output_line(output, " %data =l copy %dp")
+	else
+		qbe_output_line(output, " %data =l loadl %dp")
+	end
+	qbe_output_line(output, " jmp @loop\n@loop\n %index =l phi @content 0, @advance %next\n %done =w ceql %index, %size\n jnz %done, @complete, @separator\n@separator\n %first =w ceql %index, 0\n jnz %first, @limit, @comma\n@comma\n call $trbn_inspect_text(l %context, l $trbn_inspect_comma)\n jmp @limit\n@limit\n %full =w ceql %index, 16\n jnz %full, @truncated, @item\n@item")
+	mut child := 1
+	if node.kind == "bytes"
+		qbe_output_line(output, " %slot =l add %data, %index\n %byte =w loadub %slot\n %child =l extuw %byte")
+	else
+		child = node.value.children[0]
+		qbe_output_line(output, " %offset =l mul %index, 8\n %slot =l add %data, %offset\n %child =l loadl %slot")
+	end
+	qbe_output_line(output, " call " + test_inspection_symbol(child) + "(l %context, l %child, l %next_depth, l %path)\n jmp @advance\n@advance\n %next =l add %index, 1\n jmp @loop\n@truncated\n call $trbn_inspect_text(l %context, l $trbn_inspect_ellipsis)\n jmp @complete\n@complete\n call $trbn_inspect_text(l %context, l $trbn_inspect_array_end)\n ret")
+end
+
+def emit_inspection_hash(node: MirTestInspectionNode, mut output: QbeOutput)
+	emit_inspection_text("$trbn_inspect_hash", output)
+	qbe_output_line(output, " %indexes =l alloc8 128\n %count =l call $trbn_inspect_hash_order(l %value, l %indexes)\n %fp =l add %value, 40\n %flags =l loadl %fp\n %boxed_bits =l and %flags, 4\n %boxed =w cnel %boxed_bits, 0\n %key_budget =l alloc8 8\n jmp @loop\n@loop\n %index =l phi @content 0, @advance %next\n %done =w ceql %index, %count\n jnz %done, @limit, @separator\n@separator\n %first =w ceql %index, 0\n jnz %first, @item, @comma\n@comma\n call $trbn_inspect_text(l %context, l $trbn_inspect_comma)\n jmp @item\n@item\n %offset =l mul %index, 8\n %ip =l add %indexes, %offset\n %position =l loadl %ip\n %kp =l add %value, 24\n %keys =l loadl %kp\n %dp =l add %keys, 24\n %data =l loadl %dp\n %key_offset =l mul %position, 8\n %key_slot =l add %data, %key_offset\n %key =l loadl %key_slot\n jnz %boxed, @boxed, @plain\n@boxed\n jmp @render_key\n@plain\n %decoded =l call $trbn_inspect_hash_key(l %value, l %key)\n jmp @render_key\n@render_key\n %key_value =l phi @boxed %key, @plain %decoded\n %budget_before_key =l loadl %budgetp\n storel %budget_before_key, %key_budget\n storel 256, %budgetp")
+	qbe_output_line(output, " call " + test_inspection_symbol(node.key) + "(l %context, l %key_value, l 0, l 0)\n %budget_after_key =l loadl %key_budget\n storel %budget_after_key, %budgetp\n call $trbn_inspect_text(l %context, l $trbn_inspect_arrow)\n %vp =l call $trbn_hash_value_address(l %value, l %position)\n %child =l loadl %vp\n call " + test_inspection_symbol(node.value.children[0]) + "(l %context, l %child, l %next_depth, l %path)\n jmp @advance\n@advance\n %next =l add %index, 1\n jmp @loop\n@limit\n %sp =l add %value, 8\n %size =l loadl %sp\n %truncated =w cugtl %size, %count\n jnz %truncated, @truncated, @complete\n@truncated\n call $trbn_inspect_text(l %context, l $trbn_inspect_comma)\n call $trbn_inspect_text(l %context, l $trbn_inspect_ellipsis)\n jmp @complete\n@complete\n call $trbn_inspect_text(l %context, l $trbn_inspect_hash_end)\n ret")
+end
+
+def emit_test_inspection_node(node: MirTestInspectionNode, mut output: QbeOutput)
+	kind := node.kind
+	value := node.value
+	mut parameter := "%value"
+	if kind == "interface"
+		parameter = "%boxed"
+	end
+	qbe_output_line(output, "function " + test_inspection_symbol(value.type_id) + "(l %context, l " + parameter + ", l %depth, l %seen) {\n@start")
+	if kind == "interface"
+		qbe_output_line(output, " %vp =l add %boxed, 8\n %value =l loadl %vp")
+	end
+	if kind == "alias" || kind == "nullable" || kind == "tagged"
+		if kind == "alias"
+			qbe_output_line(output, " call " + test_inspection_symbol(value.children[0]) + "(l %context, l %value, l %depth, l %seen)\n ret")
+		elsif kind == "nullable"
+			qbe_output_line(output, " %absent =w ceql %value, 0\n jnz %absent, @nil, @unwrap\n@nil\n call $trbn_inspect_text(l %context, l $trbn_inspect_nil)\n ret\n@unwrap\n %vp =l add %value, 8\n %child =l loadl %vp\n call " + test_inspection_symbol(value.children[0]) + "(l %context, l %child, l %depth, l %seen)\n ret")
+		else
+			qbe_output_line(output, " %tp =l add %value, 8\n %tag =l loadl %tp\n %vp =l add %value, 16\n %child =l loadl %vp")
+			mut index := 0
+			value.children.each do |child|
+				id := integer_string(index)
+				qbe_output_line(output, " %tag" + id + " =w ceql %tag, " + integer_string(child) + "\n jnz %tag" + id + ", @child" + id + ", @next" + id + "\n@child" + id + "\n call " + test_inspection_symbol(child) + "(l %context, l %child, l %depth, l %seen)\n ret\n@next" + id)
+				index += 1
+			end
+			qbe_output_line(output, " hlt")
+		end
+		qbe_output_line(output, "}\n")
+		return
+	end
+	if kind == "nil"
+		emit_inspection_text("$trbn_inspect_nil", output)
+		qbe_output_line(output, " ret\n}\n")
+		return
+	end
+	qbe_output_line(output, " %budgetp =l add %context, 24\n %budget =l loadl %budgetp\n %empty =w cslel %budget, 0\n %deep =w csgel %depth, 8\n %limited =w or %empty, %deep\n jnz %limited, @limited, @visit\n@limited\n call $trbn_inspect_text(l %context, l $trbn_inspect_ellipsis)\n ret\n@visit\n %remaining =l sub %budget, 1\n storel %remaining, %budgetp\n %next_depth =l add %depth, 1")
+	if kind == "array" || kind == "hash" || kind == "object" || kind == "interface"
+		mut identity := value.type_id
+		if kind == "object" || kind == "interface"
+			identity = 0
+		end
+		qbe_output_line(output, " %visited =l call $trbn_inspect_seen(l %seen, l " + integer_string(identity) + ", l %value)\n %cycle =w cnel %visited, 0\n jnz %cycle, @cycle, @pair\n@cycle\n call $trbn_inspect_text(l %context, l $trbn_inspect_cycle)\n ret\n@pair\n %path =l alloc8 24\n storel %seen, %path\n %path_kind =l add %path, 8\n %path_value =l add %path, 16\n storel " + integer_string(identity) + ", %path_kind\n storel %value, %path_value")
+	else
+		qbe_output_line(output, " %path =l copy %seen")
+	end
+	qbe_output_line(output, " jmp @content\n@content")
+	if kind == "integer"
+		qbe_output_line(output, " call $trbn_inspect_integer(l %context, l %value)\n ret")
+	elsif kind == "boolean"
+		qbe_output_line(output, " %truth =w cnel %value, 0\n jnz %truth, @true, @false\n@true\n call $trbn_inspect_text(l %context, l $trbn_inspect_true)\n ret\n@false\n call $trbn_inspect_text(l %context, l $trbn_inspect_false)\n ret")
+	elsif kind == "float"
+		qbe_output_line(output, " call $trbn_inspect_float(l %context, l %value)\n ret")
+	elsif kind == "string"
+		qbe_output_line(output, " call $trbn_inspect_quoted(l %context, l %value)\n ret")
+	elsif kind == "fields"
+		emit_inspection_fields(value.children, 8, "record", inspection_label(value.type_id, 0), true, output)
+	elsif kind == "array" || kind == "bytes"
+		emit_inspection_sequence(node, output)
+	elsif kind == "hash"
+		emit_inspection_hash(node, output)
+	elsif kind == "range"
+		qbe_output_line(output, " %sp =l add %value, 8\n %ep =l add %value, 16\n %xp =l add %value, 24\n %start =l loadl %sp\n %end =l loadl %ep\n %exclusive =l loadl %xp\n call $trbn_inspect_integer(l %context, l %start)\n %excluded =w cnel %exclusive, 0\n jnz %excluded, @exclusive, @inclusive\n@exclusive\n call $trbn_inspect_text(l %context, l $trbn_inspect_range_exclusive)\n jmp @end\n@inclusive\n call $trbn_inspect_text(l %context, l $trbn_inspect_range)\n jmp @end\n@end\n call $trbn_inspect_integer(l %context, l %end)\n ret")
+	elsif kind == "enum" || kind == "enum_scalar" || kind == "enum_integer" || kind == "object" || kind == "interface"
+		if kind == "enum" || kind == "enum_scalar" || kind == "enum_integer"
+			qbe_output_line(output, " %tp =l add %value, 8\n %tag =l loadl %tp")
+		else
+			qbe_output_line(output, " %header =l loadl %value\n %tag =l and %header, -2")
+		end
+		mut index := 0
+		value.variants.each do |variant|
+			id := integer_string(index)
+			mut tag := integer_string(variant)
+			mut offset := 16
+			mut nominal := false
+			if kind == "object" || kind == "interface"
+				nominal = true
+			end
+			if nominal
+				tag = "$trbn_desc_object" + tag
+				offset = 8
+			end
+			label := inspection_label(value.type_id, index)
+			qbe_output_line(output, " %matches" + id + " =w ceql %tag, " + tag + "\n jnz %matches" + id + ", @variant" + id + ", @next" + id + "\n@variant" + id)
+			if kind == "enum_scalar"
+				qbe_output_line(output, " call $trbn_inspect_quote_span(l %context, l " + label + ", l " + integer_string(compiler_string_bytes(node.labels[index]).size()) + ")\n ret")
+			elsif kind == "enum_integer" || (!nominal && value.fields[index].size() == 0)
+				emit_inspection_text(label, output)
+				qbe_output_line(output, " ret")
+			else
+				emit_inspection_fields(value.fields[index], offset, "variant" + id + "_", label, nominal, output)
+			end
+			qbe_output_line(output, "@next" + id)
+			index += 1
+		end
+		qbe_output_line(output, " hlt")
+	else
+		mut text := "$trbn_inspect_opaque"
+		if kind == "callable"
+			text = "$trbn_inspect_function"
+		elsif kind == "empty" || kind == "empty_hash"
+			mut opener := "$trbn_inspect_array"
+			text = "$trbn_inspect_array_end"
+			if kind == "empty_hash"
+				opener = "$trbn_inspect_hash"
+				text = "$trbn_inspect_hash_end"
+			end
+			emit_inspection_text(opener, output)
+		end
+		emit_inspection_text(text, output)
+		qbe_output_line(output, " ret")
+	end
+	qbe_output_line(output, "}\n")
+end
+
+def emit_test_inspection_runtime(native_module: MirModule, mut output: QbeOutput)
+	mut roots: Array<Integer> := []
+	native_module.signatures.each do |signature|
+		if signature.kind == mir_signature_standard() && signature.adapter == test_adapter_inspect()
+			roots.push(mir_test_value_id(native_module, signature.parameter_types[0]))
+		end
+	end
+	if roots.size() == 0
+		return
+	end
+	# Leaf conversion and bounded Hash ordering are private dependencies of this
+	# optional family; ordinary applications do not request this runtime.
+	output.runtime_flags[qbe_runtime_float_string_slot()] = 1
+	output.runtime_flags[qbe_runtime_process_slot()] = 1
+	output.runtime_flags[qbe_runtime_hash_mode_slot()] = 4
+	emit_test_inspection_helpers(output)
+	plan := mir_test_inspection_plan(native_module, roots)
+	plan.nodes.each do |node|
+		mut variant := 0
+		node.labels.each do |label|
+			name := inspection_label(node.value.type_id, variant)
+			emit_inspection_data(name, label, output)
+			if variant < node.field_labels.size()
+				mut field := 0
+				node.field_labels[variant].each do |text|
+					emit_inspection_data(name + "_field" + integer_string(field), text + ": ", output)
+					field += 1
+				end
+			end
+			variant += 1
+		end
+		emit_test_inspection_node(node, output)
+	end
+	native_module.signatures.each do |signature|
+		if signature.kind == mir_signature_standard() && signature.adapter == test_adapter_inspect()
+			id := mir_test_value_id(native_module, signature.parameter_types[0])
+			mut storage := "l"
+			if mir_storage_name(native_module, signature.parameter_types[0]) == "Float"
+				storage = "d"
+			end
+			qbe_output_line(output, "function l $trbn_test_inspect_" + integer_string(signature.id) + "(" + storage + " %input) {\n@start\n %roots =l loadl $trbn_gc_temp_count")
+			if mir_managed_type(native_module, id)
+				qbe_output_line(output, " call $trbn_gc_temp_push(l %input)")
+			end
+			mut operation := "copy"
+			if storage == "d"
+				operation = "cast"
+			end
+			qbe_output_line(output, " %value =l " + operation + " %input\n %context =l alloc8 32\n storel 0, %context\n %lp =l add %context, 8\n %cp =l add %context, 16\n %bp =l add %context, 24\n storel 0, %lp\n storel 0, %cp\n storel 256, %bp\n call " + test_inspection_symbol(id) + "(l %context, l %value, l 0, l 0)\n %data =l loadl %context\n %length =l loadl %lp\n %result =l call $trbn_string_from_bytes(l %data, l %length)\n call $free(l %data)\n storel %roots, $trbn_gc_temp_count\n ret %result\n}\n")
+		end
+	end
+end

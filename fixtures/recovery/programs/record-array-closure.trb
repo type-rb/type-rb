@@ -1,0 +1,27 @@
+alias ReadRow = () -> Row
+
+record Row
+	id: Integer
+end
+
+record Message
+	rows: Array<Row>
+end
+
+def reader(value: Integer): ReadRow
+	message := Message.new(rows: [Row.new(id: value)])
+	return fn(): Row
+		return message.rows[- 1]
+	end
+end
+
+def main()
+	read := reader(42)
+	other := reader(9)
+	if other().id == 9
+		if read().id == 42
+			puts("record-array-closure-ok")
+		end
+	end
+	return
+end

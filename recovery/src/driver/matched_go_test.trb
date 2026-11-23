@@ -1,0 +1,70 @@
+import { matched_go_driver_import, matched_go_driver_source, matched_go_recover_canonical_source, matched_go_source } from driver/matched_go
+import trb/std/result
+import { describe, expect, test } from trb/std/test
+
+describe("Matched Go compiler comparison driver") do
+	test("retains the exact generated comparison entry") do
+		canonical := "def compiler_main(source: String, mode: String, file_mode: Boolean): Integer\n\treturn 0\nend\n\ndef main()\n\treturn\nend\n"
+		expected := "import trb/std/process\ndef compiler_main(source: String, mode: String, file_mode: Boolean): Integer\n\treturn 0\nend\n\ndef main()\n\targuments := Process.argv()\n\tif arguments.size() != 3 || arguments[0] != \"--source-content\"\n\t\tputs(\"usage: compiler --source-content MODE SOURCE\")\n\t\treturn\n\tend\n\tcompiler_main(arguments[2], arguments[1], false)\n\treturn\nend\n"
+		case matched_go_source(canonical)
+		when Result::Ok(transformed)
+			expect(transformed).to_equal(expected)
+		when Result::Err(_message)
+			expect(false).to_be_true()
+		end
+	end
+
+	test("rejects a transformed source without the exact import boundary") do
+		case matched_go_recover_canonical_source(matched_go_driver_source())
+		when Result::Ok(_source)
+			expect(false).to_be_true()
+		when Result::Err(message)
+			expect(message).to_equal("matched source is missing the argv import")
+		end
+	end
+
+	test("changes only the import and empty main driver") do
+		mut canonical := "def compiler_main(source: String, mode: String, file_mode: Boolean): Integer\n"
+		canonical += "\tputs(source + mode + file_mode.to_s())\n"
+		canonical += "\treturn 0\n"
+		canonical += "end\n\n"
+		canonical += "def main()\n"
+		canonical += "\treturn\n"
+		canonical += "end\n"
+		case matched_go_source(canonical)
+		when Result::Ok(transformed)
+			expect(transformed.start_with?(matched_go_driver_import())).to_be_true()
+			expect(transformed.end_with?(matched_go_driver_source())).to_be_true()
+			case matched_go_recover_canonical_source(transformed)
+			when Result::Ok(recovered)
+				expect(recovered).to_equal(canonical)
+			when Result::Err(message)
+				puts(message)
+				expect(false).to_be_true()
+			end
+		when Result::Err(message)
+			puts(message)
+			expect(false).to_be_true()
+		end
+	end
+
+	test("rejects a compiler source without the exact empty main driver") do
+		case matched_go_source("def main()\n\tputs(\"active\")\n\treturn\nend\n")
+		when Result::Ok(_source)
+			expect(false).to_be_true()
+		when Result::Err(message)
+			expect(message).to_equal("compiler source must end with the exact empty main() driver")
+		end
+	end
+
+	test("rejects a transformed source with a changed driver boundary") do
+		case matched_go_recover_canonical_source(
+				matched_go_driver_import() + "def main()\n\treturn\nend\n",
+			)
+		when Result::Ok(_source)
+			expect(false).to_be_true()
+		when Result::Err(message)
+			expect(message).to_equal("matched source is missing the exact argv driver")
+		end
+	end
+end

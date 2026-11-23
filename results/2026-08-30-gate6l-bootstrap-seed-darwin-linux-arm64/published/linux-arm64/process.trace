@@ -1,0 +1,53 @@
+4528  execve("/home/runner/work/_temp/bootstrap-workspace/b4/compiler", ["/home/runner/work/_temp/bootstra"..., "build", "/home/runner/work/type-rb-native"..., "--output", "/home/runner/work/_temp/bootstra"..., "--qbe", "/home/runner/work/_temp/qbe-1.3/"..., "--cc", "/usr/bin/cc", "--target", "linux-arm64-v0"], 0xffffd816ab58 /* 103 vars */) = 0
+4528  clone(child_stack=NULL, flags=CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, child_tidptr=0xff87b90dbf90) = 4529
+4528  wait4(4529,  <unfinished ...>
+4529  execve("/home/runner/work/_temp/qbe-1.3/qbe", ["/home/runner/work/_temp/qbe-1.3/"..., "-t", "arm64", "-o", "/home/runner/work/_temp/bootstra"..., "/home/runner/work/_temp/bootstra"...], 0xffffeeaef9a8 /* 103 vars */) = 0
+4529  exit_group(0)                     = ?
+4529  +++ exited with 0 +++
+4528  <... wait4 resumed>[{WIFEXITED(s) && WEXITSTATUS(s) == 0}], 0, NULL) = 4529
+4528  --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=4529, si_uid=1001, si_status=0, si_utime=0, si_stime=0} ---
+4528  clone(child_stack=NULL, flags=CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, child_tidptr=0xff87b90dbf90) = 4530
+4528  wait4(4530,  <unfinished ...>
+4530  execve("/usr/bin/cc", ["/usr/bin/cc", "-xassembler", "/home/runner/work/_temp/bootstra"..., "-Wl,--gc-sections,--strip-all", "-o", "/home/runner/work/_temp/bootstra"...], 0xffffeeaef9a8 /* 103 vars */) = 0
+4530  clone(child_stack=0xffffd23a7e40, flags=CLONE_VM|CLONE_VFORK|SIGCHLD <unfinished ...>
+4531  execve("/snap/bin/as", ["as", "-EL", "-mabi=lp64", "-o", "/tmp/cc7HRPCV.o", "/home/runner/work/_temp/bootstra"...], 0x31e3dbe0 /* 108 vars */) = -1 ENOENT (No such file or directory)
+4531  execve("/home/runner/.local/bin/as", ["as", "-EL", "-mabi=lp64", "-o", "/tmp/cc7HRPCV.o", "/home/runner/work/_temp/bootstra"...], 0x31e3dbe0 /* 108 vars */) = -1 ENOENT (No such file or directory)
+4531  execve("/opt/pipx_bin/as", ["as", "-EL", "-mabi=lp64", "-o", "/tmp/cc7HRPCV.o", "/home/runner/work/_temp/bootstra"...], 0x31e3dbe0 /* 108 vars */) = -1 ENOENT (No such file or directory)
+4531  execve("/home/runner/.cargo/bin/as", ["as", "-EL", "-mabi=lp64", "-o", "/tmp/cc7HRPCV.o", "/home/runner/work/_temp/bootstra"...], 0x31e3dbe0 /* 108 vars */) = -1 ENOENT (No such file or directory)
+4531  execve("/home/runner/.config/composer/vendor/bin/as", ["as", "-EL", "-mabi=lp64", "-o", "/tmp/cc7HRPCV.o", "/home/runner/work/_temp/bootstra"...], 0x31e3dbe0 /* 108 vars */) = -1 ENOENT (No such file or directory)
+4531  execve("/home/runner/.dotnet/tools/as", ["as", "-EL", "-mabi=lp64", "-o", "/tmp/cc7HRPCV.o", "/home/runner/work/_temp/bootstra"...], 0x31e3dbe0 /* 108 vars */) = -1 ENOENT (No such file or directory)
+4531  execve("/usr/local/sbin/as", ["as", "-EL", "-mabi=lp64", "-o", "/tmp/cc7HRPCV.o", "/home/runner/work/_temp/bootstra"...], 0x31e3dbe0 /* 108 vars */) = -1 ENOENT (No such file or directory)
+4531  execve("/usr/local/bin/as", ["as", "-EL", "-mabi=lp64", "-o", "/tmp/cc7HRPCV.o", "/home/runner/work/_temp/bootstra"...], 0x31e3dbe0 /* 108 vars */) = -1 ENOENT (No such file or directory)
+4531  execve("/usr/sbin/as", ["as", "-EL", "-mabi=lp64", "-o", "/tmp/cc7HRPCV.o", "/home/runner/work/_temp/bootstra"...], 0x31e3dbe0 /* 108 vars */) = -1 ENOENT (No such file or directory)
+4531  execve("/usr/bin/as", ["as", "-EL", "-mabi=lp64", "-o", "/tmp/cc7HRPCV.o", "/home/runner/work/_temp/bootstra"...], 0x31e3dbe0 /* 108 vars */ <unfinished ...>
+4530  <... clone resumed>)              = 4531
+4531  <... execve resumed>)             = 0
+4530  wait4(4531,  <unfinished ...>
+4531  exit_group(0)                     = ?
+4531  +++ exited with 0 +++
+4530  <... wait4 resumed>[{WIFEXITED(s) && WEXITSTATUS(s) == 0}], 0, NULL) = 4531
+4530  --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=4531, si_uid=1001, si_status=0, si_utime=0, si_stime=0} ---
+4530  clone(child_stack=0xffffd23a6f80, flags=CLONE_VM|CLONE_VFORK|SIGCHLD <unfinished ...>
+4532  execve("/usr/libexec/gcc/aarch64-linux-gnu/13/collect2", ["/usr/libexec/gcc/aarch64-linux-g"..., "-plugin", "/usr/libexec/gcc/aarch64-linux-g"..., "-plugin-opt=/usr/libexec/gcc/aar"..., "-plugin-opt=-fresolution=/tmp/cc"..., "-plugin-opt=-pass-through=-lgcc", "-plugin-opt=-pass-through=-lgcc_"..., "-plugin-opt=-pass-through=-lc", "-plugin-opt=-pass-through=-lgcc", "-plugin-opt=-pass-through=-lgcc_"..., "--build-id", "--eh-frame-hdr", "--hash-style=gnu", "--as-needed", "-dynamic-linker", "/lib/ld-linux-aarch64.so.1", "-X", "-EL", "-maarch64linux", "--fix-cortex-a53-843419", "-pie", "-z", "now", "-z", "relro", "-o", "/home/runner/work/_temp/bootstra"..., "/usr/lib/gcc/aarch64-linux-gnu/1"..., "/usr/lib/gcc/aarch64-linux-gnu/1"..., "/usr/lib/gcc/aarch64-linux-gnu/1"..., "-L/usr/lib/gcc/aarch64-linux-gnu"..., "-L/usr/lib/gcc/aarch64-linux-gnu"..., ...], 0x31e3e340 /* 110 vars */ <unfinished ...>
+4530  <... clone resumed>)              = 4532
+4532  <... execve resumed>)             = 0
+4530  wait4(4532,  <unfinished ...>
+4532  clone(child_stack=0xffffe464f900, flags=CLONE_VM|CLONE_VFORK|SIGCHLD <unfinished ...>
+4533  execve("/usr/bin/ld", ["/usr/bin/ld", "-plugin", "/usr/libexec/gcc/aarch64-linux-g"..., "-plugin-opt=/usr/libexec/gcc/aar"..., "-plugin-opt=-fresolution=/tmp/cc"..., "-plugin-opt=-pass-through=-lgcc", "-plugin-opt=-pass-through=-lgcc_"..., "-plugin-opt=-pass-through=-lc", "-plugin-opt=-pass-through=-lgcc", "-plugin-opt=-pass-through=-lgcc_"..., "--build-id", "--eh-frame-hdr", "--hash-style=gnu", "--as-needed", "-dynamic-linker", "/lib/ld-linux-aarch64.so.1", "-X", "-EL", "-maarch64linux", "--fix-cortex-a53-843419", "-pie", "-z", "now", "-z", "relro", "-o", "/home/runner/work/_temp/bootstra"..., "/usr/lib/gcc/aarch64-linux-gnu/1"..., "/usr/lib/gcc/aarch64-linux-gnu/1"..., "/usr/lib/gcc/aarch64-linux-gnu/1"..., "-L/usr/lib/gcc/aarch64-linux-gnu"..., "-L/usr/lib/gcc/aarch64-linux-gnu"..., ...], 0xffffe464ffb0 /* 110 vars */ <unfinished ...>
+4532  <... clone resumed>)              = 4533
+4533  <... execve resumed>)             = 0
+4532  wait4(4533,  <unfinished ...>
+4533  exit_group(0)                     = ?
+4533  +++ exited with 0 +++
+4532  <... wait4 resumed>[{WIFEXITED(s) && WEXITSTATUS(s) == 0}], 0, NULL) = 4533
+4532  --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=4533, si_uid=1001, si_status=0, si_utime=1 /* 0.01 s */, si_stime=1 /* 0.01 s */} ---
+4532  exit_group(0)                     = ?
+4532  +++ exited with 0 +++
+4530  <... wait4 resumed>[{WIFEXITED(s) && WEXITSTATUS(s) == 0}], 0, NULL) = 4532
+4530  --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=4532, si_uid=1001, si_status=0, si_utime=0, si_stime=0} ---
+4530  exit_group(0)                     = ?
+4530  +++ exited with 0 +++
+4528  <... wait4 resumed>[{WIFEXITED(s) && WEXITSTATUS(s) == 0}], 0, NULL) = 4530
+4528  --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=4530, si_uid=1001, si_status=0, si_utime=0, si_stime=0} ---
+4528  exit_group(0)                     = ?
+4528  +++ exited with 0 +++

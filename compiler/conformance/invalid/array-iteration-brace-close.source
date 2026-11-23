@@ -1,0 +1,7 @@
+def main()
+	[1].each { |value|
+		puts(value)
+	else
+		puts(value)
+	}
+end

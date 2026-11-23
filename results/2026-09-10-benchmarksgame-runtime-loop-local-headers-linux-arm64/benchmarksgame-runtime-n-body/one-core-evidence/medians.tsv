@@ -1,0 +1,8 @@
+case	lane	candidate	retained	passed	walltime_median_seconds	cputime_median_seconds	memory_median_bytes	status
+n-body	one-core	typerb-native	11	11	7.87414	7.8713	524288	pass
+n-body	one-core	typerb-go	11	11	7.54048	7.53344	3289088	pass
+n-body	one-core	c	11	11	2.97682	2.97384	786432	pass
+n-body	one-core	cpp	11	11	2.73207	2.72903	950272	pass
+n-body	one-core	go	11	11	3.59973	3.59351	2899968	pass
+n-body	one-core	rust	11	11	3.50996	3.50695	1220608	pass
+n-body	one-core	java	11	11	5.05625	4.98906	49287168	pass

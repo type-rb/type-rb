@@ -1,0 +1,3 @@
+def add(left: Integer, right: Integer): Integer
+	return left + right
+end

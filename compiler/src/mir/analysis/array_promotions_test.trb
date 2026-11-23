@@ -1,0 +1,200 @@
+import { emit_qbe } from compiler
+import { mir_scalar_boolean_and, mir_scalar_boolean_or } from mir/model/scalar_operators
+import { mir_op_scalar_binary } from mir/model/instructions
+import { MirArrayCachedValue, MirArrayLoop, mir_instruction_with_payload } from mir/model/module
+import { mir_function_array_loops } from mir/analysis/array_loops
+import { optimize_verified_mir } from mir/passes/optimize
+import { verify_mir } from mir/verify/module
+import { CompilerState } from state/state
+import { array_loop_mir_check } from testing/mir/array_loops
+import { control_test_output } from testing/mir/control
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { logical_run_qbe } from testing/qbe_runner
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+def array_promotion_source(start: String, extra: String, main: String): String
+	return "def step(read: Array<Float>, mut left: Array<Float>, mut right: Array<Float>)\nmut index := 0\nwhile index < read.size()\nmut other := " + start + "\nwhile other < read.size()\nleft[index] += read[other]\nright[index] += read[other]\nleft[other] -= read[index]\nright[other] -= read[index]\n" + extra + "\nother += 1\nend\nindex += 1\nend\nend\ndef observe(values: Array<Float>)\nputs(values[0])\nend\ndef main()\n" + main + "\nend\n"
+end
+
+def array_promotion_count(state: CompilerState): Integer
+	mut count := 0
+	state.scalar_mir.array_loops[0].each do |plan|
+		count += plan.cached_values.size()
+	end
+	return count
+end
+
+def array_promotion_run(output: String, expected: String)
+	qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+	if qbe != nil
+		case logical_run_qbe(qbe, output)
+		when Result::Ok(actual)
+			expect(actual).to_equal(expected)
+		when Result::Err(error)
+			puts(error)
+			expect(false).to_be_true()
+		end
+	end
+end
+
+describe("MIR Array loop value promotion") do
+	test("caches distinct primitive elements and keeps every alias on its original path") do
+		source := array_promotion_source("index + 1", "", "mut left := [10.0, 20.0, 30.0]\nmut right := [1.0, 2.0, 3.0]\nstep([2.0, 3.0, 5.0], left, right)\nputs(left[0].to_i())\nputs(left[1].to_i())\nputs(left[2].to_i())\nputs(right[0].to_i())\nputs(right[1].to_i())\nputs(right[2].to_i())\nmut shared := [10.0, 20.0, 30.0]\nstep([2.0, 3.0, 5.0], shared, shared)\nputs(shared[0].to_i())\nputs(shared[1].to_i())\nputs(shared[2].to_i())\nmut read := [2.0, 3.0, 5.0]\nmut other := [1.0, 2.0, 3.0]\nstep(read, read, other)\nputs(read[0].to_i())\nputs(read[1].to_i())\nputs(read[2].to_i())\nstep([], [], [])\nstep([1.0], [], [])")
+		mut state := array_loop_mir_check(source)
+		expect(array_promotion_count(state)).to_equal(2)
+		before := control_test_output(emit_qbe(state))
+		expect(before.include?("@mir_array_initialize_")).to_be_true()
+		expect(before.include?("%mir_array_ready_")).to_be_false()
+		intrinsic_mir_erase(state)
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+		array_promotion_run(before, "18\n23\n25\n9\n5\n-2\n26\n26\n20\n10\n-7\n2\n")
+	end
+
+	test("rejects overlapping indexes observers early exits and unproved failures") do
+		["index", "index - 1"].each do |start|
+			state := array_loop_mir_check(array_promotion_source(start, "", ""))
+			expect(array_promotion_count(state)).to_equal(0)
+		end
+		["observe(left)", "left[0] = 9.0", "if other == 2\nbreak\nend", "left.push(1.0)", "puts((other * other).to_s())", "left[index] += (other * other).to_f()", "index += 1"].each do |extra|
+			state := array_loop_mir_check(array_promotion_source("index + 1", extra, ""))
+			expect(array_promotion_count(state)).to_equal(0)
+		end
+	end
+
+	test("preserves Integer Boolean and signed-zero Float elements across swaps") do
+		["Integer", "Boolean", "Float"].each do |element|
+			mut main := "mut values := [1, 2, 3]\nstep(values)\nputs(values[0])\nputs(values[1])\nputs(values[2])"
+			mut expected := "3\n2\n1\n"
+			if element == "Boolean"
+				main = "mut values := [true, false, false]\nstep(values)\nputs(values[0])\nputs(values[1])\nputs(values[2])"
+				expected = "false\nfalse\ntrue\n"
+			elsif element == "Float"
+				main = "mut values := [-0.0, 1.0, 2.0]\nstep(values)\nputs(values[0])\nputs(values[1])\nputs(1.0 / values[2] < 0.0)"
+				expected = "2.0\n1.0\ntrue\n"
+			end
+			source := "def step(mut values: Array<" + element + ">)\nmut index := 0\nwhile index < values.size()\nmut other := index + 1\nwhile other < values.size()\nsaved := values[index]\nvalues[index] = values[other]\nvalues[other] = saved\nother += 1\nend\nindex += 1\nend\nend\ndef main()\n" + main + "\nstep([])\nend\n"
+			state := array_loop_mir_check(source)
+			expect(array_promotion_count(state)).to_equal(1)
+			array_promotion_run(control_test_output(emit_qbe(state)), expected)
+		end
+	end
+
+	test("rederives cache proofs after source erasure and physical block reordering") do
+		mut state := array_loop_mir_check(array_promotion_source("index + 1", "", "mut left := [1.0, 2.0]\nstep([3.0, 4.0], left, [0.0, 0.0])\nputs(left[0].to_i())"))
+		expect(array_promotion_count(state)).to_equal(2)
+		intrinsic_mir_erase(state)
+		state.scalar_mir.functions.each do |function|
+			mut left := function.block_start
+			mut right := left + function.block_count - 1
+			while left < right
+				saved := state.scalar_mir.blocks[left]
+				state.scalar_mir.blocks[left] = state.scalar_mir.blocks[right]
+				state.scalar_mir.blocks[right] = saved
+				left += 1
+				right -= 1
+			end
+		end
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(array_promotion_count(state)).to_equal(2)
+		array_promotion_run(control_test_output(emit_qbe(state)), "5\n")
+	end
+
+	test("rejects cached facts when a successful conjunction becomes a disjunction") do
+		mut state := array_loop_mir_check(array_promotion_source("index + 1", "", ""))
+		expect(array_promotion_count(state)).to_equal(2)
+		mut index := 0
+		while index < state.scalar_mir.instructions.size()
+			instruction := state.scalar_mir.instructions[index]
+			if instruction.kind == mir_op_scalar_binary() && instruction.payload == mir_scalar_boolean_and()
+				state.scalar_mir.instructions[index] = mir_instruction_with_payload(instruction, mir_scalar_boolean_or())
+			end
+			index += 1
+		end
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR Array-loop plan differs")
+		state.scalar_mir.array_loops[0] = mir_function_array_loops(state.scalar_mir, state.scalar_mir.functions[0], state.scalar_mir.values)
+		expect(array_promotion_count(state)).to_equal(0)
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	end
+
+	test("captures each read before later writes and retains strict Float rounding") do
+		base := array_promotion_source("index + 1", "right[index] += saved", "mut left := [1.0, 2.0, 3.0]\nmut right := [0.0, 0.0, 0.0]\nstep([3.0, 4.0, 5.0], left, right)\nputs(left[0].to_i())\nputs(left[1].to_i())\nputs(left[2].to_i())\nputs(right[0].to_i())\nputs(right[1].to_i())\nputs(right[2].to_i())\nmut rounded := [10000000000000000.0, 0.0, 0.0]\nstep([0.0, 1.0, -10000000000000000.0], rounded, [0.0, 0.0, 0.0])\nputs(rounded[0])")
+		source := base.split("left[index] += read[other]").join("saved := left[index]\nleft[index] += read[other]")
+		state := array_loop_mir_check(source)
+		expect(array_promotion_count(state)).to_equal(2)
+		array_promotion_run(control_test_output(emit_qbe(state)), "10\n4\n-4\n15\n1\n-7\n0.0\n")
+	end
+
+	test("rejects element reads in the header before deferred writeback") do
+		base := array_promotion_source("index + 1", "", "")
+		source := base.split("while other < read.size()").join("while other < left[index].to_i()")
+		state := array_loop_mir_check(source)
+		expect(array_promotion_count(state)).to_equal(0)
+	end
+
+	test("rejects forged owner index access and exit metadata") do
+		mut mode := 0
+		while mode < 5
+			mut state := array_loop_mir_check(array_promotion_source("index + 1", "", ""))
+			mut changed := false
+			mut slot := 0
+			while slot < state.scalar_mir.array_loops[0].size()
+				plan := state.scalar_mir.array_loops[0][slot]
+				if plan.cached_values.size() > 0 && !changed
+					cache := plan.cached_values[0]
+					mut owner := cache.owner
+					mut index := cache.index
+					mut exit_block := cache.exit
+					mut loads := cache.loads
+					mut stores := cache.stores
+					if mode == 0
+						owner = plan.cached_values[1].owner
+					elsif mode == 1
+						index = owner
+					elsif mode == 2
+						loads = []
+					elsif mode == 3
+						stores = []
+					else
+						exit_block = cache.body
+					end
+					caches := [MirArrayCachedValue.new(owner: owner, index: index, type_id: cache.type_id, body: cache.body, exit: exit_block, loads: loads, stores: stores), plan.cached_values[1]]
+					state.scalar_mir.array_loops[0][slot] = MirArrayLoop.new(header: plan.header, preheader: plan.preheader, owner: plan.owner, length: plan.length, accesses: plan.accesses, headers: plan.headers, reserved_pushes: plan.reserved_pushes, cached_values: caches, peel_body: plan.peel_body, peel_nonempty: plan.peel_nonempty)
+					changed = true
+				end
+				slot += 1
+			end
+			expect(changed).to_be_true()
+			expect(verify_mir(state.scalar_mir, true)).to_equal("MIR Array-loop plan differs")
+			optimize_verified_mir(state.scalar_mir)
+			expect(verify_mir(state.scalar_mir, true)).to_equal("")
+			expect(array_promotion_count(state)).to_equal(2)
+			mode += 1
+		end
+	end
+
+	test("writes back before collection and retains the original short-array failure") do
+		state := array_loop_mir_check(array_promotion_source("index + 1", "", "mut left := [1.0, 2.0]\nstep([3.0, 4.0], left, [0.0, 0.0])\ntext := left[0].to_i().to_s()\nputs(text + left[1].to_i().to_s())"))
+		expect(array_promotion_count(state)).to_equal(2)
+		output := control_test_output(emit_qbe(state))
+		allocation := "function l $trbn_string_alloc(l %size) {\n@start\n"
+		expect(output.split(allocation).size()).to_equal(2)
+		forced := output.split(allocation).join(allocation + "\tcall $trbn_gc_collect(w 0)\n")
+		array_promotion_run(forced, "5-1\n")
+		short := array_loop_mir_check(array_promotion_source("index + 1", "", "step([3.0, 4.0], [1.0], [0.0, 0.0])"))
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, control_test_output(emit_qbe(short)), 2)
+			when Result::Ok(_actual)
+				expect(false).to_be_true()
+			when Result::Err(error)
+				expect(error).to_equal("panic: index is out of bounds\n")
+			end
+		end
+	end
+end

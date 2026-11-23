@@ -1,0 +1,8 @@
+{
+  "name": "recovery-scalar-integer-overflow",
+  "mode": "go",
+  "sourceDir": "src",
+  "go": {
+    "module": "github.com/type-rb/type-rb-native/corpus/recovery-scalar/integer-overflow"
+  }
+}

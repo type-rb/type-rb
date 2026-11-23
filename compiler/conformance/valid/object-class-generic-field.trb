@@ -1,0 +1,14 @@
+class Box<T>
+	@value: T
+	def initialize(value: T)
+		@value = value
+	end
+	def get(): T
+		return @value
+	end
+end
+
+def main()
+	puts(Box<Integer>.new(3).get())
+	puts(Box<String>.new("word").get())
+end

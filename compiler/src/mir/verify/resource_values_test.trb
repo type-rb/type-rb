@@ -1,0 +1,46 @@
+import { check } from compiler
+import { MirObject } from frontend/types/object_model
+import { verify_mir } from mir/verify/module
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { expect_compiler_phase, logical_checked_source } from testing/pipeline
+import { describe, expect, test } from trb/std/test
+
+describe("Scoped resource MIR value proof") do
+	test("rejects ordinary construction storage conversion capture and returns after source erasure") do
+		[
+			"def forge()\n_value := File.new()\nend\n",
+			"def escape(file: File): File\nreturn file\nend\n",
+			"def escape(file: File): Any\nreturn file\nend\n",
+			"def escape(file: File): File?\nreturn file\nend\n",
+			"record Holder\nfile: File\nend\ndef escape(file: File): Holder\nreturn Holder.new(file: file)\nend\n",
+			"def escape(file: File): Array<File>\nreturn [file]\nend\n",
+			"def escape(file: File): Hash<String, File>\nreturn {\"file\" => file}\nend\n",
+			"def escape(file: File): () -> Any\nreturn fn(): Any\nreturn file\nend\nend\n",
+		].each do |declarations|
+			mut state := logical_checked_source("class File\nend\n" + declarations + "def main()\nend\n")
+			expect_compiler_phase(state, "check", check(state))
+			expect(verify_mir(state.scalar_mir, true)).to_equal("")
+			# Strengthen an ordinary empty class to a resource in MIR only. The
+			# already-lowered ordinary operations must now be rejected without
+			# consulting tokens or the frontend's resource checking decisions.
+			mut found := false
+			state.scalar_mir.objects.each.with_index do |row, index|
+				if row.name == "File"
+					state.scalar_mir.objects[index] = MirObject.new(resource_kind: 1, initializer: row.initializer, declaration: row.declaration, type_id: row.type_id, name: row.name, arguments: row.arguments, source_id: row.source_id, line: row.line, interface_type: row.interface_type, superclass: row.superclass, interfaces: row.interfaces, fields: row.fields)
+					found = true
+				end
+			end
+			expect(found).to_be_true()
+			intrinsic_mir_erase(state)
+			expect(verify_mir(state.scalar_mir, true).include?("MIR scoped resource")).to_be_true()
+		end
+	end
+
+	test("preserves immutable aliases and borrow arguments across loop and branch edges") do
+		source := "import trb/std/file\ndef consume(_file: File)\nend\ndef borrow(file: File, flag: Boolean)\nborrowed_file := file\nmut index := 0\nwhile index < 2\nif flag\nconsume(borrowed_file)\nelse\nconsume(file)\nend\nindex += 1\nend\nend\ndef main()\nend\n"
+		mut state := logical_checked_source(source)
+		expect_compiler_phase(state, "check", check(state))
+		intrinsic_mir_erase(state)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	end
+end

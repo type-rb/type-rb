@@ -1,0 +1,3 @@
+def main()
+span: Range<String> := 1..2
+end

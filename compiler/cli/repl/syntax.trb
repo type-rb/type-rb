@@ -1,0 +1,553 @@
+import { repl_style_callable, repl_style_comment, repl_style_incomplete, repl_style_keyword, repl_style_literal, repl_style_plain, repl_style_string, repl_style_type } from repl/display_kinds
+import { token_kind_identifier, token_kind_newline, token_kind_number, token_kind_string } from state/token_kinds
+import { token_is, skip_newlines } from frontend/syntax/syntax_tokens
+import { parse_module } from frontend/syntax/parser
+import { enum_uppercase } from frontend/types/enum_types
+import { string_starts_with } from support/path
+import { compiler_new, has_diagnostic } from state/state
+import { load_integer, load_string } from support/storage
+import { character_in, compiler_source_slice, lex, interpolation_end, interpolation_quote_end } from frontend/syntax/lexer
+import { native_cli_scalar, native_cli_character, native_cli_cell_width } from host
+import { unicode_identifier_part, unicode_identifier_upper } from support/unicode_identifiers
+import { terminal_style } from terminal
+
+# Display spans preserve whitespace, comments and unfinished input. They do not
+# replace the compiler lexer or decide whether an expression may execute.
+record ReplSyntax
+	starts: Array<Integer>
+	ends: Array<Integer>
+	kinds: Array<Integer>
+	words: Array<String>
+end
+
+def repl_word(character: String): Boolean
+	if character_in(character, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_0123456789")
+		return true
+	end
+	return unicode_identifier_part(character)
+end
+
+def repl_keyword(word: String): Boolean
+	words := ["alias", "break", "case", "catch", "class", "def", "do", "else", "elsif", "end", "enum", "fn", "if", "implements", "import", "interface", "module", "mut", "newtype", "next", "readonly", "record", "return", "self", "then", "try", "when", "while", "from"]
+	mut index := 0
+	while index < words.size()
+		if words[index] == word
+			return true
+		end
+		index += 1
+	end
+	return false
+end
+
+def repl_syntax_flat(source: String): ReplSyntax
+	mut spans := ReplSyntax.new(starts: [], ends: [], kinds: [], words: [])
+	mut interpolation := [false]
+	mut index := 0
+	mut previous := ""
+	while index < source.size()
+		start := index
+		character := source[index]
+		mut kind := repl_style_plain()
+		index += 1
+		if character == "#"
+			kind = repl_style_comment()
+			mut loop_2 := true
+			while loop_2
+				mut condition_1 := index < source.size()
+				if condition_1
+					condition_1 = source[index] != "\n"
+				end
+				if condition_1
+					index += 1
+				else
+					loop_2 = false
+				end
+			end
+		else
+			if character == "\"" || character == "'"
+				kind = repl_style_string()
+				finish := interpolation_quote_end(source, source.size(), index, character, interpolation)
+				if finish < 0
+					index = source.size()
+					kind = repl_style_incomplete()
+				else
+					index = finish + 1
+				end
+			else
+				if character_in(character, "0123456789")
+					kind = repl_style_literal()
+					mut loop_7 := true
+					while loop_7
+						mut condition_6 := index < source.size()
+						if condition_6
+							condition_6 = character_in(source[index], "0123456789_.")
+						end
+						if condition_6
+							index += 1
+						else
+							loop_7 = false
+						end
+					end
+				else
+					if repl_word(character)
+						mut loop_9 := true
+						while loop_9
+							mut condition_8 := index < source.size()
+							if condition_8
+								condition_8 = repl_word(source[index])
+							end
+							if condition_8
+								index += 1
+							else
+								loop_9 = false
+							end
+						end
+						if index < source.size() && !character_in(character, "ABCDEFGHIJKLMNOPQRSTUVWXYZ") && !unicode_identifier_upper(character)
+							if source[index] == "?" || source[index] == "!"
+								index += 1
+							end
+						end
+						word := compiler_source_slice(source, start, index)
+						if repl_keyword(word)
+							kind = repl_style_keyword()
+						else
+							mut condition_10 := word == "true"
+							if !condition_10
+								condition_10 = word == "false"
+							end
+							if !condition_10
+								condition_10 = word == "nil"
+							end
+							if condition_10
+								kind = repl_style_literal()
+							else
+								if character_in(character, "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+									kind = repl_style_type()
+								else
+									mut lookahead := index
+									mut loop_12 := true
+									while loop_12
+										mut condition_11 := lookahead < source.size()
+										if condition_11
+											condition_11 = source[lookahead] == " "
+										end
+										if condition_11
+											lookahead += 1
+										else
+											loop_12 = false
+										end
+									end
+									mut condition_13 := previous == "def"
+									if !condition_13
+										condition_13 = previous == "."
+									end
+									if condition_13
+										kind = repl_style_callable()
+									else
+										mut condition_14 := lookahead < source.size()
+										if condition_14
+											condition_14 = source[lookahead] == "("
+										end
+										if condition_14
+											kind = repl_style_callable()
+										end
+									end
+								end
+							end
+						end
+					end
+				end
+			end
+		end
+		word := compiler_source_slice(source, start, index)
+		spans.starts.push(start)
+		spans.ends.push(index)
+		spans.kinds.push(kind)
+		spans.words.push(word)
+		mut condition_15 := character != " "
+		if condition_15
+			condition_15 = character != "\t"
+		end
+		if condition_15
+			condition_15 = kind != repl_style_comment()
+		end
+		if condition_15
+			previous = word
+		end
+	end
+	return spans
+end
+
+def repl_syntax_span(mut spans: ReplSyntax, source: String, start: Integer, finish: Integer, kind: Integer)
+	if finish > start
+		spans.starts.push(start)
+		spans.ends.push(finish)
+		spans.kinds.push(kind)
+		spans.words.push(compiler_source_slice(source, start, finish))
+	end
+	return
+end
+
+def repl_string_spans(mut spans: ReplSyntax, source: String, start: Integer, finish: Integer, kind: Integer)
+	mut chunk := start
+	mut index := start + 1
+	while index < finish
+		if source[index] == "\\"
+			index += 2
+		else
+			mut embedded := source[index] == "#"
+			if embedded
+				embedded = index + 1 < finish
+			end
+			if embedded
+				embedded = source[index + 1] == "{"
+			end
+			if embedded
+				repl_syntax_span(spans, source, chunk, index, repl_style_string())
+				mut end_index := interpolation_end(source, source.size(), index + 2)
+				mut marker_kind := repl_style_keyword()
+				if end_index < 0
+					end_index = finish
+					marker_kind = repl_style_incomplete()
+				end
+				repl_syntax_span(spans, source, index, index + 2, marker_kind)
+				inner := repl_syntax(compiler_source_slice(source, index + 2, end_index))
+				mut part := 0
+				while part < inner.starts.size()
+					repl_syntax_span(spans, source, index + 2 + inner.starts[part], index + 2 + inner.ends[part], inner.kinds[part])
+					part += 1
+				end
+				if end_index < finish
+					repl_syntax_span(spans, source, end_index, end_index + 1, repl_style_keyword())
+				end
+				index = end_index + 1
+				chunk = index
+			else
+				index += 1
+			end
+		end
+	end
+	repl_syntax_span(spans, source, chunk, finish, kind)
+	return
+end
+
+def repl_syntax(source: String): ReplSyntax
+	flat := repl_syntax_flat(source)
+	mut spans := ReplSyntax.new(starts: [], ends: [], kinds: [], words: [])
+	mut index := 0
+	while index < flat.starts.size()
+		start := flat.starts[index]
+		if source[start] == "\""
+			repl_string_spans(spans, source, start, flat.ends[index], flat.kinds[index])
+		else
+			repl_syntax_span(spans, source, start, flat.ends[index], flat.kinds[index])
+		end
+		index += 1
+	end
+	return spans
+end
+
+def repl_escape(): String
+	return native_cli_character(27) + "["
+end
+
+def repl_color(kind: Integer): String
+	return terminal_style(kind)
+end
+
+def repl_block_open(word: String): Boolean
+	if word == "do" || word == "fn"
+		return true
+	end
+	mut condition_16 := word == "def"
+	if !condition_16
+		condition_16 = word == "record"
+	end
+	if !condition_16
+		condition_16 = word == "enum"
+	end
+	if !condition_16
+		condition_16 = word == "if"
+	end
+	if !condition_16
+		condition_16 = word == "while"
+	end
+	if !condition_16
+		condition_16 = word == "class"
+	end
+	if !condition_16
+		condition_16 = word == "module"
+	end
+	if !condition_16
+		condition_16 = word == "case"
+	end
+	if !condition_16
+		condition_16 = word == "enum"
+	end
+	if !condition_16
+		condition_16 = word == "interface"
+	end
+	if !condition_16
+		condition_16 = word == "do"
+	end
+	return condition_16
+end
+
+# Keep two-space interactive indentation, including partially written blocks.
+# Formatting never modifies bytes inside a string or comment.
+def repl_indent(source: String): String
+	spans := repl_syntax_flat(source)
+	mut depth := 0
+	mut output := ""
+	mut line_start := true
+	mut index := 0
+	while index < spans.words.size()
+		word := spans.words[index]
+		kind := spans.kinds[index]
+		mut condition_17 := !line_start
+		if !condition_17
+			mut condition_18 := word != " "
+			if condition_18
+				condition_18 = word != "\t"
+			end
+			condition_17 = condition_18
+		end
+		if condition_17
+			mut condition_19 := word == "end"
+			if !condition_19
+				condition_19 = word == ")"
+			end
+			if !condition_19
+				condition_19 = word == "]"
+			end
+			if !condition_19
+				condition_19 = word == "}"
+			end
+			closing := condition_19
+			mut condition_20 := word == "else"
+			if !condition_20
+				condition_20 = word == "elsif"
+			end
+			if !condition_20
+				condition_20 = word == "when"
+			end
+			if !condition_20
+				condition_20 = word == "catch"
+			end
+			branch := condition_20
+			mut condition_21 := kind != repl_style_string()
+			if condition_21
+				condition_21 = kind != repl_style_comment()
+			end
+			if condition_21
+				condition_21 = kind != repl_style_incomplete()
+			end
+			if condition_21
+				condition_21 = closing
+			end
+			if condition_21
+				depth -= 1
+				if depth < 0
+					depth = 0
+				end
+			end
+			mut condition_22 := line_start
+			if condition_22
+				condition_22 = word != "\n"
+			end
+			if condition_22
+				mut indent := depth
+				mut condition_23 := branch
+				if condition_23
+					condition_23 = indent > 0
+				end
+				if condition_23
+					indent -= 1
+				end
+				mut level := 0
+				while level < indent
+					output += "  "
+					level += 1
+				end
+			end
+			output += word
+			line_start = word == "\n"
+			mut condition_24 := kind != repl_style_string()
+			if condition_24
+				condition_24 = kind != repl_style_comment()
+			end
+			if condition_24
+				condition_24 = kind != repl_style_incomplete()
+			end
+			if condition_24
+				mut condition_25 := repl_block_open(word)
+				if !condition_25
+					condition_25 = word == "("
+				end
+				if !condition_25
+					condition_25 = word == "["
+				end
+				if !condition_25
+					condition_25 = word == "{"
+				end
+				if condition_25
+					depth += 1
+				end
+			end
+		end
+		index += 1
+	end
+	if line_start
+		mut level := 0
+		while level < depth
+			output += "  "
+			level += 1
+		end
+	end
+	return output
+end
+
+# Editor positions use the same code-point coordinates as String indexing.
+# Terminal cells are a separate quantity; combining code points can have width 0.
+record ReplGlyph
+	characters: Integer
+	width: Integer
+end
+
+def repl_glyph(text: String, start: Integer): ReplGlyph
+	codepoint := native_cli_scalar(text[start])
+	mut width := native_cli_cell_width(codepoint)
+	if width < 0
+		width = 1
+	end
+	return ReplGlyph.new(characters: 1, width: width)
+end
+
+def repl_previous(text: String, cursor: Integer): Integer
+	mut previous := 0
+	mut index := 0
+	while index < cursor
+		glyph := repl_glyph(text, index)
+		if glyph.width != 0
+			previous = index
+		end
+		index += glyph.characters
+	end
+	return previous
+end
+
+def repl_next(text: String, cursor: Integer): Integer
+	if cursor >= text.size()
+		return text.size()
+	end
+	mut index := cursor + repl_glyph(text, cursor).characters
+	mut loop_31 := true
+	while loop_31
+		mut condition_30 := index < text.size()
+		if condition_30
+			condition_30 = repl_glyph(text, index).width == 0
+		end
+		if condition_30
+			index += repl_glyph(text, index).characters
+		else
+			loop_31 = false
+		end
+	end
+	return index
+end
+
+def repl_incomplete(text: String): Boolean
+	mut state := compiler_new(text.size() * 3 + 16)
+	lex(state, text)
+	if has_diagnostic(state)
+		message := load_string(state.diagnostics.messages, 0)
+		return string_starts_with(message, "unterminated")
+	end
+	# Let the ordinary parser select literal contexts before counting keywords.
+	# In particular, :end is a value, whereas callback: fn opens a real body.
+	# An incomplete parse still normalizes its successfully consumed prefix.
+	mut first := [0]
+	skip_newlines(state, first)
+	declaration := token_is(state, first[0], "def") || token_is(state, first[0], "class") || token_is(state, first[0], "interface") || token_is(state, first[0], "record") || token_is(state, first[0], "enum") || token_is(state, first[0], "module") || token_is(state, first[0], "alias") || token_is(state, first[0], "newtype") || token_is(state, first[0], "import") || (enum_uppercase(load_string(state.source_tokens.token_texts, first[0])) && (token_is(state, first[0] + 1, ":=") || token_is(state, first[0] + 1, ":")))
+	if !declaration
+		wrapped := "def main()\n" + text + "\nend\n"
+		state = compiler_new(wrapped.size() * 3 + 16)
+		lex(state, wrapped)
+	end
+	parse_module(state, 0, state.module_graph.entry_module[0])
+	if has_diagnostic(state) && load_string(state.diagnostics.codes, 0) == "TRBN4001"
+		# A rejected interpolation can leave only its opening synthetic tokens.
+		# Frame the original authored tokens so that the error is submitted once
+		# its enclosing declaration is complete, rather than waiting forever.
+		state = compiler_new(text.size() * 3 + 16)
+		lex(state, text)
+	end
+	mut depth := 0
+	mut interface_depth := -1
+	mut delimiters := 0
+	mut transfer_depth := -1
+	mut transfer_delimiters := -1
+	mut index := 0
+	while index < state.source_tokens.token_count[0]
+		if (token_is(state, index, "def") && interface_depth != depth) || token_is(state, index, "fn")
+			depth += 1
+		end
+		if token_is(state, index, "record") || token_is(state, index, "enum") || token_is(state, index, "module") || token_is(state, index, "class") || token_is(state, index, "interface")
+			depth += 1
+		end
+		if token_is(state, index, "interface")
+			interface_depth = depth
+		end
+		if token_is(state, index, "return") || token_is(state, index, "break") || token_is(state, index, "next")
+			transfer_depth = depth
+			transfer_delimiters = delimiters
+		end
+		if load_integer(state.source_tokens.token_kinds, index) == token_kind_newline() || token_is(state, index, ";")
+			if delimiters == 0
+				transfer_depth = -1
+			end
+		end
+		if token_is(state, index, "if")
+			mut modifier := false
+			if index > 0 && transfer_depth == depth && transfer_delimiters == delimiters
+				previous := load_integer(state.source_tokens.token_kinds, index - 1)
+				modifier = previous == token_kind_identifier() || previous == token_kind_number() || previous == token_kind_string() || token_is(state, index - 1, ")") || token_is(state, index - 1, "]") || token_is(state, index - 1, "}")
+				if token_is(state, index - 1, "if") || token_is(state, index - 1, "else") || token_is(state, index - 1, "when")
+					modifier = false
+				end
+			end
+			if !modifier
+				depth += 1
+			end
+		end
+		if token_is(state, index, "case")
+			depth += 1
+		end
+		if token_is(state, index, "while") || token_is(state, index, "do") || token_is(state, index, "catch")
+			depth += 1
+		end
+		if token_is(state, index, "end")
+			if interface_depth == depth
+				interface_depth = -1
+			end
+			depth -= 1
+		end
+		if token_is(state, index, "(")
+			delimiters += 1
+		end
+		if token_is(state, index, "[") || token_is(state, index, "{")
+			delimiters += 1
+		end
+		if token_is(state, index, ")")
+			delimiters -= 1
+		end
+		if token_is(state, index, "]") || token_is(state, index, "}")
+			delimiters -= 1
+		end
+		index += 1
+	end
+	if depth > 0
+		return true
+	end
+	return delimiters > 0
+end

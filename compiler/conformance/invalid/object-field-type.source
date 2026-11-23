@@ -1,0 +1,9 @@
+class Box
+@value: Integer
+def initialize()
+@value = "wrong"
+end
+end
+def main()
+Box.new()
+end

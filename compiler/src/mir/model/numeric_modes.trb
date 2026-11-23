@@ -1,0 +1,67 @@
+# Numeric modes select independently verified MIR proofs, not source operators.
+# Divisors, reciprocals, shifts and budget counts remain numeric data.
+
+# No specialized proof: use the ordinary checked operation.
+def mir_numeric_default_mode(): Integer
+	return 0
+end
+
+# Retain both portable bounds or the zero-divisor check when expanding inline.
+def mir_numeric_checked_mode(): Integer
+	return 1
+end
+
+# A nonnegative right addend permits a single overflow direction check.
+def mir_numeric_right_nonnegative_add_mode(): Integer
+	return 2
+end
+
+# The same proof for the left addend, with operand order preserved by lowering.
+def mir_numeric_left_nonnegative_add_mode(): Integer
+	return 3
+end
+
+# Use the guarded add adapter when neither operand has a narrow proof.
+def mir_numeric_guarded_add_mode(): Integer
+	return 4
+end
+
+# Use the guarded multiply adapter for the preferred inline payload.
+def mir_numeric_guarded_multiply_mode(): Integer
+	return 5
+end
+
+# A verified constant remainder uses a 32-bit reciprocal and shift.
+def mir_numeric_reciprocal_remainder_mode(): Integer
+	return 6
+end
+
+# The exact comparison edge proves portable addition/subtraction bounds.
+def mir_numeric_proven_arithmetic_mode(): Integer
+	return 7
+end
+
+# A positive power-of-two divisor permits exact signed remainder.
+def mir_numeric_power_remainder_mode(): Integer
+	return 8
+end
+
+# Test divisibility using the original dividend, not the intermediate remainder.
+def mir_numeric_remainder_test_mode(): Integer
+	return 9
+end
+
+# Use the verified divisor and exponent for exact signed division.
+def mir_numeric_power_division_mode(): Integer
+	return 10
+end
+
+# A proven nonnegative dividend needs no signed-remainder correction.
+def mir_numeric_nonnegative_power_remainder_mode(): Integer
+	return 11
+end
+
+# A proven nonnegative dividend permits a logical shift without signed bias.
+def mir_numeric_nonnegative_power_division_mode(): Integer
+	return 12
+end

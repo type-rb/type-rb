@@ -1,0 +1,124 @@
+import { FileSystemErrorKind, FileSystemTarget } from trb/std/errors
+import { native_create_directory, native_read_text, native_write_text } from support/file_system
+import trb/std/path
+import trb/std/process
+import trb/std/result
+import { describe, expect, test } from trb/std/test
+
+def _reset_native_file_system_workspace(path: String)
+	case Process.run("/bin/rm", ["-rf", path])
+	when Result::Ok(process)
+		expect(process.success).to_be_true()
+	when Result::Err(_error)
+		expect(false).to_be_true()
+	end
+	case native_create_directory(path)
+	when Result::Ok(process)
+		expect(process.success).to_be_true()
+	when Result::Err(_error)
+		expect(false).to_be_true()
+	end
+	return
+end
+
+describe("Native filesystem support") do
+	test("reads within the explicit bound and reports oversized input") do
+		workspace := "/tmp/type-rb-native-filesystem-read-test"
+		_reset_native_file_system_workspace(workspace)
+		path := workspace + "/input.txt"
+		case native_write_text(path, "hello")
+		when Result::Ok(_unit)
+			expect(true).to_be_true()
+		when Result::Err(_error)
+			expect(false).to_be_true()
+		end
+
+		case native_read_text(path, 5)
+		when Result::Ok(value)
+			expect(value).to_equal("hello")
+		when Result::Err(_error)
+			expect(false).to_be_true()
+		end
+		case native_read_text(path, 4)
+		when Result::Ok(_value)
+			expect(false).to_be_true()
+		when Result::Err(error)
+			expect(error.operation).to_equal("read_text")
+			case error.target
+			when FileSystemTarget::Host(target)
+				expect(target).to_equal(Path.new(path))
+			else
+				expect(false).to_be_true()
+			end
+			expect(error.kind == FileSystemErrorKind::TooLarge).to_be_true()
+		end
+	end
+
+	test("truncates an existing file before writing") do
+		workspace := "/tmp/type-rb-native-filesystem-write-test"
+		_reset_native_file_system_workspace(workspace)
+		path := workspace + "/output.txt"
+		case native_write_text(path, "long value")
+		when Result::Ok(_unit)
+			expect(true).to_be_true()
+		when Result::Err(_error)
+			expect(false).to_be_true()
+		end
+		case native_write_text(path, "x")
+		when Result::Ok(_unit)
+			expect(true).to_be_true()
+		when Result::Err(_error)
+			expect(false).to_be_true()
+		end
+		case native_read_text(path)
+		when Result::Ok(value)
+			expect(value).to_equal("x")
+		when Result::Err(_error)
+			expect(false).to_be_true()
+		end
+	end
+
+	test("creates nested directories idempotently") do
+		workspace := "/tmp/type-rb-native-filesystem-mkdir-test"
+		_reset_native_file_system_workspace(workspace)
+		nested := workspace + "/one/two"
+		case native_create_directory(nested)
+		when Result::Ok(process)
+			expect(process.success).to_be_true()
+		when Result::Err(_error)
+			expect(false).to_be_true()
+		end
+		case native_create_directory(nested)
+		when Result::Ok(process)
+			expect(process.success).to_be_true()
+		when Result::Err(_error)
+			expect(false).to_be_true()
+		end
+		case native_write_text(nested + "/probe.txt", "ok")
+		when Result::Ok(_unit)
+			expect(true).to_be_true()
+		when Result::Err(_error)
+			expect(false).to_be_true()
+		end
+	end
+
+	test("returns a stable process error when directory creation fails") do
+		workspace := "/tmp/type-rb-native-filesystem-mkdir-failure-test"
+		_reset_native_file_system_workspace(workspace)
+		blocker := workspace + "/blocker"
+		case native_write_text(blocker, "file")
+		when Result::Ok(_unit)
+			expect(true).to_be_true()
+		when Result::Err(_error)
+			expect(false).to_be_true()
+		end
+		case native_create_directory(blocker + "/child")
+		when Result::Ok(_process)
+			expect(false).to_be_true()
+		when Result::Err(error)
+			expect(error.operation).to_equal("mkdir")
+			expect(error.command).to_equal("/bin/mkdir")
+			expect(error.message.empty?()).to_be_false()
+		end
+	end
+end

@@ -1,0 +1,52 @@
+import { MirArrayLoop, MirModule } from mir/model/module
+import { mir_storage_type_name } from mir/model/types
+import { QbeEmitContext, emit_temporary, emit_typed_load, emit_typed_store } from backend/qbe/context
+import { QbeOutput, qbe_output_line } from backend/qbe/output
+import { integer_string } from support/literals
+
+def qbe_array_cache_name(header: Integer, slot: Integer): String
+	return "%mir_array_cached_" + integer_string(header) + "_" + integer_string(slot)
+end
+
+def qbe_array_cache_boundary_label(header: Integer, initialize: Boolean): String
+	if initialize
+		return "@mir_array_initialize_" + integer_string(header)
+	end
+	return "@mir_array_flush_" + integer_string(header)
+end
+
+# The first successful header enters initialization; its zero-iteration exit
+# bypasses both boundaries. Only the steady header can enter writeback. The
+# verified exclusive body/exit therefore needs no flag in the repeated body.
+def emit_mir_array_cache_boundaries(native_module: MirModule, plans: Array<MirArrayLoop>, operands: Array<String>, mut context: QbeEmitContext, mut output: QbeOutput)
+	plans.each do |plan|
+		if plan.cached_values.size() > 0
+			first := plan.cached_values[0]
+			qbe_output_line(output, qbe_array_cache_boundary_label(plan.header, true))
+			mut slot := 0
+			while slot < plan.cached_values.size()
+				cache := plan.cached_values[slot]
+				name := qbe_array_cache_name(plan.header, slot)
+				storage_slot := emit_temporary(context)
+				storage := emit_temporary(context)
+				offset := emit_temporary(context)
+				qbe_output_line(output, "\t" + storage_slot + " =l add " + operands[cache.owner] + ", 24")
+				qbe_output_line(output, "\t" + storage + " =l loadl " + storage_slot)
+				qbe_output_line(output, "\t" + offset + " =l shl " + operands[cache.index] + ", 3")
+				qbe_output_line(output, "\t" + name + "_address =l add " + storage + ", " + offset)
+				emit_typed_load(output, name, mir_storage_type_name(native_module, cache.type_id), name + "_address")
+				slot += 1
+			end
+			qbe_output_line(output, "\tjmp @mir_" + integer_string(first.body))
+			qbe_output_line(output, qbe_array_cache_boundary_label(plan.header, false))
+			slot = 0
+			while slot < plan.cached_values.size()
+				cache := plan.cached_values[slot]
+				name := qbe_array_cache_name(plan.header, slot)
+				emit_typed_store(output, mir_storage_type_name(native_module, cache.type_id), name, name + "_address")
+				slot += 1
+			end
+			qbe_output_line(output, "\tjmp @mir_" + integer_string(first.exit))
+		end
+	end
+end

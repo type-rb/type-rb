@@ -1,0 +1,146 @@
+import { mir_scalar_boolean_and, mir_scalar_boolean_or } from mir/model/scalar_operators
+import { emit_qbe } from compiler
+import { binary_equal } from frontend/types/operators
+import { mir_op_scalar_binary } from mir/model/instructions
+import { mir_instruction_with_payload } from mir/model/module
+import { mir_function_array_loops } from mir/analysis/array_loops
+import { mir_array_version_count } from mir/passes/array_loop_versions
+import { optimize_verified_mir } from mir/passes/optimize
+import { verify_mir } from mir/verify/module
+import { CompilerState } from state/state
+import { compiler_test_instruction_with_cell } from testing/compiler
+import { array_loop_mir_check } from testing/mir/array_loops
+import { control_test_output } from testing/mir/control
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { logical_run_qbe } from testing/qbe_runner
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+def array_conjunct_bounds(state: CompilerState): Integer
+	mut count := 0
+	state.scalar_mir.array_loops.each do |plans|
+		plans.each do |plan|
+			plan.headers.each do |header|
+				count += header.bounded_accesses.size()
+			end
+		end
+	end
+	return count
+end
+
+def array_conjunct_source(): String
+	return "def sum(first: Array<Integer>, second: Array<Integer>, limit: Integer): Integer\nmut index := 0\nmut total := 0\nwhile index < limit\ntotal += first[index] + second[index]\nindex += 1\nend\nreturn total\nend\ndef main()\nputs(sum([1, 2, 3], [10, 20, 30], 3))\nputs(sum([], [], 0))\nputs(sum([], [], -1))\nend\n"
+end
+
+describe("MIR combined Array guards") do
+	test("uses one guard for peer lengths and retains its proofs through reoptimization") do
+		mut state := array_loop_mir_check(array_conjunct_source())
+		expect(array_conjunct_bounds(state) > 0).to_be_true()
+		expect(mir_array_version_count(state.scalar_mir, state.scalar_mir.functions[0])).to_equal(1)
+		output := control_test_output(emit_qbe(state))
+		expect(output.include?(" =l and ")).to_be_true()
+		intrinsic_mir_erase(state)
+		count := state.scalar_mir.blocks.size()
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(state.scalar_mir.blocks.size()).to_equal(count)
+		expect(control_test_output(emit_qbe(state))).to_equal(output)
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, output)
+			when Result::Ok(actual)
+				expect(actual).to_equal("66\n0\n0\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("does not derive individual bounds from a disjunction or retain stale facts") do
+		mut state := array_loop_mir_check(array_conjunct_source())
+		expect(array_conjunct_bounds(state) > 0).to_be_true()
+		mut changed := 0
+		mut index := 0
+		while index < state.scalar_mir.instructions.size()
+			instruction := state.scalar_mir.instructions[index]
+			if instruction.kind == mir_op_scalar_binary() && instruction.payload == mir_scalar_boolean_and()
+				state.scalar_mir.instructions[index] = mir_instruction_with_payload(instruction, mir_scalar_boolean_or())
+				changed += 1
+			end
+			index += 1
+		end
+		expect(changed > 0).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR Array-loop plan differs")
+		state.scalar_mir.array_loops[0] = mir_function_array_loops(state.scalar_mir, state.scalar_mir.functions[0], state.scalar_mir.values)
+		expect(array_conjunct_bounds(state)).to_equal(0)
+	end
+
+	test("retains ordinary failures when either peer is too short") do
+		["[1]", "[10]"].each do |short|
+			mut source := "def sum(first: Array<Integer>, second: Array<Integer>): Integer\nmut index := 0\nmut total := 0\nwhile index < 2\ntotal += first[index] + second[index]\nindex += 1\nend\nreturn total\nend\ndef main()\n"
+			if short == "[1]"
+				source += "puts(sum([1], [10, 20]))\n"
+			else
+				source += "puts(sum([1, 2], [10]))\n"
+			end
+			state := array_loop_mir_check(source + "end\n")
+			qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+			if qbe != nil
+				case logical_run_qbe(qbe, control_test_output(emit_qbe(state)), 2)
+				when Result::Ok(_actual)
+					expect(false).to_be_true()
+				when Result::Err(error)
+					expect(error).to_equal("panic: index is out of bounds\n")
+				end
+			end
+		end
+	end
+
+	test("verifies eager Boolean values and emits both truth tables") do
+		[mir_scalar_boolean_and(), mir_scalar_boolean_or()].each do |operator|
+			mut state := array_loop_mir_check("def combine(left: Boolean, right: Boolean): Boolean\nreturn left == right\nend\ndef main()\nif combine(true, true)\nputs(1)\nelse\nputs(0)\nend\nif combine(true, false)\nputs(1)\nelse\nputs(0)\nend\nif combine(false, true)\nputs(1)\nelse\nputs(0)\nend\nif combine(false, false)\nputs(1)\nelse\nputs(0)\nend\nend\n")
+			mut selected := -1
+			mut index := 0
+			while index < state.scalar_mir.instructions.size()
+				instruction := state.scalar_mir.instructions[index]
+				if instruction.kind == mir_op_scalar_binary() && instruction.payload == binary_equal()
+					selected = index
+					state.scalar_mir.instructions[index] = mir_instruction_with_payload(instruction, operator)
+					break
+				end
+				index += 1
+			end
+			expect(selected >= 0).to_be_true()
+			optimize_verified_mir(state.scalar_mir)
+			expect(verify_mir(state.scalar_mir, true)).to_equal("")
+			qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+			if qbe != nil
+				mut expected := "1\n0\n0\n0\n"
+				if operator == mir_scalar_boolean_or()
+					expected = "1\n1\n1\n0\n"
+				end
+				case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+				when Result::Ok(actual)
+					expect(actual).to_equal(expected)
+				when Result::Err(error)
+					puts(error)
+					expect(false).to_be_true()
+				end
+			end
+			state.scalar_mir.instructions[selected] = compiler_test_instruction_with_cell(state.scalar_mir.instructions[selected], 5, state.scalar_mir.functions[0].entry_block)
+			expect(verify_mir(state.scalar_mir, true).include?("failure")).to_be_true()
+		end
+		mut invalid := array_loop_mir_check("def combine(left: Integer, right: Integer): Boolean\nreturn left == right\nend\ndef main()\nend\n")
+		mut index := 0
+		while index < invalid.scalar_mir.instructions.size()
+			instruction := invalid.scalar_mir.instructions[index]
+			if instruction.kind == mir_op_scalar_binary()
+				invalid.scalar_mir.instructions[index] = mir_instruction_with_payload(instruction, mir_scalar_boolean_and())
+			end
+			index += 1
+		end
+		expect(verify_mir(invalid.scalar_mir, true)).to_equal("MIR scalar binary type differs")
+	end
+end

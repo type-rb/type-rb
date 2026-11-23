@@ -1,0 +1,156 @@
+import { emit_qbe } from compiler
+import { binary_equal } from frontend/types/operators
+import { MirBlock, MirModule, mir_instruction_with_payload } from mir/model/module
+import { mir_loop_exit_comparison } from mir/passes/loop_exit_constants
+import { optimize_verified_mir } from mir/passes/optimize
+import { verify_mir } from mir/verify/module
+import { CompilerState } from state/state
+import { array_loop_mir_check } from testing/mir/array_loops
+import { control_test_output } from testing/mir/control
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { logical_run_qbe } from testing/qbe_runner
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+def loop_exit_test_run(state: CompilerState, expected: String, failure: Boolean)
+	qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+	if qbe != nil
+		mut expected_status := 0
+		if failure
+			expected_status = 2
+		end
+		case logical_run_qbe(qbe, control_test_output(emit_qbe(state)), expected_status)
+		when Result::Ok(actual)
+			expect(failure).to_be_false()
+			expect(actual).to_equal(expected)
+		when Result::Err(error)
+			if !failure
+				puts(error)
+			end
+			expect(failure).to_be_true()
+			expect(error).to_equal(expected)
+		end
+	end
+end
+
+def loop_exit_test_condition(native_module: MirModule): Integer
+	function := native_module.functions[0]
+	mut index := function.block_start
+	while index < function.block_start + function.block_count
+		if mir_loop_exit_comparison(native_module, native_module.blocks[index]) >= 0
+			return index
+		end
+		index += 1
+	end
+	expect(false).to_be_true()
+	return -1
+end
+
+def loop_exit_test_span(native_module: MirModule, start: Integer, count: Integer): Array<Integer>
+	mut values: Array<Integer> := []
+	mut index := 0
+	while index < count
+		values.push(native_module.arguments[start + index])
+		index += 1
+	end
+	return values
+end
+
+def loop_exit_test_source(condition: String): String
+	return "def reduce(value: Integer): Integer\nmut remaining := value\nwhile " + condition + "\nremaining -= 1\nend\nreturn remaining\nend\ndef main()\nputs(reduce(1))\nputs(reduce(7))\nend\n"
+end
+
+describe("MIR loop exit constants") do
+	test("substitutes only the normal termination arm in either operand order") do
+		conditions := ["remaining != 1", "1 != remaining"]
+		conditions.each.with_index do |condition, mode|
+			state := array_loop_mir_check(loop_exit_test_source(condition))
+			block := state.scalar_mir.blocks[loop_exit_test_condition(state.scalar_mir)]
+			comparison := state.scalar_mir.instructions[mir_loop_exit_comparison(state.scalar_mir, block)]
+			mut literal := comparison.second
+			mut value := comparison.first
+			if mode == 1
+				literal = comparison.first
+				value = comparison.second
+			end
+			exit := loop_exit_test_span(state.scalar_mir, block.second_argument_start, block.second_argument_count)
+			body := loop_exit_test_span(state.scalar_mir, block.first_argument_start, block.first_argument_count)
+			expect(exit.include?(literal)).to_be_true()
+			expect(exit.include?(value)).to_be_false()
+			expect(body.include?(value)).to_be_true()
+			loop_exit_test_run(state, "1\n1\n", false)
+		end
+	end
+
+	test("isolates shared argument spans when equality selects the true exit") do
+		mut state := array_loop_mir_check(loop_exit_test_source("remaining != 1"))
+		index := loop_exit_test_condition(state.scalar_mir)
+		block := state.scalar_mir.blocks[index]
+		position := mir_loop_exit_comparison(state.scalar_mir, block)
+		comparison := state.scalar_mir.instructions[position]
+		expect(block.first_argument_count).to_equal(block.second_argument_count)
+		before := loop_exit_test_span(state.scalar_mir, block.first_argument_start, block.first_argument_count)
+		# Reverse both the comparison and its arms, keeping equivalent control
+		# flow. Both arms initially share the unfurled loop-carried arguments.
+		state.scalar_mir.instructions[position] = mir_instruction_with_payload(comparison, binary_equal())
+		state.scalar_mir.blocks[index] = MirBlock.new(id: block.id, source_id: block.source_id, line: block.line, parameter_start: block.parameter_start, parameter_count: block.parameter_count, instruction_start: block.instruction_start, instruction_count: block.instruction_count, terminator: block.terminator, condition: block.condition, first_target: block.second_target, second_target: block.first_target, first_argument_start: block.first_argument_start, first_argument_count: block.first_argument_count, second_argument_start: block.first_argument_start, second_argument_count: block.first_argument_count, return_value: block.return_value)
+		optimize_verified_mir(state.scalar_mir)
+		rewritten := state.scalar_mir.blocks[index]
+		expect(rewritten.first_argument_start != rewritten.second_argument_start).to_be_true()
+		expect(loop_exit_test_span(state.scalar_mir, rewritten.first_argument_start, rewritten.first_argument_count).include?(comparison.second)).to_be_true()
+		expect(loop_exit_test_span(state.scalar_mir, rewritten.second_argument_start, rewritten.second_argument_count)).to_equal(before)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		loop_exit_test_run(state, "1\n1\n", false)
+	end
+
+	test("leaves internal equality edges and their induction identities intact") do
+		state := array_loop_mir_check("def sum(values: Array<Integer>): Integer\nmut index := 0\nmut total := 0\nwhile index < values.size()\nif index == 1\nindex += 1\nnext\nend\ntotal += values[index]\nindex += 1\nend\nreturn total\nend\ndef main()\nputs(sum([2, 4, 8]))\nend\n")
+		block := state.scalar_mir.blocks[loop_exit_test_condition(state.scalar_mir)]
+		comparison := state.scalar_mir.instructions[mir_loop_exit_comparison(state.scalar_mir, block)]
+		expect(loop_exit_test_span(state.scalar_mir, block.first_argument_start, block.first_argument_count).include?(comparison.first)).to_be_true()
+		expect(state.scalar_mir.array_loops[0][0].accesses.size() > 0).to_be_true()
+		loop_exit_test_run(state, "10\n", false)
+	end
+
+	test("keeps break paths and equality edges that continue the loop distinct") do
+		state := array_loop_mir_check("def reduce(value: Integer): Integer\nmut remaining := value\nwhile remaining != 1\nif remaining == 3\nbreak\nend\nremaining -= 1\nend\nreturn remaining\nend\ndef keep(value: Integer): Integer\nmut remaining := value\nwhile remaining == 1\nremaining += 1\nend\nreturn remaining\nend\ndef main()\nputs(reduce(1))\nputs(reduce(7))\nputs(keep(1))\nputs(keep(4))\nend\n")
+		loop_exit_test_run(state, "1\n3\n2\n4\n", false)
+	end
+
+	test("preserves Float signed zero Boolean and nullable termination values") do
+		state := array_loop_mir_check("def zero(value: Float): Float\nmut remaining := value\nwhile remaining != 0.0\nremaining = 0.0\nend\nreturn remaining\nend\ndef flag(value: Boolean): Boolean\nmut remaining := value\nwhile remaining != false\nremaining = false\nend\nreturn remaining\nend\ndef optional(value: Integer?): Integer?\nmut remaining := value\nwhile remaining != nil\nremaining = nil\nend\nreturn remaining\nend\ndef main()\nputs(1.0 / zero(-0.0) < 0.0)\nputs(1.0 / zero(0.0) < 0.0)\nputs(flag(true))\nputs(flag(false))\nputs(optional(3) == nil)\nputs(optional(nil) == nil)\nend\n")
+		loop_exit_test_run(state, "true\nfalse\nfalse\nfalse\ntrue\ntrue\n", false)
+	end
+
+	test("retains checked failures after a normal loop exit") do
+		overflow := array_loop_mir_check("def add(value: Integer): Integer\nmut remaining := value\nwhile remaining != 9007199254740991\nremaining += 1\nend\nreturn remaining + 1\nend\ndef main()\nputs(add(9007199254740991))\nend\n")
+		loop_exit_test_run(overflow, "panic: Integer is outside the portable range\n", true)
+		bounds := array_loop_mir_check("def read(values: Array<Integer>, index: Integer): Integer\nmut remaining := index\nwhile remaining != 0\nremaining -= 1\nend\nreturn values[remaining]\nend\ndef main()\nputs(read([], 0))\nend\n")
+		loop_exit_test_run(bounds, "panic: index is out of bounds\n", true)
+	end
+
+	test("keeps facts independent of source text storage order and repeated optimization") do
+		mut state := array_loop_mir_check(loop_exit_test_source("remaining != 1"))
+		arguments := state.scalar_mir.arguments.size()
+		before := control_test_output(emit_qbe(state))
+		intrinsic_mir_erase(state)
+		optimize_verified_mir(state.scalar_mir)
+		expect(state.scalar_mir.arguments.size()).to_equal(arguments)
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+		function := state.scalar_mir.functions[0]
+		mut left := function.block_start
+		mut right := left + function.block_count - 1
+		while left < right
+			saved := state.scalar_mir.blocks[left]
+			state.scalar_mir.blocks[left] = state.scalar_mir.blocks[right]
+			state.scalar_mir.blocks[right] = saved
+			left += 1
+			right -= 1
+		end
+		optimize_verified_mir(state.scalar_mir)
+		expect(state.scalar_mir.arguments.size()).to_equal(arguments)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		loop_exit_test_run(state, "1\n1\n", false)
+	end
+end

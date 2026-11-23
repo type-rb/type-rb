@@ -1,0 +1,52 @@
+record Label
+	name: String
+	amount: Integer
+end
+
+class Counter
+	@value: Integer
+	def initialize(value: Integer)
+		@value = value
+	end
+end
+
+def initial(): Integer
+	return 4
+end
+
+class DefaultCounter
+	@value: Integer := initial()
+end
+
+def build(value: Integer): Counter
+	return Counter.new(value)
+end
+
+def main()
+	label := Label.new(name: "item", amount: 2)
+	values := [1, 2].concurrent_map do |value|
+		label.name + (label.amount + value).to_s()
+	end
+	puts(values[0])
+	puts(values[1])
+	objects := [5, 6].concurrent_map { |value| build(value) }
+	puts(objects[0].value)
+	puts(objects[1].value)
+	defaults := [1, 2].concurrent_map { |_value| DefaultCounter.new() }
+	puts(defaults[1].value)
+	mutated := [1, 2].concurrent_map do |value|
+		mut rows := [[value]]
+		rows.each do |items|
+			items[0] = items[0] + 1
+		end
+		mut selected := if value > 0
+			[value]
+		else
+			[0]
+		end
+		selected[0] = selected[0] + 2
+		rows[0][0] + selected[0]
+	end
+	puts(mutated[0])
+	puts(mutated[1])
+end

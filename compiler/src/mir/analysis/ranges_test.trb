@@ -1,0 +1,140 @@
+import { check, emit_qbe } from compiler
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { lex } from frontend/syntax/lexer
+import { MirInstruction, MirModule, mir_function_index, mir_instruction_with_payload } from mir/model/module
+import { mir_scalar_literal } from mir/analysis/ranges
+import { mir_numeric_plans_equal } from mir/analysis/numeric
+import { mir_function_with_guard, optimize_verified_mir } from mir/passes/optimize
+import { verify_mir } from mir/verify/module
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { CompilerState, compiler_new } from state/state
+import { load_string } from support/storage
+import { describe, expect, test } from trb/std/test
+import { QbeOutput } from backend/qbe/output
+import trb/std/string_builder
+
+def scalar_guard_output(output: QbeOutput): String
+	mut writer := StringBuilder.new()
+	mut index := 0
+	while index < output.lines.used[0]
+		writer.append(load_string(output.lines, index))
+		writer.append("\n")
+		index += 1
+	end
+	return writer.to_s()
+end
+
+def scalar_guard_state(expression: String): CompilerState
+	source := "def scalar(left: Integer, right: Integer): Float\n\treturn " + expression + "\nend\ndef main()\n\t_owner := {1 => 1}\n\t_marker := \"managed caller\"\n\tmut index := 0\n\twhile index < 2\n\t\t_value := scalar(index, index)\n\t\tindex += 1\n\tend\nend\n"
+	mut state := compiler_new(source.size() + 1)
+	expect(lex(state, source)).to_be_true()
+	expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+	expect(resolve(state)).to_be_true()
+	expect(check(state)).to_be_true()
+	return state
+end
+
+describe("MIR scalar Integer guards") do
+	test("decodes portable literals without unsupported recovery conversions") do
+		expect(mir_scalar_literal("000_12") == 12).to_be_true()
+		expect(mir_scalar_literal("9007199254740991") == 9007199254740991).to_be_true()
+		invalid := ["", "___", "-1", "x", "1.0", "9007199254740992", "999999999999999999999999"]
+		mut index := 0
+		while index < invalid.size()
+			expect(mir_scalar_literal(invalid[index]) == -1).to_be_true()
+			index += 1
+		end
+	end
+
+	test("rejects malformed Integer spellings independently of guard admission") do
+		invalid := ["", "___", "x", "1x", "-1", " 1", "1.0", "9007199254740992", "999999999999999999999999"]
+		mut index := 0
+		while index < invalid.size()
+			state := scalar_guard_state("(left + right + 1) * 1.0")
+			mut native_module := state.scalar_mir
+			expect(native_module.functions[0].integer_guard).to_equal(0)
+			mut cursor := 0
+			mut changed := false
+			while cursor < native_module.instructions.size()
+				instruction := native_module.instructions[cursor]
+				if instruction.kind == 6 && !changed
+					native_module.literal_texts[instruction.payload] = invalid[index]
+					native_module.instructions[cursor] = MirInstruction.new(kind: instruction.kind, result: instruction.result, first: 0, second: instruction.second, payload: instruction.payload, failure: instruction.failure, source_id: instruction.source_id, line: instruction.line)
+					changed = true
+				end
+				cursor += 1
+			end
+			expect(changed).to_be_true()
+			expect(verify_mir(native_module, true)).to_equal("MIR Integer literal is invalid")
+			index += 1
+		end
+	end
+
+	test("derives a common input range for an entire arithmetic region") do
+		state := scalar_guard_state("((left + right) * (left + right + 1) / 2 + left + 1) * 1.0")
+		function := state.scalar_mir.functions[mir_function_index(state.scalar_mir, 0)]
+		expect(function.integer_guard).to_equal(33554432)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		qbe := scalar_guard_output(emit_qbe(state))
+		expect(qbe.include?(", 33554432")).to_be_true()
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	end
+
+	test("retains scalar guards and expansions after entry storage reordering") do
+		mut state := scalar_guard_state("((left + right) * (left + right + 1) / 2 + left + 1) * 1.0")
+		before := scalar_guard_output(emit_qbe(state))
+		plans := state.scalar_mir.numeric_plans[0]
+		function := state.scalar_mir.functions[mir_function_index(state.scalar_mir, 0)]
+		expect(function.kind).to_equal(1)
+		expect(function.integer_guard).to_equal(33554432)
+		intrinsic_mir_erase(state)
+		entry := state.scalar_mir.blocks[function.block_start]
+		state.scalar_mir.blocks[function.block_start] = state.scalar_mir.blocks[function.block_start + 1]
+		state.scalar_mir.blocks[function.block_start + 1] = entry
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		optimize_verified_mir(state.scalar_mir)
+		expect(mir_numeric_plans_equal(plans, state.scalar_mir.numeric_plans[0])).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(scalar_guard_output(emit_qbe(state))).to_equal(before)
+	end
+
+	test("rejects supplied, widened, non-power-of-two and missing guards") do
+		guards := [-1, 0, 33554433, 67108864, 9007199254740991]
+		mut index := 0
+		while index < guards.size()
+			state := scalar_guard_state("((left + right) * (left + right + 1) / 2 + left + 1) * 1.0")
+			mut native_module := state.scalar_mir
+			function := native_module.functions[0]
+			native_module.functions[0] = mir_function_with_guard(function, guards[index])
+			expect(verify_mir(native_module, true)).to_equal("MIR scalar Integer guard differs")
+			index += 1
+		end
+		state := scalar_guard_state("((left + right) * (left + right + 1) / 2 + left + 1) * 1.0")
+		mut native_module := state.scalar_mir
+		native_module = MirModule.new(enum_scalars: native_module.enum_scalars, source_names: native_module.source_names, program: native_module.program, object_methods: native_module.object_methods, object_witnesses: native_module.object_witnesses, objects: native_module.objects, newtypes: native_module.newtypes, unions: native_module.unions, globals: native_module.globals, global_initialization: native_module.global_initialization, callables: native_module.callables, callable_plans: native_module.callable_plans, enums: native_module.enums, enum_variants: native_module.enum_variants, enum_fields: native_module.enum_fields, numeric_plans: [[]], hash_lookup_reuse: [[]], hash_membership_reuse: [[]], hash_concat_probes: [[]], call_return_guards: [[]], types: native_module.types, records: native_module.records, fields: native_module.fields, root_plans: [], enum_stack_functions: [], array_loops: [], loop_calls: [], array_check_reuse: [], array_read_guards: [], array_joins: [], string_splits: [], signatures: native_module.signatures, calls: native_module.calls, file_scopes: native_module.file_scopes, source_count: native_module.source_count, entry_function: native_module.entry_function, functions: native_module.functions, blocks: native_module.blocks, values: native_module.values, instructions: native_module.instructions, arguments: native_module.arguments, literal_texts: native_module.literal_texts, literal_data: [], string_concats: [])
+		expect(verify_mir(native_module, false)).to_equal("MIR scalar Integer guard differs")
+	end
+
+	test("rechecks the proof after a valid arithmetic instruction changes") do
+		state := scalar_guard_state("((left + right) * (left + right + 1) / 2 + left + 1) * 1.0")
+		mut native_module := state.scalar_mir
+		block := native_module.blocks[native_module.functions[0].block_start]
+		instruction := native_module.instructions[block.instruction_start]
+		native_module.instructions[block.instruction_start] = mir_instruction_with_payload(instruction, 2)
+		expect(verify_mir(native_module, true)).to_equal("MIR scalar Integer guard differs")
+	end
+
+	test("keeps unsupported or unprofitable regions checked") do
+		expressions := ["(left + right) * 1.0", "(left + right + 1 - left) * 1.0", "((left + right + 1) / right) * 1.0", "((left + right + 1) % 2) * 1.0", "(- left + right + 1) * 1.0"]
+		mut index := 0
+		while index < expressions.size()
+			state := scalar_guard_state(expressions[index])
+			function := state.scalar_mir.functions[mir_function_index(state.scalar_mir, 0)]
+			expect(function.integer_guard).to_equal(0)
+			expect(verify_mir(state.scalar_mir, true)).to_equal("")
+			index += 1
+		end
+	end
+end

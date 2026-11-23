@@ -1,0 +1,18 @@
+import { expect_compiler_phase, logical_checked_source } from testing/pipeline
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { control_test_output } from testing/mir/control
+import { check, emit_qbe } from compiler
+import { verify_mir } from mir/verify/module
+import { describe, expect, test } from trb/std/test
+
+describe("Object field comparisons") do
+	test("keeps comparison suffixes out of generic method parsing and survives source erasure") do
+		source := "class Value\nreadonly @number: Integer\ndef initialize(number: Integer)\n@number = number\nend\nend\ndef main()\nvalue := Value.new(42)\nputs(value.number < 100)\nputs(value.number < 100 || value.number > 999)\nputs((value.number < 100) && (value.number > 10))\nend\n"
+		mut state := logical_checked_source(source)
+		expect_compiler_phase(state, "check", check(state))
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		before := control_test_output(emit_qbe(state))
+		intrinsic_mir_erase(state)
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+	end
+end

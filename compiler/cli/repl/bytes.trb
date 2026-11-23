@@ -1,0 +1,28 @@
+import { bytes_method_at, bytes_method_concat, bytes_method_from_string, bytes_method_size, bytes_method_to_string } from frontend/types/method_kinds
+import { ReplStore, repl_value, repl_get, repl_integer, repl_boolean, repl_string } from repl/model
+
+# The pool retains immutable raw bytes in text storage. Every public binary
+# operation uses the ordinary Bytes runtime, including replacement decoding.
+def repl_bytes_method(mut store: ReplStore, kind: Integer, receiver: Integer, argument: Integer): Integer
+	value := repl_get(store, receiver)
+	if kind == bytes_method_from_string()
+		return repl_value(store, "Bytes", 0, 0.0, value.text, [])
+	end
+	bytes := value.text.to_bytes()
+	if kind == bytes_method_size()
+		return repl_integer(store, bytes.size())
+	elsif kind == bytes_method_at()
+		index := store.integers[argument]
+		if index < 0 || index >= bytes.size()
+			store.error[0] = "Bytes index is out of bounds"
+			return 0
+		end
+		return repl_integer(store, bytes.at(index))
+	elsif kind == bytes_method_concat()
+		# Raw concatenation preserves malformed byte sequences for later decoding.
+		return repl_value(store, "Bytes", 0, 0.0, value.text + store.texts[argument], [])
+	elsif kind == bytes_method_to_string()
+		return repl_string(store, bytes.to_s())
+	end
+	return repl_boolean(store, bytes.valid_utf8?())
+end

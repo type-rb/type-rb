@@ -1,0 +1,6 @@
+def main()
+[1].each do |value|
+puts(value)
+end
+puts(value)
+end

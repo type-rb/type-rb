@@ -1,0 +1,16 @@
+def one(): Integer
+	return 1
+end
+
+def main()
+	mut value := 7
+	mut index := 0
+	while index < 1
+		value += one()
+		value += one()
+		value += one()
+		index += 1
+	end
+	puts(value.to_s())
+	return
+end

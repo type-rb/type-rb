@@ -1,0 +1,14 @@
+def copy(input: Array<Integer>, mut output: Array<Integer>)
+	mut index := 0
+	while index < input.size()
+		output[index] = input[index]
+		index += 1
+	end
+	return
+end
+
+def main()
+	mut output := [0]
+	copy([7, 8], output)
+	return
+end

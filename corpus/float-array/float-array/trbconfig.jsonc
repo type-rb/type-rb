@@ -1,0 +1,8 @@
+{
+  "name": "file-root-float-array",
+  "mode": "go",
+  "sourceDir": "src",
+  "go": {
+    "module": "github.com/type-rb/type-rb-native/corpus/float-array/float-array"
+  }
+}

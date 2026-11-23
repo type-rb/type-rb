@@ -1,0 +1,8 @@
+case	lane	candidate	retained	passed	walltime_median_seconds	cputime_median_seconds	memory_median_bytes	status
+fannkuch-redux	one-core	typerb-native	11	11	61.8302	61.8258	524288	pass
+fannkuch-redux	one-core	typerb-go	11	11	53.4575	53.4423	3280896	pass
+fannkuch-redux	one-core	c	11	11	27.4842	27.481	524288	pass
+fannkuch-redux	one-core	cpp	11	11	24.9831	24.98	692224	pass
+fannkuch-redux	one-core	go	11	11	24.6204	24.6114	2637824	pass
+fannkuch-redux	one-core	rust	11	11	24.878	24.8741	1200128	pass
+fannkuch-redux	one-core	java	11	11	24.6812	24.6128	49020928	pass

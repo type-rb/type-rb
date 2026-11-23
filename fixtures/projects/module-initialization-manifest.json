@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "milestone": "Module initialization",
+  "typeRBRevision": "af8e5f52e18e265d20bab7efbeaa2c36ea9342ae",
+  "note": "Exact released-reference outcomes for runtime roots and source-directory independence.",
+  "modeRule": "Check the fixture as written; compare reference Go execution with Native trb execution over the same source.",
+  "observedWith": {
+    "reference": "trb 0.4.10 at typeRBRevision",
+    "native": "Ordinary Native compiler built from this change"
+  },
+  "scenarios": [
+    {
+      "id": "module-initialization-runtime-roots",
+      "title": "Directory crossings preserve initialization order and unused files stay inactive",
+      "source": "https://github.com/type-rb/type-rb/blob/af8e5f52e18e265d20bab7efbeaa2c36ea9342ae/docs/specification.md#36-constants",
+      "steps": [
+        [
+          "check"
+        ],
+        [
+          "run"
+        ]
+      ],
+      "dependencies": [
+        "Project source discovery",
+        "Runtime import closure",
+        "Constant initialization"
+      ],
+      "expectation": "match-reference",
+      "fixture": "fixtures/projects/module-initialization",
+      "cwd": "app",
+      "reference": [
+        {
+          "args": [
+            "check"
+          ],
+          "code": 0,
+          "stdout": "checked 6 file(s) for mode go\n",
+          "stderr": ""
+        },
+        {
+          "args": [
+            "run"
+          ],
+          "code": 0,
+          "stdout": "shared\nz\ny\nx\n4\n2\n",
+          "stderr": ""
+        }
+      ],
+      "nativeBaseline": [
+        {
+          "args": [
+            "check"
+          ],
+          "code": 0,
+          "stdout": "ok\n",
+          "stderr": ""
+        },
+        {
+          "args": [
+            "run"
+          ],
+          "code": 0,
+          "stdout": "shared\nz\ny\nx\n4\n2\n",
+          "stderr": ""
+        }
+      ]
+    }
+  ]
+}

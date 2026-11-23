@@ -1,0 +1,128 @@
+import { emit_qbe } from compiler
+import { mir_call_return_equal } from mir/analysis/call_returns
+import { MirCallReturnGuard } from mir/model/module
+import { optimize_verified_mir } from mir/passes/optimize
+import { verify_mir } from mir/verify/module
+import { CompilerState } from state/state
+import { array_loop_mir_check } from testing/mir/array_loops
+import { array_mir_test_read } from testing/mir/arrays
+import { control_test_output } from testing/mir/control
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { logical_run_qbe } from testing/qbe_runner
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+def call_return_source(comparison: String, returned: String): String
+	return "def descend(value: Integer): Integer\nif value " + comparison + "\nreturn " + returned + "\nend\nreturn descend(value - 1) + 1\nend\ndef main()\nputs(descend(5))\nend\n"
+end
+
+def call_return_run(state: CompilerState, expected: String)
+	qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+	if qbe != nil
+		case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+		when Result::Ok(actual)
+			expect(actual).to_equal(expected)
+		when Result::Err(error)
+			puts(error)
+			expect(false).to_be_true()
+		end
+	end
+end
+
+describe("MIR recursive scalar return guard") do
+	test("recognizes each ordered identity-return comparison") do
+		["< 2", "<= 2", "> 2", ">= 2"].each do |comparison|
+			state := array_loop_mir_check(call_return_source(comparison, "value"))
+			expect(state.scalar_mir.call_return_guards[0].size()).to_equal(1)
+			expect(state.scalar_mir.call_return_guards[0][0].bound).to_equal(2)
+		end
+	end
+
+	test("executes recursive and immediate returns without changing arithmetic") do
+		source := "def branch(value: Integer): Integer\nif value < 2\nreturn value\nend\nreturn branch(value - 1) + branch(value - 2)\nend\ndef main()\nputs(branch(-5))\nputs(branch(0))\nputs(branch(1))\nputs(branch(2))\nputs(branch(10))\nputs(branch(15))\nend\n"
+		state := array_loop_mir_check(source)
+		expect(state.scalar_mir.call_return_guards[0].size()).to_equal(1)
+		call_return_run(state, "-5\n0\n1\n1\n55\n610\n")
+	end
+
+	test("retains fallback effects and Integer overflow failure") do
+		state := array_loop_mir_check("def step(value: Integer): Integer\nif value < 2\nreturn value\nend\nputs(value)\nreturn step(value - 1)\nend\ndef main()\nputs(step(3))\nend\n")
+		expect(state.scalar_mir.call_return_guards[0].size()).to_equal(1)
+		call_return_run(state, "3\n2\n1\n")
+		overflow := array_loop_mir_check("def step(value: Integer): Integer\nif value < 2\nreturn value\nend\nreturn step(1) + 9007199254740991\nend\ndef main()\nputs(step(2))\nend\n")
+		expect(overflow.scalar_mir.call_return_guards[0].size()).to_equal(1)
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, control_test_output(emit_qbe(overflow)))
+			when Result::Ok(_actual)
+				expect(false).to_be_true()
+			when Result::Err(error)
+				expect(error.include?("Integer")).to_be_true()
+			end
+		end
+	end
+
+	test("rejects transformed returns effectful prefixes and nonrecursive functions") do
+		["0", "value + 1", "value - 1"].each do |returned|
+			state := array_loop_mir_check(call_return_source("< 2", returned))
+			expect(state.scalar_mir.call_return_guards[0].size()).to_equal(0)
+		end
+		prefixed := array_loop_mir_check("def step(value: Integer): Integer\nputs(value)\nif value < 2\nreturn value\nend\nreturn step(value - 1)\nend\ndef main()\nputs(step(3))\nend\n")
+		expect(prefixed.scalar_mir.call_return_guards[0].size()).to_equal(0)
+		plain := array_loop_mir_check("def step(value: Integer): Integer\nif value < 2\nreturn value\nend\nreturn value - 1\nend\ndef main()\nputs(step(3))\nend\n")
+		expect(plain.scalar_mir.call_return_guards[0].size()).to_equal(0)
+	end
+
+	test("selects the unchanged Recursion workload without applying to multiargument calls") do
+		root := Process.environment("TYPE_RB_NATIVE_ROOT")
+		if root != nil
+			state := array_loop_mir_check(array_mir_test_read(root + "/benchmarks/features/recursion/src/main.trb"))
+			expect(state.scalar_mir.call_return_guards[0].size()).to_equal(1)
+			expect(state.scalar_mir.call_return_guards[0][0].function_id).to_equal(0)
+		end
+	end
+
+	test("rejects supplied missing duplicated and forged guard facts") do
+		mut mode := 0
+		while mode < 5
+			mut state := array_loop_mir_check(call_return_source("< 2", "value"))
+			original := state.scalar_mir.call_return_guards[0][0]
+			if mode == 0
+				state.scalar_mir.call_return_guards[0] = []
+			elsif mode == 1
+				state.scalar_mir.call_return_guards[0].push(original)
+			elsif mode == 2
+				state.scalar_mir.call_return_guards[0][0] = MirCallReturnGuard.new(function_id: original.function_id, comparison: 9, bound: original.bound)
+			elsif mode == 3
+				state.scalar_mir.call_return_guards[0][0] = MirCallReturnGuard.new(function_id: original.function_id, comparison: original.comparison, bound: 3)
+			else
+				expect(verify_mir(state.scalar_mir, false)).to_equal("MIR input cannot supply call return guards")
+				state.scalar_mir.call_return_guards[0] = []
+			end
+			expect(verify_mir(state.scalar_mir, true)).to_equal("MIR call return guard differs")
+			mode += 1
+		end
+	end
+
+	test("rederives facts after erasure and physical block reordering") do
+		mut state := array_loop_mir_check(call_return_source("< 2", "value"))
+		before := state.scalar_mir.call_return_guards[0]
+		intrinsic_mir_erase(state)
+		state.scalar_mir.functions.each do |function|
+			mut left := function.block_start
+			mut right := left + function.block_count - 1
+			while left < right
+				saved := state.scalar_mir.blocks[left]
+				state.scalar_mir.blocks[left] = state.scalar_mir.blocks[right]
+				state.scalar_mir.blocks[right] = saved
+				left += 1
+				right -= 1
+			end
+		end
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(mir_call_return_equal(before, state.scalar_mir.call_return_guards[0])).to_be_true()
+		call_return_run(state, "5\n")
+	end
+end

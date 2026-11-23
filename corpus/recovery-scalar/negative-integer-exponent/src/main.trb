@@ -1,0 +1,7 @@
+def main()
+	exponent := -1
+	if 2 ** exponent == 0
+		return
+	end
+	return
+end

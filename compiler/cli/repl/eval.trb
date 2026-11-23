@@ -1,0 +1,2110 @@
+import { standard_process } from frontend/resolution/process_intrinsics
+import { repl_process_call } from repl/process
+import { repl_file_acquisition, repl_filesystem_call } from repl/filesystem
+import { standard_filesystem_host } from frontend/resolution/filesystem_intrinsics
+import { scoped_resource_name } from frontend/types/resource_types
+import { oidc_verify_function } from frontend/resolution/oidc_intrinsics
+import { standard_crypto } from frontend/resolution/crypto_intrinsics
+import { repl_crypto_call } from repl/crypto
+import { standard_compression } from frontend/resolution/compression_intrinsics
+import { standard_string_builder } from frontend/resolution/string_builder_intrinsics
+import { builder_method, builder_parameters } from mir/model/string_builder_contract
+import { repl_builder_call } from repl/string_builder
+import { web_dispatch_function, web_serve_function } from frontend/resolution/web_dispatch
+import { standard_entropy } from frontend/resolution/secure_random_intrinsics
+import { native_cli_entropy } from host
+import { web_context_primitive } from frontend/resolution/web_context_intrinsics
+import { repl_web_context_primitive } from repl/web_context
+import { standard_time_host } from frontend/resolution/time_intrinsics
+import { native_cli_time_clock, native_cli_time_zone_data, native_cli_time_zone_environment } from host
+import { standard_runtime_fail } from frontend/resolution/standard_intrinsics
+import { json_provider_function, json_provider_response } from frontend/providers/json_declarations
+import { repl_number, repl_binary_value } from repl/operators
+import { control_syntax_case, control_syntax_guarded_transfer, control_syntax_if, control_syntax_ternary, loop_transfer_none } from state/control_kinds
+import { repl_flow_break, repl_flow_continue, repl_flow_kind_slot, repl_flow_loop_owner_slot, repl_flow_normal, repl_flow_return, repl_flow_value_slot, repl_loop_flow_offset } from repl/flow_kinds
+import { checked_logical_operator_offset } from frontend/types/operator_plans
+import { declaration_object } from frontend/types/declaration_kinds
+import { transform_concurrent_map, transform_mapping, transform_sorting, transform_all, transform_any, transform_find, transform_find_index, transform_none, transform_reduce, transform_select, transform_sort_by_descending } from frontend/types/transform_kinds
+import { iteration_source_array, iteration_source_hash, iteration_source_range } from frontend/types/iteration_kinds
+import { hash_action_copy, hash_action_delete, hash_action_empty, hash_action_fetch, hash_action_has_key, hash_action_index_write, hash_action_keys, hash_action_merge, hash_action_none, hash_action_size, hash_action_update } from mir/model/hash_actions
+import { array_method_concat, array_method_include, array_method_index, array_method_join, array_method_none, array_method_unshift, bytes_method_none, float_method_none, integer_method_none, result_method_float, result_method_integer, result_method_key, result_method_slice, string_method_none, string_method_split } from frontend/types/method_kinds
+import { binary_add_assign } from frontend/types/operators
+import { token_kind_attribute, token_kind_number, token_kind_string } from state/token_kinds
+import { bytes_method_kind, bytes_method_arity, bytes_method_argument_type } from mir/lowering/bytes
+import { repl_bytes_method } from repl/bytes
+import { nominal_application_end } from frontend/syntax/generic_syntax
+import { find_visible_declaration } from frontend/resolution/declaration_lookup
+import { resolve_type_name } from frontend/resolution/type_resolution
+import { find_object_type, object_field_index, object_initializer_owner, object_abstract_function, object_static_self_type } from frontend/types/object_types
+import { mir_object_witness } from mir/lowering/object_dispatch
+import { repl_builtin_number_parse, repl_string_integer, repl_string_float } from repl/number_parsing
+import { builtin_result_method } from frontend/checking/builtins/results
+import { repl_builtin_lookup } from repl/builtin_lookup
+import { union_parts } from frontend/types/union_types
+import { find_newtype_in_module, find_newtype_type, newtype_type } from frontend/types/newtype_types
+import { find_visible_newtype } from frontend/resolution/declaration_lookup
+import { repl_slice_available, repl_slice_next } from repl/sliced_iteration
+import { repl_array_sort_keys } from repl/array_sorting
+import { raw_enum_type } from frontend/types/raw_enum_types
+import { repl_raw_enum_from, repl_raw_enum_value } from repl/raw_enums
+import { repl_failed, repl_global_key } from repl/model
+import { checked_reference_name } from frontend/resolution/namespace_references
+import { enum_method_function } from frontend/resolution/enum_methods
+import { repl_range_array } from repl/range_methods
+import { array_method_arity, array_method_kind } from frontend/checking/builtins/array_methods
+import { repl_array_method } from repl/array_methods
+import { string_method_argument_type, string_method_arity, string_method_kind } from frontend/checking/builtins/string_methods
+import { repl_string_method } from repl/string_methods
+import { repl_string_transform } from repl/string_transforms
+import { float_method_kind } from frontend/checking/builtins/float_methods
+import { repl_float_method } from repl/float_methods
+import { integer_method_arity, integer_method_kind } from frontend/checking/builtins/integer_methods
+import { repl_integer_method } from repl/integer_methods
+import { callable_parts } from frontend/types/callable_types
+import { declared_callable_type } from mir/lowering/callables
+import { repl_closure, repl_closure_environment } from repl/callables
+import { select_checked_body } from state/state
+import { result_projection } from frontend/checking/nominal/results
+import { token_is, parse_type, skip_newlines } from frontend/syntax/syntax_tokens
+import { repl_absent, repl_none, repl_payload, repl_nullable_read } from repl/nullable
+import { standard_package_import } from frontend/resolution/import_resolution
+import { enum_argument_bindings, enum_type, find_enum_type, find_enum_variant } from frontend/types/enum_types
+import { ArgumentBindings, argument_binding_slot, function_argument_bindings, record_argument_bindings } from frontend/resolution/argument_binding
+import { default_call_arguments } from frontend/resolution/default_arguments
+import { hash_key_type, hash_value_type } from frontend/types/hash_types
+import { checked_hash_plan } from frontend/checking/collections/hashes
+import { repl_hash_new, repl_hash_set, repl_hash_get, repl_hash_slot, repl_hash_delete, repl_hash_update } from repl/hash
+import trb/std/math
+import { CompilerState } from state/state
+import { sparse_integer_at, load_integer, load_string, sparse_string_at } from support/storage
+import { parse_argument_label, syntax_statement_boundary, syntax_iteration_suffix, syntax_loop_transfer_kind, syntax_block_end, syntax_conditional_tail, binary_operator_id, syntax_expression_precedence, declaration_start } from frontend/syntax/syntax_forms
+import { parse_expression_syntax, parse_statement_value_syntax } from frontend/syntax/body_syntax
+import { mir_logical_short_value } from mir/model/module
+import { checked_loop_transfer_kind } from frontend/checking/body/control
+import { checked_iteration_require, checked_range_require, checked_transform_require } from frontend/checking/collections/iteration
+import { find_visible_enum, find_visible_function, find_visible_record } from frontend/resolution/declaration_lookup
+import { find_record_type, find_field, record_type, array_element_type } from frontend/resolution/type_resolution
+import { number_is_float, number_without_underscores } from support/literals
+import { native_cli_float, native_cli_interrupt } from host
+import { repl_type, repl_set_type, repl_variant, repl_get, ReplStore, ReplEnvironment, ReplReference, repl_value, repl_integer, repl_float, repl_boolean, repl_string, repl_reference, repl_environment } from repl/model
+import { repl_scalar_string, repl_binding_value, repl_assign_binding, repl_render, repl_find, repl_bind, repl_present, repl_coerce } from repl/values
+
+# Evaluation follows the already checked token stream. Parser, resolution and
+# type checking remain owned by the ordinary compiler; no source is replayed.
+def repl_call(mut state: CompilerState, function: Integer, arguments: Array<Integer>, mut store: ReplStore): Integer
+	if repl_failed(store)
+		return 0
+	end
+	process := standard_process(state, function)
+	if process >= 0
+		return repl_process_call(store, process, arguments)
+	end
+	filesystem := standard_filesystem_host(state, function)
+	if filesystem >= 0
+		return repl_filesystem_call(store, filesystem, arguments)
+	end
+	if oidc_verify_function(state, function)
+		store.error[0] = "intrinsic trb.internal.auth.oidc.verify_bearer has no REPL runtime adapter"
+		store.failed[0] = true
+		return 0
+	end
+	crypto := standard_crypto(state, function)
+	if crypto >= 0
+		return repl_crypto_call(store, crypto, arguments)
+	end
+	if standard_compression(state, function)
+		store.error[0] = "intrinsic trb.web.middleware.compression.gzip has no REPL runtime adapter"
+		store.failed[0] = true
+		return 0
+	end
+	if web_serve_function(state, function)
+		store.error[0] = "intrinsic trb.web.serve has no REPL runtime adapter"
+		store.failed[0] = true
+		return 0
+	end
+	if web_dispatch_function(state, function)
+		store.error[0] = "intrinsic trb.web.testing.dispatch has no REPL runtime adapter"
+		return 0
+	end
+	context_primitive := web_context_primitive(state, function)
+	if context_primitive > 0
+		return repl_web_context_primitive(state, function, context_primitive, arguments, store)
+	end
+	builder := standard_string_builder(state, function)
+	if builder >= 0
+		return repl_builder_call(store, builder, arguments)
+	end
+	if standard_entropy(state, function)
+		return repl_string(store, native_cli_entropy(store.integers[arguments[0]]))
+	end
+	time_host := standard_time_host(state, function)
+	if time_host == 1
+		mut parts := [0, 0]
+		ok := native_cli_time_clock(parts)
+		if ok
+			store.children[arguments[0]][0] = repl_integer(store, parts[0])
+			store.children[arguments[0]][1] = repl_integer(store, parts[1])
+		end
+		return repl_boolean(store, ok)
+	end
+	if time_host == 2
+		mut parts := ["", ""]
+		status := native_cli_time_zone_data(store.texts[arguments[0]], store.integers[arguments[1]], store.integers[arguments[2]], parts)
+		store.children[arguments[3]][0] = repl_string(store, parts[0])
+		store.children[arguments[3]][1] = repl_string(store, parts[1])
+		return repl_integer(store, status)
+	end
+	if time_host == 3
+		mut parts := ["", ""]
+		present := native_cli_time_zone_environment(parts)
+		store.children[arguments[0]][0] = repl_string(store, parts[0])
+		store.children[arguments[0]][1] = repl_string(store, parts[1])
+		return repl_boolean(store, present)
+	end
+	if standard_runtime_fail(state, function)
+		store.error[0] = store.texts[arguments[0]]
+		store.failed[0] = true
+		return 0
+	end
+	if json_provider_function(state, function) == json_provider_response()
+		# The pinned reference has no response JSON REPL adapter; #1178 owns
+		# that capability decision independently of compiled response behavior.
+		store.error[0] = "Response.json has no REPL runtime adapter"
+		store.failed[0] = true
+		return 0
+	end
+	if object_abstract_function(state, function)
+		return repl_interface_call(state, function, arguments, store)
+	end
+	if store.depth[0] > 256
+		store.error[0] = "REPL call depth limit exceeded"
+		return 0
+	end
+	previous_body := select_checked_body(state, function)
+	store.depth[0] += 1
+	mut environment := repl_environment()
+	start := load_integer(state.declarations.function_parameter_starts, function)
+	mut index := 0
+	while index < arguments.size()
+		type_name := load_string(state.declarations.parameter_types, start + index)
+		value := repl_coerce(store, arguments[index], type_name)
+		repl_bind(environment, load_string(state.declarations.parameter_names, start + index), value, load_integer(state.declarations.parameter_mutable, start + index))
+		index += 1
+	end
+	mut position := [load_integer(state.declarations.function_body_starts, function)]
+	mut flow := [repl_flow_normal()]
+	module_name := state.module_graph.active_module[0]
+	previous_owner := state.global_bindings.declaration_owner[0]
+	state.global_bindings.declaration_owner[0] = sparse_string_at(state.source_tokens.token_namespaces, position[0])
+	state.module_graph.active_module[0] = load_integer(state.declarations.function_modules, function)
+	owner := object_initializer_owner(state, function)
+	if owner >= 0
+		mut field_index := 0
+		state.nominal.object_instances[owner].fields.each do |field|
+			if field.default_start >= 0
+				mut default_position := [field.default_start]
+				value := repl_expression(state, default_position, store, environment, 1, field.type_name)
+				store.children[arguments[0]][field_index] = repl_coerce(store, value.value, field.type_name)
+			end
+			field_index += 1
+		end
+	end
+	mut result := 0
+	if sparse_integer_at(state.parsed.function_expression_bodies, function) > 0
+		value := repl_expression(state, position, store, environment, 1, load_string(state.declarations.function_result_types, function))
+		result = value.value
+	else
+		result = repl_block(state, position, store, environment, flow, -1)
+	end
+	state.module_graph.active_module[0] = module_name
+	state.global_bindings.declaration_owner[0] = previous_owner
+	state.callables.checked[0] = previous_body
+	store.depth[0] -= 1
+	if load_string(state.declarations.function_result_types, function) == "Void"
+		return 0
+	end
+	return repl_coerce(store, result, load_string(state.declarations.function_result_types, function))
+end
+
+# Retained boxes carry the actual class value. Remapping a submission changes
+# nominal IDs, so dispatch always uses the newly checked witness catalog.
+def repl_interface_call(mut state: CompilerState, function: Integer, arguments: Array<Integer>, mut store: ReplStore): Integer
+	if arguments.size() == 0 || store.children[arguments[0]].size() != 1
+		store.error[0] = "interface call has no checked receiver"
+		return 0
+	end
+	receiver := store.children[arguments[0]][0]
+	owner := find_object_type(state, repl_type(store, receiver))
+	contract := find_object_type(state, repl_type(store, arguments[0]))
+	index := mir_object_witness(state.scalar_mir, owner, contract)
+	if index < 0
+		store.error[0] = "interface call has no checked implementation"
+		return 0
+	end
+	witness := state.scalar_mir.object_witnesses[index]
+	mut slot := 0
+	state.scalar_mir.object_methods.each do |method|
+		if method.owner == contract
+			if method.function == function
+				mut values: Array<Integer> := []
+				witness.arguments[slot].each do |argument|
+					if argument == 0
+						values.push(receiver)
+					else
+						values.push(arguments[argument])
+					end
+				end
+				return repl_call(state, state.scalar_mir.object_methods[witness.methods[slot]].function, values, store)
+			end
+			slot += 1
+		end
+	end
+	store.error[0] = "interface call has no checked method"
+	return 0
+end
+
+def repl_complete_arguments(mut state: CompilerState, mut bindings: ArgumentBindings, mut store: ReplStore)
+	mut index := 0
+	while index < bindings.values.size()
+		if !bindings.provided[index]
+			if bindings.defaults[index] < 0
+				store.error[0] = "missing checked argument " + bindings.names[index]
+				return
+			end
+			arguments := default_call_arguments(state, bindings.defaults[index], bindings.values, index)
+			bindings.values[index] = repl_call(state, bindings.defaults[index], arguments, store)
+			if repl_failed(store)
+				return
+			end
+			bindings.provided[index] = true
+		end
+		index += 1
+	end
+end
+
+# A call switches to its retained checked program for exactly the body lifetime.
+# Nested callbacks may switch back; saved body/module/context are always restored.
+def repl_indirect_call(mut store: ReplStore, id: Integer, arguments: Array<Integer>): Integer
+	if store.depth[0] > 256
+		store.error[0] = "REPL call depth limit exceeded"
+		return 0
+	end
+	owner := store.value_programs[id]
+	if owner < 0
+		store.error[0] = "fn has no retained checked program"
+		return 0
+	end
+	previous_program := store.active_program[0]
+	store.active_program[0] = owner
+	mut state := store.programs[owner]
+	function := store.integers[id]
+	previous_body := select_checked_body(state, function)
+	previous_module := state.module_graph.active_module[0]
+	previous_owner := state.global_bindings.declaration_owner[0]
+	state.global_bindings.declaration_owner[0] = sparse_string_at(state.source_tokens.token_namespaces, load_integer(state.declarations.function_body_starts, function))
+	state.module_graph.active_module[0] = load_integer(state.declarations.function_modules, function)
+	store.depth[0] += 1
+	mut environment := repl_closure_environment(state, store, id, arguments)
+	mut position := [load_integer(state.declarations.function_body_starts, function)]
+	mut flow := [repl_flow_normal()]
+	mut result := repl_block(state, position, store, environment, flow, -1)
+	result_type := load_string(state.declarations.function_result_types, function)
+	if result_type == "Void"
+		result = 0
+	else
+		result = repl_coerce(store, result, result_type)
+	end
+	store.depth[0] -= 1
+	state.callables.checked[0] = previous_body
+	state.module_graph.active_module[0] = previous_module
+	state.global_bindings.declaration_owner[0] = previous_owner
+	store.active_program[0] = previous_program
+	return result
+end
+
+def repl_primary(mut state: CompilerState, mut position: Array<Integer>, mut store: ReplStore, mut environment: ReplEnvironment, expected: String): ReplReference
+	if token_is(state, position[0], ":")
+		position[0] += 1
+		text := load_string(state.source_tokens.token_texts, position[0])
+		position[0] += 1
+		return repl_reference(repl_string(store, text))
+	end
+	if token_is(state, position[0], "fn")
+		origin := position[0]
+		syntax := state.callables.lambdas[sparse_integer_at(state.callables.lambda_origins, origin) - 1]
+		position[0] = syntax.finish
+		return repl_reference(repl_closure(state, origin, store, environment))
+	end
+	if token_is(state, position[0], "try")
+		origin := position[0]
+		position[0] += 1
+		operand := repl_postfix(state, position, store, environment, "")
+		if repl_failed(store) || environment.flow[repl_flow_kind_slot()] != repl_flow_normal()
+			return operand
+		end
+		operation := result_projection(state, origin, false)
+		if operation.origin < 0 || repl_type(store, operand.value) != operation.result_type
+			store.error[0] = "Result operand disagrees with its checked operation"
+			return repl_reference(0)
+		end
+		payload := store.children[operand.value][0]
+		if repl_variant(store, operand.value) == operation.ok_variant
+			return repl_reference(payload)
+		end
+		converted := repl_coerce(store, payload, operation.boundary_error)
+		returned := repl_value(store, operation.boundary_type, operation.boundary_variant, 0.0, "Err", [converted])
+		environment.flow[repl_flow_kind_slot()] = repl_flow_return()
+		environment.flow[repl_flow_value_slot()] = returned
+		return repl_reference(returned)
+	end
+	if token_is(state, position[0], "if") || token_is(state, position[0], "case")
+		return repl_reference(repl_control(state, position, store, environment, 0))
+	end
+	mut text := load_string(state.source_tokens.token_texts, position[0])
+	kind := load_integer(state.source_tokens.token_kinds, position[0])
+	position[0] += 1
+	if kind == token_kind_attribute()
+		self_binding := repl_find(environment, "self")
+		if self_binding < 0
+			store.error[0] = "instance field has no checked receiver"
+			return repl_reference(0)
+		end
+		receiver := repl_binding_value(store, environment, self_binding)
+		owner := find_object_type(state, repl_type(store, receiver))
+		field := object_field_index(state, owner, text)
+		return ReplReference.new(value: repl_present(store, store.children[receiver][field], ""), binding: -1, container: receiver, slot: field)
+	end
+	if kind == token_kind_number()
+		if number_is_float(text)
+			return repl_reference(repl_float(store, native_cli_float(number_without_underscores(text))))
+		end
+		return repl_reference(repl_integer(store, repl_number(text)))
+	end
+	if kind == token_kind_string()
+		return repl_reference(repl_string(store, text))
+	end
+	if text == "nil"
+		return repl_reference(repl_none(store, "Nil"))
+	end
+	if text == "true"
+		return repl_reference(repl_boolean(store, true))
+	end
+	if text == "false"
+		return repl_reference(repl_boolean(store, false))
+	end
+	if text == "+"
+		operand := repl_expression(state, position, store, environment, 8, "")
+		if environment.flow[repl_flow_kind_slot()] != repl_flow_normal()
+			return repl_reference(environment.flow[repl_flow_value_slot()])
+		end
+		return repl_reference(operand.value)
+	end
+	if text == "-"
+		operand := repl_expression(state, position, store, environment, 8, "")
+		if environment.flow[repl_flow_kind_slot()] != repl_flow_normal()
+			return repl_reference(environment.flow[repl_flow_value_slot()])
+		end
+		mut id := operand.value
+		if union_parts(repl_type(store, id)).size() > 0
+			id = store.children[id][0]
+		end
+		value := repl_get(store, id)
+		if value.type_name == "Float"
+			return repl_reference(repl_float(store, -value.floating))
+		end
+		return repl_reference(repl_integer(store, -value.integer))
+	end
+	if text == "!"
+		operand := repl_expression(state, position, store, environment, 8, "Boolean")
+		if environment.flow[repl_flow_kind_slot()] != repl_flow_normal()
+			return repl_reference(environment.flow[repl_flow_value_slot()])
+		end
+		return repl_reference(repl_boolean(store, store.integers[operand.value] == 0))
+	end
+	if text == "("
+		skip_newlines(state, position)
+		result := repl_expression(state, position, store, environment, 1, expected)
+		if environment.flow[repl_flow_kind_slot()] != repl_flow_normal()
+			return repl_reference(environment.flow[repl_flow_value_slot()])
+		end
+		position[0] += 1
+		return result
+	end
+	if text == "{"
+		plan := checked_hash_plan(state, position[0] - 1)
+		diverging := sparse_integer_at(state.callables.checked[0].diverging_hashes, position[0] - 1) > 0
+		mut id := 0
+		if !diverging
+			id = repl_hash_new(store, plan.type_name, plan.capacity)
+		end
+		skip_newlines(state, position)
+		while !token_is(state, position[0], "}")
+			key := repl_expression(state, position, store, environment, 1, plan.key_type)
+			if environment.flow[repl_flow_kind_slot()] != repl_flow_normal()
+				return repl_reference(environment.flow[repl_flow_value_slot()])
+			end
+			position[0] += 1
+			item := repl_expression(state, position, store, environment, 1, plan.value_type)
+			if environment.flow[repl_flow_kind_slot()] != repl_flow_normal()
+				return repl_reference(environment.flow[repl_flow_value_slot()])
+			end
+			if repl_failed(store)
+				return repl_reference(0)
+			end
+			if !diverging
+				repl_hash_set(store, id, key.value, repl_coerce(store, item.value, plan.value_type))
+			end
+			skip_newlines(state, position)
+			if token_is(state, position[0], ",")
+				position[0] += 1
+			end
+			skip_newlines(state, position)
+		end
+		position[0] += 1
+		if diverging
+			store.error[0] = "diverging Hash literal did not transfer"
+		end
+		return repl_reference(id)
+	end
+	if text == "["
+		mut children: Array<Integer> := []
+		result_type := sparse_string_at(state.callables.checked[0].array_literal_types, position[0] - 1)
+		element := array_element_type(result_type)
+		skip_newlines(state, position)
+		if element == "" && result_type != "Never" && !(result_type == "Array" && token_is(state, position[0], "]"))
+			store.error[0] = "Array literal has no checked element type"
+			return repl_reference(0)
+		end
+		while !token_is(state, position[0], "]")
+			value := repl_expression(state, position, store, environment, 1, element)
+			if environment.flow[repl_flow_kind_slot()] != repl_flow_normal()
+				return repl_reference(environment.flow[repl_flow_value_slot()])
+			end
+			children.push(value.value)
+			if token_is(state, position[0], ",")
+				position[0] += 1
+			end
+			skip_newlines(state, position)
+			if repl_failed(store)
+				return repl_reference(0)
+			end
+		end
+		position[0] += 1
+		mut child := 0
+		while child < children.size()
+			children[child] = repl_coerce(store, children[child], element)
+			child += 1
+		end
+		return repl_reference(repl_value(store, result_type, 0, 0.0, "", children))
+	end
+	origin := position[0] - 1
+	selected_finish := sparse_integer_at(state.callables.checked[0].resolved_finishes, origin)
+	if selected_finish > origin
+		text = checked_reference_name(state, origin)
+		position[0] = selected_finish
+	end
+	application_type := sparse_string_at(state.callables.checked[0].generic_application_types, origin)
+	application_finish := sparse_integer_at(state.callables.checked[0].generic_application_finishes, origin)
+	if application_finish > origin
+		position[0] = application_finish
+	end
+	constant := sparse_integer_at(state.callables.checked[0].global_references, origin)
+	if constant > 0
+		key := repl_global_key(state, constant - 1)
+		if !store.globals.key?(key) || store.globals[key] == 0
+			store.error[0] = "constant is not initialized"
+			return repl_reference(0)
+		end
+		return ReplReference.new(value: repl_nullable_read(state, store, store.children[store.globals[key]][0], origin), binding: -constant - 1, container: -1, slot: -1)
+	end
+	binding := repl_find(environment, text)
+	if binding >= 0
+		return ReplReference.new(value: repl_nullable_read(state, store, repl_binding_value(store, environment, binding), origin), binding: binding, container: -1, slot: -1)
+	end
+	function_value := sparse_integer_at(state.callables.checked[0].function_values, origin)
+	if function_value > 0
+		function := function_value - 1
+		return repl_reference(repl_value(store, declared_callable_type(state, function, 0), function, 0.0, "", []))
+	end
+	if text == "value" && token_is(state, position[0], "(")
+		self_slot := repl_find(environment, "self")
+		if self_slot >= 0
+			receiver := repl_binding_value(store, environment, self_slot)
+			if find_newtype_type(state, repl_type(store, receiver)) >= 0
+				position[0] += 1
+				skip_newlines(state, position)
+				position[0] += 1
+				return repl_reference(store.children[receiver][0])
+			end
+		end
+	end
+	if token_is(state, position[0], "(")
+		mut function := find_visible_function(state, state.module_graph.active_module[0], text)
+		encoded := sparse_integer_at(state.callables.checked[0].generic_calls, position[0])
+		if encoded > 0
+			function = encoded - 1
+		end
+		if function >= 0 && sparse_string_at(state.nominal.function_receivers, function) != ""
+			self_slot := repl_find(environment, "self")
+			return repl_reference(repl_nominal_method_call(state, position, store, environment, function, repl_binding_value(store, environment, self_slot)))
+		end
+		mut bindings := function_argument_bindings(state, function)
+		position[0] += 1
+		skip_newlines(state, position)
+		while !token_is(state, position[0], ")")
+			label := parse_argument_label(state, position)
+			slot := argument_binding_slot(bindings, label)
+			if slot < 0
+				store.error[0] = bindings.error[0]
+				return repl_reference(0)
+			end
+			mut parameter_type := "String"
+			if function >= 0
+				start := load_integer(state.declarations.function_parameter_starts, function)
+				parameter_type = load_string(state.declarations.parameter_types, start + slot)
+			end
+			value := repl_expression(state, position, store, environment, 1, parameter_type)
+			if environment.flow[repl_flow_kind_slot()] != repl_flow_normal()
+				return repl_reference(environment.flow[repl_flow_value_slot()])
+			end
+			bindings.values[slot] = repl_coerce(store, value.value, parameter_type)
+			if token_is(state, position[0], ",")
+				position[0] += 1
+			end
+			skip_newlines(state, position)
+			if repl_failed(store)
+				return repl_reference(0)
+			end
+		end
+		position[0] += 1
+		repl_complete_arguments(state, bindings, store)
+		if repl_failed(store)
+			return repl_reference(0)
+		end
+		arguments := bindings.values
+		if text == "puts" && function < 0
+			mut printed := arguments[0]
+			if union_parts(repl_type(store, printed)).size() > 0
+				printed = store.children[printed][0]
+			end
+			if repl_absent(store, printed)
+				puts("nil")
+			else
+				printed = repl_payload(store, printed)
+				if repl_get(store, printed).type_name == "String"
+					puts(store.texts[printed])
+				elsif repl_type(store, printed) == "Float"
+					puts(repl_scalar_string(repl_get(store, printed)))
+				else
+					puts(repl_render(state, store, printed, 0))
+				end
+			end
+			return repl_reference(0)
+		end
+		if function >= 0
+			return repl_reference(repl_call(state, function, arguments, store))
+		end
+	end
+	if token_is(state, position[0], "::")
+		mut owner := find_enum_type(state, application_type)
+		if owner < 0
+			owner = find_visible_enum(state, state.module_graph.active_module[0], text)
+		end
+		variant := find_enum_variant(state, owner, load_string(state.source_tokens.token_texts, position[0] + 1))
+		position[0] += 2
+		row := state.nominal.enum_variants[variant]
+		mut bindings := enum_argument_bindings(state, variant)
+		if row.field_count > 0
+			position[0] += 1
+			skip_newlines(state, position)
+			while !token_is(state, position[0], ")") && !repl_failed(store)
+				label := parse_argument_label(state, position)
+				slot := argument_binding_slot(bindings, label)
+				if slot < 0
+					store.error[0] = bindings.error[0]
+					return repl_reference(0)
+				end
+				type_name := state.nominal.enum_fields[row.field_start + slot].type_name
+				value := repl_expression(state, position, store, environment, 1, type_name)
+				if environment.flow[repl_flow_kind_slot()] != repl_flow_normal()
+					return repl_reference(environment.flow[repl_flow_value_slot()])
+				end
+				bindings.values[slot] = repl_coerce(store, value.value, type_name)
+				if token_is(state, position[0], ",")
+					position[0] += 1
+				end
+				skip_newlines(state, position)
+			end
+			position[0] += 1
+		end
+		return repl_reference(repl_value(store, enum_type(owner), variant, 0.0, row.name, bindings.values))
+	end
+	mut object_type := application_type
+	if text == "self"
+		object_type = object_static_self_type(state)
+	end
+	if find_visible_declaration(state, state.module_graph.active_module[0], text, declaration_object()) >= 0 && find_object_type(state, object_type) < 0
+		object_type = resolve_type_name(state, state.module_graph.active_module[0], text, false)
+	end
+	if find_object_type(state, object_type) >= 0 && token_is(state, position[0], ".")
+		member := load_string(state.source_tokens.token_texts, position[0] + 1)
+		position[0] += 2
+		return repl_reference(repl_object_method(state, position, store, environment, object_type, member, -1))
+	end
+	mut newtype_owner := find_newtype_type(state, application_type)
+	if newtype_owner < 0
+		newtype_owner = find_visible_newtype(state, state.module_graph.active_module[0], text)
+	end
+	if text == "self"
+		newtype_owner = find_newtype_in_module(state, state.module_graph.active_module[0], state.global_bindings.declaration_owner[0])
+	end
+	if newtype_owner >= 0 && token_is(state, position[0], ".")
+		member := load_string(state.source_tokens.token_texts, position[0] + 1)
+		position[0] += 2
+		if member == "new"
+			position[0] += 1
+			skip_newlines(state, position)
+			representation := state.nominal.newtypes[newtype_owner].representation
+			argument := repl_expression(state, position, store, environment, 1, representation)
+			if environment.flow[repl_flow_kind_slot()] != repl_flow_normal()
+				return repl_reference(environment.flow[repl_flow_value_slot()])
+			end
+			skip_newlines(state, position)
+			if token_is(state, position[0], ",")
+				position[0] += 1
+				skip_newlines(state, position)
+			end
+			position[0] += 1
+			return repl_reference(repl_value(store, newtype_type(newtype_owner), 0, 0.0, "", [repl_coerce(store, argument.value, representation)]))
+		end
+		return repl_reference(repl_newtype_method(state, position, store, environment, -1))
+	end
+	if token_is(state, position[0], ".")
+		position[0] += 1
+		member := load_string(state.source_tokens.token_texts, position[0])
+		position[0] += 2
+		if member == "from_raw"
+			call_origin := position[0] - 1
+			state.callables.checked[0].raw_enum_conversions.each do |operation|
+				if operation.origin == call_origin
+					skip_newlines(state, position)
+					argument := repl_expression(state, position, store, environment, 1, raw_enum_type(state, operation.owner))
+					if environment.flow[repl_flow_kind_slot()] != repl_flow_normal()
+						return repl_reference(environment.flow[repl_flow_value_slot()])
+					end
+					skip_newlines(state, position)
+					position[0] += 1
+					return repl_reference(repl_raw_enum_from(state, store, operation.owner, argument.value, operation.result_type))
+				end
+			end
+			store.error[0] = "raw enum conversion has no checked result"
+			return repl_reference(0)
+		end
+		if standard_package_import(state, state.module_graph.active_module[0], text) == -3
+			argument := repl_expression(state, position, store, environment, 1, "Float")
+			if environment.flow[repl_flow_kind_slot()] != repl_flow_normal()
+				return repl_reference(environment.flow[repl_flow_value_slot()])
+			end
+			position[0] += 1
+			value := repl_coerce(store, argument.value, "Float")
+			return repl_reference(repl_float(store, Math.sqrt(store.floats[value])))
+		end
+		if standard_package_import(state, state.module_graph.active_module[0], text) == -2
+			position[0] += 1
+			return repl_reference(repl_value(store, "Array<String>", 0, 0.0, "", []))
+		end
+		mut record_index := find_record_type(state, application_type)
+		if record_index < 0
+			record_index = find_visible_record(state, state.module_graph.active_module[0], text)
+		end
+		if record_index >= 0
+			if member == "new"
+				start := load_integer(state.declarations.record_field_starts, record_index)
+				mut bindings := record_argument_bindings(state, record_index)
+				skip_newlines(state, position)
+				while !token_is(state, position[0], ")")
+					name := parse_argument_label(state, position)
+					slot := argument_binding_slot(bindings, name)
+					if slot < 0
+						store.error[0] = bindings.error[0]
+						return repl_reference(0)
+					end
+					field := start + slot
+					type_name := load_string(state.declarations.field_types, field)
+					value := repl_expression(state, position, store, environment, 1, type_name)
+					if environment.flow[repl_flow_kind_slot()] != repl_flow_normal()
+						return repl_reference(environment.flow[repl_flow_value_slot()])
+					end
+					bindings.values[slot] = repl_coerce(store, value.value, type_name)
+					if token_is(state, position[0], ",")
+						position[0] += 1
+					end
+					skip_newlines(state, position)
+				end
+				position[0] += 1
+				repl_complete_arguments(state, bindings, store)
+				if repl_failed(store)
+					return repl_reference(0)
+				end
+				return repl_reference(repl_value(store, record_type(record_index), 0, 0.0, "", bindings.values))
+			end
+		end
+	end
+	store.error[0] = "unsupported checked REPL expression " + text
+	return repl_reference(0)
+end
+
+def repl_callable_expression(mut state: CompilerState, mut position: Array<Integer>, mut store: ReplStore, mut environment: ReplEnvironment, callable: Integer): ReplReference
+	parts := callable_parts(store.types[callable])
+	position[0] += 1
+	skip_newlines(state, position)
+	mut arguments: Array<Integer> := []
+	while !token_is(state, position[0], ")") && !repl_failed(store)
+		argument := repl_expression(state, position, store, environment, 1, parts[arguments.size() + 1])
+		if environment.flow[repl_flow_kind_slot()] != repl_flow_normal()
+			return repl_reference(environment.flow[repl_flow_value_slot()])
+		end
+		arguments.push(argument.value)
+		skip_newlines(state, position)
+		if token_is(state, position[0], ",")
+			position[0] += 1
+			skip_newlines(state, position)
+		end
+	end
+	position[0] += 1
+	if repl_failed(store)
+		return repl_reference(0)
+	end
+	return repl_reference(repl_indirect_call(store, callable, arguments))
+end
+
+def repl_postfix(mut state: CompilerState, mut position: Array<Integer>, mut store: ReplStore, mut environment: ReplEnvironment, expected: String): ReplReference
+	mut result := repl_primary(state, position, store, environment, expected)
+	if environment.flow[repl_flow_kind_slot()] != repl_flow_normal()
+		return repl_reference(environment.flow[repl_flow_value_slot()])
+	end
+	mut complete := false
+	while !complete
+		if repl_failed(store)
+			return repl_reference(0)
+		end
+		if syntax_iteration_suffix(state, position[0]) >= 0
+			break
+		end
+		mut safe_origin := -1
+		if token_is(state, position[0], "&.")
+			safe_origin = position[0]
+			if repl_absent(store, result.value)
+				position[0] = sparse_integer_at(state.callables.checked[0].safe_finishes, safe_origin)
+				result = repl_reference(repl_none(store, load_string(state.callables.checked[0].safe_types, safe_origin)))
+				next
+			end
+			result = ReplReference.new(value: repl_payload(store, result.value), binding: result.binding, container: result.container, slot: result.slot)
+		end
+		mut union_receiver := false
+		if token_is(state, position[0], ".") && union_parts(repl_type(store, result.value)).size() > 0
+			union_receiver = true
+			result = repl_reference(store.children[result.value][0])
+		end
+		value := repl_get(store, result.value)
+		if token_is(state, position[0], "(")
+			result = repl_callable_expression(state, position, store, environment, result.value)
+			next
+		end
+		if token_is(state, position[0], "[")
+			if value.type_name == "Hash" || hash_key_type(value.type_name) != ""
+				plan := checked_hash_plan(state, position[0])
+				repl_set_type(store, result.value, plan.type_name)
+				position[0] += 1
+				key := repl_expression(state, position, store, environment, 1, plan.key_type)
+				if environment.flow[repl_flow_kind_slot()] != repl_flow_normal()
+					return repl_reference(environment.flow[repl_flow_value_slot()])
+				end
+				position[0] += 1
+				if plan.kind == hash_action_index_write()
+					result = ReplReference.new(value: 0, binding: -1, container: result.value, slot: key.value)
+				else
+					result = repl_reference(repl_present(store, repl_hash_get(store, result.value, key.value), ""))
+				end
+				next
+			end
+			position[0] += 1
+			requested := repl_expression(state, position, store, environment, 1, "Integer")
+			if environment.flow[repl_flow_kind_slot()] != repl_flow_normal()
+				return repl_reference(environment.flow[repl_flow_value_slot()])
+			end
+			position[0] += 1
+			mut length := value.children.size()
+			if value.type_name == "String"
+				length = value.text.size()
+			end
+			mut index := store.integers[requested.value]
+			if index < 0
+				index += length
+			end
+			if index < 0
+				store.error[0] = "panic: index is out of bounds"
+				return repl_reference(0)
+			end
+			if index >= length
+				store.error[0] = "panic: index is out of bounds"
+				return repl_reference(0)
+			end
+			if value.type_name == "String"
+				result = repl_reference(repl_string(store, value.text[index]))
+			else
+				result = ReplReference.new(value: repl_present(store, value.children[index], ""), binding: -1, container: result.value, slot: index)
+			end
+		else
+			if token_is(state, position[0], ".") || safe_origin >= 0
+				if sparse_integer_at(state.parsed.transform_origins, position[0]) > 0
+					result = repl_reference(repl_transform(state, position, store, environment, result.value))
+					if repl_failed(store)
+						return result
+					end
+					if safe_origin >= 0 && environment.flow[repl_flow_kind_slot()] == repl_flow_normal()
+						result = repl_reference(repl_coerce(store, result.value, load_string(state.callables.checked[0].safe_types, safe_origin)))
+					end
+					next
+				end
+				position[0] += 1
+				member := load_string(state.source_tokens.token_texts, position[0])
+				position[0] += 1
+				if (member == "each" || member == "each_slice") && syntax_iteration_suffix(state, position[0] - 2) >= 0
+					position[0] -= 2
+					break
+				end
+				if find_object_type(state, value.type_name) >= 0
+					owner := find_object_type(state, value.type_name)
+					field := object_field_index(state, owner, "@" + member)
+					if field >= 0 && (union_receiver || (!token_is(state, position[0], "(") && (!token_is(state, position[0], "<") || nominal_application_end(state, position[0] - 1) < 0)))
+						result = ReplReference.new(value: repl_present(store, store.children[result.value][field], ""), binding: -1, container: result.value, slot: field)
+						if token_is(state, position[0], "(")
+							result = repl_callable_expression(state, position, store, environment, result.value)
+						end
+					else
+						result = repl_reference(repl_object_method(state, position, store, environment, value.type_name, member, result.value))
+					end
+					if safe_origin >= 0 && environment.flow[repl_flow_kind_slot()] == repl_flow_normal()
+						result = repl_reference(repl_coerce(store, result.value, load_string(state.callables.checked[0].safe_types, safe_origin)))
+					end
+					next
+				end
+				if find_newtype_type(state, value.type_name) >= 0
+					if member == "value"
+						position[0] += 1
+						skip_newlines(state, position)
+						position[0] += 1
+						result = repl_reference(value.children[0])
+					else
+						result = repl_reference(repl_newtype_method(state, position, store, environment, result.value))
+					end
+					if safe_origin >= 0 && environment.flow[repl_flow_kind_slot()] == repl_flow_normal()
+						result = repl_reference(repl_coerce(store, result.value, load_string(state.callables.checked[0].safe_types, safe_origin)))
+					end
+					next
+				end
+				record_index := find_record_type(state, value.type_name)
+				if record_index >= 0
+					field := find_field(state, record_index, member)
+					start := load_integer(state.declarations.record_field_starts, record_index)
+					result = ReplReference.new(value: repl_present(store, repl_nullable_read(state, store, value.children[field - start], position[0] - 1), ""), binding: -1, container: result.value, slot: field - start)
+					if token_is(state, position[0], "(")
+						result = repl_callable_expression(state, position, store, environment, result.value)
+					end
+				elsif token_is(state, position[0], "(")
+					if member == "raw_value" && raw_enum_type(state, find_enum_type(state, value.type_name)) != ""
+						position[0] += 1
+						skip_newlines(state, position)
+						position[0] += 1
+						result = repl_reference(repl_raw_enum_value(state, store, result.value))
+						if safe_origin >= 0
+							result = repl_reference(repl_coerce(store, result.value, load_string(state.callables.checked[0].safe_types, safe_origin)))
+						end
+						next
+					end
+					method_function := enum_method_function(state, value.type_name, member)
+					if method_function >= 0
+						result = repl_reference(repl_nominal_method_call(state, position, store, environment, method_function, result.value))
+						if safe_origin >= 0 && environment.flow[repl_flow_kind_slot()] == repl_flow_normal()
+							result = repl_reference(repl_coerce(store, result.value, load_string(state.callables.checked[0].safe_types, safe_origin)))
+						end
+						next
+					end
+					if builtin_result_method(value.type_name, member) > 0
+						origin := position[0]
+						kind := builtin_result_method(value.type_name, member)
+						if kind == result_method_integer() || kind == result_method_float()
+							position[0] += 1
+							skip_newlines(state, position)
+							position[0] += 1
+							result = repl_reference(repl_builtin_number_parse(state, store, result.value, kind == result_method_float(), load_string(state.callables.checked[0].builtin_result_types, origin)))
+							if safe_origin >= 0 && !repl_failed(store)
+								result = repl_reference(repl_coerce(store, result.value, load_string(state.callables.checked[0].safe_types, safe_origin)))
+							end
+							next
+						end
+						mut argument_type := "Integer"
+						if kind == result_method_slice()
+							argument_type = "Range<Integer>"
+						elsif kind == result_method_key()
+							argument_type = hash_key_type(value.type_name)
+						end
+						position[0] += 1
+						skip_newlines(state, position)
+						argument := repl_expression(state, position, store, environment, 1, argument_type)
+						if environment.flow[repl_flow_kind_slot()] != repl_flow_normal()
+							return repl_reference(environment.flow[repl_flow_value_slot()])
+						end
+						if repl_failed(store)
+							return repl_reference(0)
+						end
+						skip_newlines(state, position)
+						if token_is(state, position[0], ",")
+							position[0] += 1
+							skip_newlines(state, position)
+						end
+						position[0] += 1
+						converted := repl_coerce(store, argument.value, argument_type)
+						result = repl_reference(repl_builtin_lookup(state, store, kind, result.value, converted, load_string(state.callables.checked[0].builtin_result_types, origin)))
+						if safe_origin >= 0 && environment.flow[repl_flow_kind_slot()] == repl_flow_normal() && !repl_failed(store)
+							result = repl_reference(repl_coerce(store, result.value, load_string(state.callables.checked[0].safe_types, safe_origin)))
+						end
+						next
+					end
+					if value.type_name == "Hash" || hash_key_type(value.type_name) != ""
+						result = repl_reference(repl_hash_method(state, position, store, environment, result.value))
+						if safe_origin >= 0 && environment.flow[repl_flow_kind_slot()] == repl_flow_normal()
+							result = repl_reference(repl_coerce(store, result.value, load_string(state.callables.checked[0].safe_types, safe_origin)))
+						end
+						next
+					end
+					if value.type_name == "Range<Integer>" && member == "to_a"
+						position[0] += 1
+						skip_newlines(state, position)
+						position[0] += 1
+						result = repl_reference(repl_range_array(store, result.value))
+						if safe_origin >= 0
+							result = repl_reference(repl_coerce(store, result.value, load_string(state.callables.checked[0].safe_types, safe_origin)))
+						end
+						next
+					end
+					if (array_element_type(value.type_name) != "" || (value.type_name == "Array" && (member == "empty?" || member == "unshift"))) && array_method_kind(member) > array_method_none()
+						kind := array_method_kind(member)
+						position[0] += 1
+						skip_newlines(state, position)
+						mut argument := -1
+						if array_method_arity(kind) == 1
+							mut argument_type := "Range<Integer>"
+							if kind == array_method_unshift() || (kind >= array_method_include() && kind <= array_method_index())
+								argument_type = array_element_type(value.type_name)
+							elsif kind == array_method_concat()
+								argument_type = value.type_name
+							elsif kind == array_method_join()
+								argument_type = "String"
+							end
+							checked_argument := repl_expression(state, position, store, environment, 1, argument_type)
+							if environment.flow[repl_flow_kind_slot()] != repl_flow_normal()
+								return repl_reference(environment.flow[repl_flow_value_slot()])
+							end
+							if repl_failed(store)
+								return repl_reference(0)
+							end
+							argument = repl_coerce(store, checked_argument.value, argument_type)
+							skip_newlines(state, position)
+							if token_is(state, position[0], ",")
+								position[0] += 1
+								skip_newlines(state, position)
+							end
+						end
+						position[0] += 1
+						result = repl_reference(repl_array_method(store, kind, result.value, argument))
+						if safe_origin >= 0 && environment.flow[repl_flow_kind_slot()] == repl_flow_normal() && !repl_failed(store)
+							result = repl_reference(repl_coerce(store, result.value, load_string(state.callables.checked[0].safe_types, safe_origin)))
+						end
+						next
+					end
+					if value.type_name == "StringBuilder"
+						kind := builder_method(member)
+						parameters := builder_parameters(kind)
+						position[0] += 1
+						skip_newlines(state, position)
+						mut arguments := [result.value]
+						if parameters.size() > 1
+							argument := repl_expression(state, position, store, environment, 1, parameters[1])
+							if environment.flow[repl_flow_kind_slot()] != repl_flow_normal()
+								return repl_reference(environment.flow[repl_flow_value_slot()])
+							end
+							if repl_failed(store)
+								return repl_reference(0)
+							end
+							arguments.push(argument.value)
+							skip_newlines(state, position)
+							if token_is(state, position[0], ",")
+								position[0] += 1
+								skip_newlines(state, position)
+							end
+						end
+						position[0] += 1
+						result = repl_reference(repl_builder_call(store, kind, arguments))
+						if safe_origin >= 0 && environment.flow[repl_flow_kind_slot()] == repl_flow_normal() && !repl_failed(store)
+							result = repl_reference(repl_coerce(store, result.value, load_string(state.callables.checked[0].safe_types, safe_origin)))
+						end
+						next
+					end
+					if bytes_method_kind(value.type_name, member) > bytes_method_none()
+						kind := bytes_method_kind(value.type_name, member)
+						position[0] += 1
+						skip_newlines(state, position)
+						mut argument := -1
+						if bytes_method_arity(kind) == 1
+							checked_argument := repl_expression(state, position, store, environment, 1, bytes_method_argument_type(kind))
+							if environment.flow[repl_flow_kind_slot()] != repl_flow_normal()
+								return repl_reference(environment.flow[repl_flow_value_slot()])
+							end
+							if repl_failed(store)
+								return repl_reference(0)
+							end
+							argument = checked_argument.value
+							skip_newlines(state, position)
+							if token_is(state, position[0], ",")
+								position[0] += 1
+								skip_newlines(state, position)
+							end
+						end
+						position[0] += 1
+						result = repl_reference(repl_bytes_method(store, kind, result.value, argument))
+						if safe_origin >= 0 && environment.flow[repl_flow_kind_slot()] == repl_flow_normal() && !repl_failed(store)
+							result = repl_reference(repl_coerce(store, result.value, load_string(state.callables.checked[0].safe_types, safe_origin)))
+						end
+						next
+					end
+					if value.type_name == "String" && string_method_kind(member) > string_method_none()
+						kind := string_method_kind(member)
+						position[0] += 1
+						skip_newlines(state, position)
+						mut argument := -1
+						mut arguments: Array<Integer> := []
+						while arguments.size() < string_method_arity(kind)
+							checked_argument := repl_expression(state, position, store, environment, 1, string_method_argument_type(kind))
+							if environment.flow[repl_flow_kind_slot()] != repl_flow_normal()
+								return repl_reference(environment.flow[repl_flow_value_slot()])
+							end
+							if repl_failed(store)
+								return repl_reference(0)
+							end
+							argument = checked_argument.value
+							arguments.push(argument)
+							skip_newlines(state, position)
+							if token_is(state, position[0], ",")
+								position[0] += 1
+								skip_newlines(state, position)
+							end
+						end
+						position[0] += 1
+						if kind >= string_method_split()
+							result = repl_reference(repl_string_transform(store, kind, result.value, arguments))
+						else
+							result = repl_reference(repl_string_method(store, kind, result.value, argument))
+						end
+						if safe_origin >= 0 && environment.flow[repl_flow_kind_slot()] == repl_flow_normal() && !repl_failed(store)
+							result = repl_reference(repl_coerce(store, result.value, load_string(state.callables.checked[0].safe_types, safe_origin)))
+						end
+						next
+					end
+					if value.type_name == "Float" && float_method_kind(member) > float_method_none()
+						position[0] += 1
+						skip_newlines(state, position)
+						position[0] += 1
+						result = repl_reference(repl_float_method(store, float_method_kind(member), result.value))
+						if safe_origin >= 0 && environment.flow[repl_flow_kind_slot()] == repl_flow_normal() && !repl_failed(store)
+							result = repl_reference(repl_coerce(store, result.value, load_string(state.callables.checked[0].safe_types, safe_origin)))
+						end
+						next
+					end
+					if value.type_name == "Integer" && integer_method_kind(member) > integer_method_none()
+						kind := integer_method_kind(member)
+						position[0] += 1
+						skip_newlines(state, position)
+						mut arguments: Array<Integer> := []
+						while arguments.size() < integer_method_arity(kind)
+							argument := repl_expression(state, position, store, environment, 1, "Integer")
+							if environment.flow[repl_flow_kind_slot()] != repl_flow_normal()
+								return repl_reference(environment.flow[repl_flow_value_slot()])
+							end
+							if repl_failed(store)
+								return repl_reference(0)
+							end
+							arguments.push(argument.value)
+							skip_newlines(state, position)
+							if token_is(state, position[0], ",")
+								position[0] += 1
+								skip_newlines(state, position)
+							end
+						end
+						position[0] += 1
+						result = repl_reference(repl_integer_method(store, kind, result.value, arguments))
+						if safe_origin >= 0 && environment.flow[repl_flow_kind_slot()] == repl_flow_normal() && !repl_failed(store)
+							result = repl_reference(repl_coerce(store, result.value, load_string(state.callables.checked[0].safe_types, safe_origin)))
+						end
+						next
+					end
+					position[0] += 1
+					if member == "push"
+						argument := repl_expression(state, position, store, environment, 1, array_element_type(value.type_name))
+						if environment.flow[repl_flow_kind_slot()] != repl_flow_normal()
+							return repl_reference(environment.flow[repl_flow_value_slot()])
+						end
+						store.children[result.value].push(repl_coerce(store, argument.value, array_element_type(value.type_name)))
+						result = repl_reference(0)
+					else
+						if member == "size"
+							mut size := value.children.size()
+							if value.type_name == "String"
+								size = value.text.size()
+							end
+							result = repl_reference(repl_integer(store, size))
+						else
+							if member == "to_s"
+								result = repl_reference(repl_string(store, repl_scalar_string(value)))
+							else
+								if member == "to_f"
+									result = repl_reference(repl_float(store, repl_string_float(store, value.text)))
+								elsif member == "to_i"
+									result = repl_reference(repl_integer(store, repl_string_integer(store, value.text)))
+								end
+							end
+						end
+					end
+					position[0] += 1
+				end
+			else
+				complete = true
+			end
+		end
+		if safe_origin >= 0 && environment.flow[repl_flow_kind_slot()] == repl_flow_normal()
+			result = repl_reference(repl_coerce(store, result.value, load_string(state.callables.checked[0].safe_types, safe_origin)))
+		end
+	end
+	return result
+end
+
+def repl_expression(mut state: CompilerState, mut position: Array<Integer>, mut store: ReplStore, mut environment: ReplEnvironment, minimum: Integer, expected: String): ReplReference
+	expression_origin := position[0]
+	mut result := repl_postfix(state, position, store, environment, expected)
+	if environment.flow[repl_flow_kind_slot()] != repl_flow_normal()
+		return repl_reference(environment.flow[repl_flow_value_slot()])
+	end
+	mut complete := false
+	while !complete
+		if repl_failed(store)
+			return repl_reference(0)
+		end
+		operator := load_string(state.source_tokens.token_texts, position[0])
+		precedence := syntax_expression_precedence(operator)
+		if precedence < minimum
+			complete = true
+		else
+			position[0] += 1
+			origin := position[0] - 1
+			skip_newlines(state, position)
+			if precedence <= 2
+				plan := load_integer(state.callables.checked[0].checked_operator_plans, origin)
+				short_value := mir_logical_short_value(plan)
+				if short_value < 0 || plan - checked_logical_operator_offset() != binary_operator_id(operator)
+					store.error[0] = "invalid checked logical plan"
+					return repl_reference(0)
+				end
+				if store.integers[result.value] == short_value
+					# The frontend already checked both regions. Advance through
+					# skipped syntax without evaluating calls, allocations or traps.
+					if !parse_expression_syntax(state, position, precedence + 1)
+						store.error[0] = "invalid checked logical right-hand side"
+					end
+					result = repl_reference(result.value)
+				else
+					result = repl_reference(repl_expression(state, position, store, environment, precedence + 1, "Boolean").value)
+					if environment.flow[repl_flow_kind_slot()] != repl_flow_normal()
+						return repl_reference(environment.flow[repl_flow_value_slot()])
+					end
+				end
+			else
+				end_origin := position[0]
+				mut right_precedence := precedence + 1
+				if precedence == 8
+					right_precedence = precedence
+				end
+				right := repl_expression(state, position, store, environment, right_precedence, "")
+				if environment.flow[repl_flow_kind_slot()] != repl_flow_normal()
+					return repl_reference(environment.flow[repl_flow_value_slot()])
+				end
+				if precedence == 3
+					if repl_failed(store)
+						return repl_reference(0)
+					end
+					plan := checked_range_require(state, expression_origin, origin, end_origin, position[0])
+					start := repl_coerce(store, result.value, plan.start_type)
+					finish := repl_coerce(store, right.value, plan.end_type)
+					if plan.origin < 0 || repl_type(store, start) != plan.start_type || repl_type(store, finish) != plan.end_type
+						store.error[0] = "Range operands disagree with checked MIR"
+						return repl_reference(0)
+					end
+					result = repl_reference(repl_value(store, "Range<Integer>", 0, 0.0, "", [start, finish, repl_integer(store, plan.exclusive)]))
+				else
+					result = repl_reference(repl_binary_value(store, result.value, operator, right.value))
+				end
+			end
+		end
+	end
+	if minimum == 1 && token_is(state, position[0], "?")
+		result = repl_reference(repl_control(state, position, store, environment, result.value))
+	end
+	return result
+end
+
+def repl_block_end(state: CompilerState, start: Integer, stop_else: Boolean): Integer
+	mut position := start
+	mut depth := 0
+	while position < state.source_tokens.token_count[0]
+		transformed := sparse_integer_at(state.parsed.transform_origins, position)
+		if transformed > 0
+			position = state.parsed.transforms[transformed - 1].iteration.finish
+			next
+		end
+		caught := sparse_integer_at(state.parsed.catch_origins, position)
+		if caught > 0
+			position = state.parsed.catch_syntax[caught - 1].finish
+			next
+		end
+		control := sparse_integer_at(state.parsed.control_origins, position)
+		if control > 0
+			position = state.parsed.controls[control - 1].finish
+			next
+		end
+		encoded_iteration := sparse_integer_at(state.parsed.iteration_origins, position)
+		if encoded_iteration > 0 && encoded_iteration <= state.parsed.iterations.size()
+			position = state.parsed.iterations[encoded_iteration - 1].finish
+			next
+		end
+		if token_is(state, position, "if")
+			depth += 1
+		end
+		if token_is(state, position, "while")
+			depth += 1
+		end
+		if token_is(state, position, "end")
+			if depth == 0
+				return position
+			end
+			depth -= 1
+		end
+		if stop_else
+			if depth == 0
+				if syntax_conditional_tail(state, position)
+					return position
+				end
+			end
+		end
+		position += 1
+	end
+	return position
+end
+
+def repl_iteration(mut state: CompilerState, mut position: Array<Integer>, mut store: ReplStore, mut environment: ReplEnvironment, mut flow: Array<Integer>, parent_loop: Integer): Integer
+	plan := checked_iteration_require(state, position[0], parent_loop)
+	if plan.syntax.origin < 0
+		store.error[0] = "invalid checked iteration"
+		return 0
+	end
+	mut receiver := repl_expression(state, position, store, environment, 1, plan.type_name).value
+	if repl_failed(store)
+		return 0
+	end
+	if environment.flow[repl_flow_kind_slot()] != repl_flow_normal()
+		return environment.flow[repl_flow_value_slot()]
+	end
+	if token_is(state, plan.syntax.receiver_finish, "&.")
+		if repl_absent(store, receiver)
+			position[0] = plan.syntax.finish
+			return 0
+		end
+		receiver = repl_payload(store, receiver)
+	end
+	if repl_type(store, receiver) != plan.type_name || position[0] != plan.syntax.receiver_finish
+		store.error[0] = "iteration receiver disagrees with checked MIR"
+		return 0
+	end
+	mut slice_size := 0
+	if plan.syntax.slice_start >= 0
+		position[0] = plan.syntax.slice_start
+		size := repl_expression(state, position, store, environment, 1, "Integer").value
+		if repl_failed(store) || environment.flow[repl_flow_kind_slot()] != repl_flow_normal()
+			return environment.flow[repl_flow_value_slot()]
+		end
+		slice_size = store.integers[size]
+		if slice_size <= 0
+			store.error[0] = "panic: each_slice size must be greater than zero"
+			return 0
+		end
+	end
+	saved := environment.count[0]
+	mut cursor := 0
+	mut ordinal := 0
+	mut bound := 0
+	mut exclusive := 0
+	if plan.source_kind == iteration_source_range()
+		cursor = store.integers[store.children[receiver][0]]
+		bound = store.integers[store.children[receiver][1]]
+		exclusive = store.integers[store.children[receiver][2]]
+	end
+	mut keys: Array<Integer> := []
+	mut values: Array<Integer> := []
+	if plan.source_kind == iteration_source_hash()
+		table := store.hashes[store.integers[receiver]]
+		# Preserve the reference REPL's deterministic presentation while
+		# snapshotting before the block can mutate or rebuild the table.
+		mut index := 0
+		while index < table.order.size()
+			key := table.order[index]
+			if key > 0
+				slot := repl_hash_slot(store, table, key)
+				if slot >= 0
+					keys.push(table.keys[slot])
+					values.push(table.values[slot])
+				end
+			end
+			index += 1
+		end
+	end
+	mut slice_cursor := [cursor, bound, exclusive, 0]
+	mut result := 0
+	while true
+		if slice_size > 0
+			if !repl_slice_available(store, receiver, plan.source_kind == iteration_source_range(), slice_cursor)
+				break
+			end
+		elsif plan.source_kind == iteration_source_hash()
+			if cursor >= keys.size()
+				break
+			end
+		elsif plan.source_kind == iteration_source_array()
+			if cursor >= store.children[receiver].size()
+				break
+			end
+		elsif cursor > bound || (cursor == bound && exclusive == 1)
+			break
+		end
+		environment.count[0] = saved
+		mut element := 0
+		if slice_size > 0
+			element = repl_slice_next(store, receiver, plan.source_kind == iteration_source_range(), plan.element_type, slice_size, slice_cursor)
+		elsif plan.source_kind == iteration_source_array()
+			element = store.children[receiver][cursor]
+		elsif plan.source_kind == iteration_source_hash()
+			element = keys[cursor]
+		else
+			element = repl_integer(store, cursor)
+		end
+		repl_bind(environment, load_string(state.source_tokens.token_texts, plan.syntax.element_origin), element, 1)
+		if plan.syntax.second_origin >= 0
+			mut second := 0
+			if plan.source_kind == iteration_source_hash()
+				second = values[cursor]
+			else
+				second = repl_integer(store, ordinal)
+			end
+			repl_bind(environment, load_string(state.source_tokens.token_texts, plan.syntax.second_origin), second, 1)
+		end
+		position[0] = plan.syntax.body_start
+		result = repl_block(state, position, store, environment, flow, plan.syntax.origin)
+		if flow[repl_flow_kind_slot()] == repl_flow_break()
+			flow[repl_flow_kind_slot()] = repl_flow_normal()
+			break
+		elsif flow[repl_flow_kind_slot()] == repl_flow_continue()
+			flow[repl_flow_kind_slot()] = repl_flow_normal()
+		elsif flow[repl_flow_kind_slot()] != repl_flow_normal()
+			break
+		end
+		if repl_failed(store)
+			break
+		end
+		if slice_size > 0
+			if !repl_slice_available(store, receiver, plan.source_kind == iteration_source_range(), slice_cursor)
+				break
+			end
+			if plan.syntax.second_origin >= 0
+				if ordinal == 9007199254740991
+					store.error[0] = "panic: Integer is outside the portable range"
+					break
+				end
+				ordinal += 1
+			end
+		else
+			if plan.source_kind == iteration_source_range() && cursor == bound
+				break
+			end
+			if plan.source_kind != iteration_source_hash() && plan.syntax.second_origin >= 0
+				# There is no next ordinal when the exclusive endpoint is next.
+				if plan.source_kind == iteration_source_range() && exclusive == 1 && cursor + 1 == bound
+					break
+				end
+				if ordinal == 9007199254740991
+					store.error[0] = "panic: Integer is outside the portable range"
+					break
+				end
+				ordinal += 1
+			end
+			cursor += 1
+		end
+	end
+	environment.count[0] = saved
+	position[0] = plan.syntax.finish
+	if flow[repl_flow_kind_slot()] == repl_flow_return()
+		return result
+	end
+	return 0
+end
+
+def repl_statement_value(mut state: CompilerState, mut position: Array<Integer>, mut store: ReplStore, mut environment: ReplEnvironment, mut flow: Array<Integer>, loop_origin: Integer): Integer
+	# The checker deliberately records no value plan for a discarded empty
+	# collection. Follow that checked omission instead of attempting to create
+	# an untyped Array or Hash during retained REPL execution.
+	collection_origin := position[0]
+	if syntax_statement_boundary(state, collection_origin + 2)
+		if token_is(state, collection_origin, "[") && token_is(state, collection_origin + 1, "]") && sparse_string_at(state.callables.checked[0].array_literal_types, collection_origin) == ""
+			position[0] += 2
+			return 0
+		end
+		if token_is(state, collection_origin, "{") && token_is(state, collection_origin + 1, "}") && checked_hash_plan(state, collection_origin).kind == hash_action_none()
+			position[0] += 2
+			return 0
+		end
+	end
+	if sparse_integer_at(state.parsed.iteration_origins, position[0]) > 0
+		return repl_iteration(state, position, store, environment, flow, loop_origin)
+	end
+	if token_is(state, position[0], "if") || token_is(state, position[0], "case")
+		return repl_control(state, position, store, environment, 0)
+	end
+	if token_is(state, position[0], "while")
+		start := position[0] + 1
+		finish := repl_block_end(state, start, false)
+		mut running := true
+		mut result := 0
+		while running
+			position[0] = start
+			condition := repl_expression(state, position, store, environment, 1, "Boolean")
+			if environment.flow[repl_flow_kind_slot()] != repl_flow_normal()
+				return environment.flow[repl_flow_value_slot()]
+			end
+			if store.integers[condition.value] == 0
+				running = false
+			else
+				saved := environment.count[0]
+				result = repl_block(state, position, store, environment, flow, start - 1)
+				environment.count[0] = saved
+			end
+			if flow[repl_flow_kind_slot()] == repl_flow_break()
+				flow[repl_flow_kind_slot()] = repl_flow_normal()
+				running = false
+			elsif flow[repl_flow_kind_slot()] == repl_flow_continue()
+				flow[repl_flow_kind_slot()] = repl_flow_normal()
+			elsif flow[repl_flow_kind_slot()] != repl_flow_normal()
+				running = false
+			end
+			if repl_failed(store)
+				running = false
+			end
+		end
+		position[0] = finish + 1
+		return result
+	end
+	if syntax_loop_transfer_kind(state, position[0]) > loop_transfer_none()
+		kind := checked_loop_transfer_kind(state, position[0], loop_origin)
+		if kind == loop_transfer_none()
+			store.error[0] = "invalid checked loop transfer target"
+			return 0
+		end
+		# Return remains 1; the nearest while consumes exit/header transfers.
+		flow[repl_flow_kind_slot()] = kind + repl_loop_flow_offset()
+		position[0] += 1
+		return 0
+	end
+	if token_is(state, position[0], "return")
+		position[0] += 1
+		if syntax_statement_boundary(state, position[0]) || token_is(state, position[0], "if")
+			flow[repl_flow_kind_slot()] = repl_flow_return()
+			return 0
+		end
+		value := repl_statement_expression(state, position, store, environment, "")
+		if environment.flow[repl_flow_kind_slot()] != repl_flow_normal()
+			return environment.flow[repl_flow_value_slot()]
+		end
+		flow[repl_flow_kind_slot()] = repl_flow_return()
+		return value.value
+	end
+	if declaration_start(state, position[0])
+		origin := position[0]
+		mut mutable := 0
+		if token_is(state, position[0], "mut")
+			mutable = 1
+			position[0] += 1
+		end
+		name := load_string(state.source_tokens.token_texts, position[0])
+		position[0] += 1
+		mut expected := ""
+		if token_is(state, position[0], ":")
+			position[0] += 1
+			parse_type(state, position)
+			expected = sparse_string_at(state.callables.checked[0].local_types, origin)
+		end
+		position[0] += 1
+		value := repl_statement_expression(state, position, store, environment, expected)
+		if environment.flow[repl_flow_kind_slot()] != repl_flow_normal()
+			return environment.flow[repl_flow_value_slot()]
+		end
+		mut presentation := ""
+		if state.submissions.size() > 0
+			presentation = sparse_string_at(state.submissions[0].presentations, origin)
+		end
+		result := repl_present(store, repl_coerce(store, value.value, expected), presentation)
+		if !repl_failed(store)
+			repl_bind(environment, name, result, mutable, presentation)
+		end
+		return result
+	end
+	left := repl_statement_expression(state, position, store, environment, "")
+	if environment.flow[repl_flow_kind_slot()] != repl_flow_normal()
+		return environment.flow[repl_flow_value_slot()]
+	end
+	if repl_failed(store)
+		return 0
+	end
+	operator := load_string(state.source_tokens.token_texts, position[0])
+	mut assignment := operator == "="
+	if binary_operator_id(operator) >= binary_add_assign()
+		assignment = true
+	end
+	if assignment
+		logical := operator == "||=" || operator == "&&="
+		mut short_value := 0
+		if operator == "||="
+			short_value = 1
+		end
+		if logical
+			plan := load_integer(state.callables.checked[0].checked_operator_plans, position[0])
+			if mir_logical_short_value(plan) != short_value
+				store.error[0] = "invalid checked logical assignment"
+				return 0
+			end
+		end
+		position[0] += 1
+		if logical && store.integers[left.value] == short_value
+			if !parse_statement_value_syntax(state, position)
+				store.error[0] = "invalid checked logical assignment right-hand side"
+			end
+			return left.value
+		end
+		mut expected := repl_type(store, left.value)
+		if left.binding >= 0
+			expected = repl_type(store, repl_binding_value(store, environment, left.binding))
+		elsif left.binding < -1
+			expected = state.global_bindings.global_types[-left.binding - 2]
+		end
+		mut hash_assignment := false
+		if left.container >= 0
+			object_owner := find_object_type(state, repl_type(store, left.container))
+			if object_owner >= 0
+				expected = state.nominal.object_instances[object_owner].fields[left.slot].type_name
+			end
+			if hash_key_type(repl_type(store, left.container)) != ""
+				hash_assignment = true
+				expected = hash_value_type(repl_type(store, left.container))
+			end
+		end
+		right := repl_statement_expression(state, position, store, environment, expected)
+		if environment.flow[repl_flow_kind_slot()] != repl_flow_normal()
+			return environment.flow[repl_flow_value_slot()]
+		end
+		mut result := repl_coerce(store, right.value, expected)
+		if operator != "=" && !logical
+			result = repl_binary_value(store, left.value, operator[0], result)
+		end
+		if !repl_failed(store)
+			if hash_assignment
+				repl_hash_set(store, left.container, left.slot, result)
+				return result
+			end
+			if left.binding >= 0
+				repl_assign_binding(store, environment, left.binding, result)
+			elsif left.binding < -1
+				store.children[store.globals[repl_global_key(state, -left.binding - 2)]][0] = result
+			else
+				if left.slot >= store.children[left.container].size()
+					store.error[0] = "panic: index is out of bounds"
+					return 0
+				end
+				store.children[left.container][left.slot] = result
+			end
+		end
+		return result
+	end
+	return left.value
+end
+
+def repl_block(mut state: CompilerState, mut position: Array<Integer>, mut store: ReplStore, mut environment: ReplEnvironment, mut flow: Array<Integer>, loop_origin: Integer): Integer
+	mut result := 0
+	skip_newlines(state, position)
+	mut complete := false
+	while !complete
+		if native_cli_interrupt(0) != 0
+			store.error[0] = "Interrupted"
+		end
+		if repl_failed(store)
+			return 0
+		end
+		if syntax_block_end(state, position[0])
+			complete = true
+		else
+			if syntax_conditional_tail(state, position[0])
+				complete = true
+			else
+				result = repl_statement(state, position, store, environment, flow, loop_origin)
+				skip_newlines(state, position)
+				if flow[repl_flow_kind_slot()] != repl_flow_normal()
+					complete = true
+				end
+			end
+		end
+	end
+	return result
+end
+
+# Consume the same checked operation plans as ordinary code generation.
+def repl_hash_method(mut state: CompilerState, mut position: Array<Integer>, mut store: ReplStore, mut environment: ReplEnvironment, receiver: Integer): Integer
+	plan := checked_hash_plan(state, position[0])
+	position[0] += 1
+	repl_set_type(store, receiver, plan.type_name)
+	mut argument := 0
+	if plan.kind == hash_action_has_key() || plan.kind == hash_action_delete() || plan.kind == hash_action_fetch()
+		argument = repl_expression(state, position, store, environment, 1, plan.key_type).value
+		if environment.flow[repl_flow_kind_slot()] != repl_flow_normal()
+			return environment.flow[repl_flow_value_slot()]
+		end
+	end
+	if plan.kind == hash_action_merge() || plan.kind == hash_action_update()
+		argument = repl_expression(state, position, store, environment, 1, plan.type_name).value
+		if environment.flow[repl_flow_kind_slot()] != repl_flow_normal()
+			return environment.flow[repl_flow_value_slot()]
+		end
+	end
+	skip_newlines(state, position)
+	position[0] += 1
+	if repl_failed(store)
+		return 0
+	end
+	table := store.hashes[store.integers[receiver]]
+	if plan.kind == hash_action_size()
+		return repl_integer(store, table.sizes[0])
+	elsif plan.kind == hash_action_empty()
+		return repl_boolean(store, table.sizes[0] == 0)
+	elsif plan.kind == hash_action_has_key()
+		return repl_boolean(store, repl_hash_slot(store, table, argument) >= 0)
+	elsif plan.kind == hash_action_fetch()
+		return repl_hash_get(store, receiver, argument)
+	elsif plan.kind == hash_action_delete()
+		return repl_hash_delete(store, receiver, argument)
+	elsif plan.kind == hash_action_update()
+		repl_hash_update(store, receiver, argument)
+		return 0
+	elsif plan.kind == hash_action_copy() || plan.kind == hash_action_merge()
+		copy := repl_hash_new(store, plan.type_name, table.keys.size())
+		repl_hash_update(store, copy, receiver)
+		if plan.kind == hash_action_merge()
+			repl_hash_update(store, copy, argument)
+		end
+		return copy
+	end
+	mut children: Array<Integer> := []
+	mut index := 0
+	while index < table.order.size()
+		key := table.order[index]
+		if key > 0
+			slot := repl_hash_slot(store, table, key)
+			if slot >= 0
+				if plan.kind == hash_action_keys()
+					children.push(table.keys[slot])
+				else
+					children.push(table.values[slot])
+				end
+			end
+		end
+		index += 1
+	end
+	mut element := plan.value_type
+	if plan.kind == hash_action_keys()
+		element = plan.key_type
+	end
+	return repl_value(store, "Array<" + element + ">", 0, 0.0, "", children)
+end
+
+def repl_statement(mut state: CompilerState, mut position: Array<Integer>, mut store: ReplStore, mut environment: ReplEnvironment, mut flow: Array<Integer>, loop_origin: Integer): Integer
+	environment.flow[repl_flow_kind_slot()] = flow[repl_flow_kind_slot()]
+	environment.flow[repl_flow_loop_owner_slot()] = loop_origin
+	origin := position[0]
+	environment.result_origin[0] = origin
+	guard := sparse_integer_at(state.parsed.control_origins, position[0])
+	if guard > 0 && state.parsed.controls[guard - 1].kind == control_syntax_guarded_transfer()
+		control := state.parsed.controls[guard - 1]
+		position[0] = control.selector
+		condition := repl_expression(state, position, store, environment, 1, "Boolean")
+		mut result := 0
+		if environment.flow[repl_flow_kind_slot()] != repl_flow_normal()
+			result = environment.flow[repl_flow_value_slot()]
+		end
+		if environment.flow[repl_flow_kind_slot()] == repl_flow_normal() && store.integers[condition.value] != 0
+			position[0] = control.origin
+			result = repl_statement_value(state, position, store, environment, environment.flow, loop_origin)
+		end
+		flow[repl_flow_kind_slot()] = environment.flow[repl_flow_kind_slot()]
+		if flow[repl_flow_kind_slot()] != repl_flow_normal()
+			environment.flow[repl_flow_value_slot()] = result
+		end
+		position[0] = control.finish
+		return result
+	end
+	result := repl_statement_value(state, position, store, environment, environment.flow, loop_origin)
+	# A call or collection expression can evaluate a block, but its own checked
+	# type is the displayed result. Only statement controls expose the selected
+	# branch's last executed statement.
+	if !token_is(state, origin, "if") && !token_is(state, origin, "case") && !token_is(state, origin, "while")
+		environment.result_origin[0] = origin
+	end
+	flow[repl_flow_kind_slot()] = environment.flow[repl_flow_kind_slot()]
+	if flow[repl_flow_kind_slot()] != repl_flow_normal()
+		environment.flow[repl_flow_value_slot()] = result
+	end
+	return result
+end
+
+def repl_control(mut state: CompilerState, mut position: Array<Integer>, mut store: ReplStore, mut environment: ReplEnvironment, predicate: Integer): Integer
+	origin := position[0]
+	control := state.parsed.controls[sparse_integer_at(state.parsed.control_origins, origin) - 1]
+	saved := environment.count[0]
+	mut selector := predicate
+	if control.kind == control_syntax_case()
+		position[0] = control.selector
+		selector = repl_expression(state, position, store, environment, 1, "").value
+	end
+	mut result := 0
+	mut index := 0
+	while index < control.branches.size() && environment.flow[repl_flow_kind_slot()] == repl_flow_normal() && !repl_failed(store)
+		branch := control.branches[index]
+		mut selected := branch.condition < 0
+		if control.kind == control_syntax_ternary() && index == 0
+			selected = store.integers[predicate] != 0
+		elsif control.kind == control_syntax_if() && branch.condition >= 0
+			position[0] = branch.condition
+			condition := repl_expression(state, position, store, environment, 1, "Boolean")
+			selected = store.integers[condition.value] != 0
+		elsif control.kind == control_syntax_case() && branch.condition >= 0 && sparse_integer_at(state.callables.checked[0].union_pattern_origins, branch.condition) > 0
+			pattern := state.callables.checked[0].union_patterns[sparse_integer_at(state.callables.checked[0].union_pattern_origins, branch.condition) - 1]
+			payload := store.children[selector][0]
+			selected = repl_type(store, payload) == pattern.type_name
+			if selected
+				repl_bind(environment, load_string(state.source_tokens.token_texts, pattern.binding), payload, 0)
+			end
+		elsif control.kind == control_syntax_case() && branch.condition >= 0 && find_enum_type(state, repl_type(store, selector)) >= 0
+			pattern := state.callables.checked[0].enum_patterns[sparse_integer_at(state.callables.checked[0].enum_pattern_origins, branch.condition) - 1]
+			selected = repl_variant(store, selector) == pattern.variant
+			if selected
+				mut slot := 0
+				while slot < pattern.bindings.size()
+					repl_bind(environment, load_string(state.source_tokens.token_texts, pattern.bindings[slot]), store.children[selector][slot], 0)
+					slot += 1
+				end
+			end
+		elsif control.kind == control_syntax_case() && branch.condition >= 0
+			position[0] = branch.condition
+			while position[0] < branch.condition_finish && !selected
+				pattern := repl_expression(state, position, store, environment, 1, repl_type(store, selector))
+				comparison := repl_binary_value(store, selector, "==", pattern.value)
+				selected = store.integers[comparison] != 0
+				if token_is(state, position[0], ",")
+					position[0] += 1
+				end
+			end
+		end
+		if environment.flow[repl_flow_kind_slot()] != repl_flow_normal()
+			break
+		end
+		if selected
+			position[0] = branch.body
+			if control.kind == control_syntax_ternary()
+				result = repl_expression(state, position, store, environment, 1, "").value
+			else
+				result = repl_block(state, position, store, environment, environment.flow, environment.flow[repl_flow_loop_owner_slot()])
+			end
+			break
+		end
+		index += 1
+	end
+	environment.count[0] = saved
+	position[0] = control.finish
+	if environment.flow[repl_flow_kind_slot()] != repl_flow_normal()
+		return environment.flow[repl_flow_value_slot()]
+	end
+	return repl_coerce(store, result, load_string(state.callables.checked[0].control_types, origin))
+end
+
+def repl_statement_expression(mut state: CompilerState, mut position: Array<Integer>, mut store: ReplStore, mut environment: ReplEnvironment, expected: String): ReplReference
+	origin := position[0]
+	encoded := sparse_integer_at(state.parsed.catch_origins, origin)
+	if encoded == 0
+		return repl_expression(state, position, store, environment, 1, expected)
+	end
+	handler := state.parsed.catch_syntax[encoded - 1]
+	operand := repl_expression(state, position, store, environment, 1, "")
+	if repl_failed(store) || environment.flow[repl_flow_kind_slot()] != repl_flow_normal()
+		return operand
+	end
+	operation := result_projection(state, origin, true)
+	if operation.origin < 0 || repl_type(store, operand.value) != operation.result_type
+		store.error[0] = "Result operand disagrees with its checked operation"
+		return repl_reference(0)
+	end
+	mut value := store.children[operand.value][0]
+	if repl_variant(store, operand.value) == operation.err_variant
+		saved := environment.count[0]
+		repl_bind(environment, load_string(state.source_tokens.token_texts, handler.binding), value, 0)
+		position[0] = handler.body
+		value = repl_block(state, position, store, environment, environment.flow, environment.flow[repl_flow_loop_owner_slot()])
+		environment.count[0] = saved
+	end
+	position[0] = handler.finish
+	if environment.flow[repl_flow_kind_slot()] != repl_flow_normal()
+		return repl_reference(environment.flow[repl_flow_value_slot()])
+	end
+	return repl_reference(repl_coerce(store, repl_coerce(store, value, operation.success_type), expected))
+end
+
+# Retain the source object, but read its current size and slot on each visit.
+def repl_transform(mut state: CompilerState, mut position: Array<Integer>, mut store: ReplStore, mut environment: ReplEnvironment, receiver: Integer): Integer
+	plan := checked_transform_require(state, position[0])
+	syntax := plan.syntax
+	shape := syntax.iteration
+	if shape.origin < 0 || repl_type(store, receiver) != plan.iteration.type_name
+		store.error[0] = "invalid checked collection transform"
+		return 0
+	end
+	if syntax.kind == transform_concurrent_map() && syntax.initial_start >= 0
+		position[0] = syntax.initial_start
+		limit := repl_expression(state, position, store, environment, 1, "Integer").value
+		if repl_failed(store) || environment.flow[repl_flow_kind_slot()] != repl_flow_normal()
+			return limit
+		end
+		if store.integers[limit] <= 0
+			store.error[0] = "panic: concurrent_map limit must be greater than zero"
+			return 0
+		end
+	end
+	mut result := 0
+	mut keys: Array<Integer> := []
+	if syntax.kind == transform_find() || syntax.kind == transform_find_index()
+		result = repl_none(store, plan.type_name)
+	elsif syntax.kind >= transform_any() && syntax.kind <= transform_none()
+		result = repl_boolean(store, syntax.kind != transform_any())
+	elsif syntax.kind == transform_reduce()
+		position[0] = syntax.initial_start
+		result = repl_expression(state, position, store, environment, 1, plan.type_name).value
+		if repl_failed(store) || environment.flow[repl_flow_kind_slot()] != repl_flow_normal()
+			return result
+		end
+	else
+		result = repl_value(store, plan.type_name, 0, 0.0, "", [])
+	end
+	saved := environment.count[0]
+	mut cursor := 0
+	mut ordinal := 0
+	mut bound := 0
+	mut exclusive := 0
+	if plan.iteration.source_kind == iteration_source_range()
+		cursor = store.integers[store.children[receiver][0]]
+		bound = store.integers[store.children[receiver][1]]
+		exclusive = store.integers[store.children[receiver][2]]
+	end
+	mut flow := [repl_flow_normal()]
+	while !repl_failed(store)
+		if plan.iteration.source_kind == iteration_source_array()
+			if cursor >= store.children[receiver].size()
+				break
+			end
+		elsif cursor > bound || (cursor == bound && exclusive == 1)
+			break
+		end
+		environment.count[0] = saved
+		mut element := 0
+		if plan.iteration.source_kind == iteration_source_array()
+			element = store.children[receiver][cursor]
+		else
+			element = repl_integer(store, cursor)
+		end
+		if syntax.kind == transform_reduce()
+			repl_bind(environment, load_string(state.source_tokens.token_texts, syntax.accumulator_origin), result, 1)
+		end
+		repl_bind(environment, load_string(state.source_tokens.token_texts, shape.element_origin), element, 1)
+		if shape.second_origin >= 0
+			repl_bind(environment, load_string(state.source_tokens.token_texts, shape.second_origin), repl_integer(store, ordinal), 1)
+		end
+		position[0] = shape.body_start
+		yielded := repl_block(state, position, store, environment, flow, -1)
+		if repl_failed(store) || flow[repl_flow_kind_slot()] != repl_flow_normal() || environment.flow[repl_flow_kind_slot()] != repl_flow_normal()
+			break
+		end
+		if transform_sorting(syntax.kind)
+			store.children[result].push(element)
+			keys.push(repl_coerce(store, yielded, plan.key_type))
+		elsif transform_mapping(syntax.kind)
+			store.children[result].push(repl_coerce(store, yielded, array_element_type(plan.type_name)))
+		elsif syntax.kind == transform_select()
+			if store.integers[yielded] != 0
+				store.children[result].push(element)
+			end
+		elsif syntax.kind == transform_find() || syntax.kind == transform_find_index()
+			if store.integers[yielded] != 0
+				mut selected := element
+				if syntax.kind == transform_find_index()
+					selected = repl_integer(store, ordinal)
+				end
+				result = repl_coerce(store, selected, plan.type_name)
+				break
+			end
+		elsif syntax.kind >= transform_any()
+			truth := store.integers[yielded] != 0
+			mut answer := truth
+			if syntax.kind == transform_none()
+				answer = !truth
+			end
+			result = repl_boolean(store, answer)
+			if (syntax.kind == transform_all() && !truth) || (syntax.kind != transform_all() && truth)
+				break
+			end
+		else
+			result = repl_coerce(store, yielded, plan.type_name)
+		end
+		if plan.iteration.source_kind == iteration_source_range() && cursor == bound
+			break
+		end
+		if shape.second_origin >= 0 || syntax.kind == transform_find_index()
+			if plan.iteration.source_kind == iteration_source_range() && exclusive == 1 && cursor + 1 == bound
+				break
+			end
+			if ordinal == 9007199254740991
+				store.error[0] = "panic: Integer is outside the portable range"
+				break
+			end
+			ordinal += 1
+		end
+		cursor += 1
+	end
+	environment.count[0] = saved
+	position[0] = shape.finish
+	if transform_sorting(syntax.kind) && !repl_failed(store) && flow[repl_flow_kind_slot()] == repl_flow_normal() && environment.flow[repl_flow_kind_slot()] == repl_flow_normal()
+		return repl_array_sort_keys(store, result, keys, syntax.kind == transform_sort_by_descending())
+	end
+	return result
+end
+
+def repl_nominal_method_call(mut state: CompilerState, mut position: Array<Integer>, mut store: ReplStore, mut environment: ReplEnvironment, function: Integer, receiver: Integer): Integer
+	mut bindings := function_argument_bindings(state, function)
+	if receiver >= 0
+		bindings.values[0] = receiver
+		bindings.provided[0] = true
+		bindings.position[0] = 1
+	end
+	position[0] += 1
+	skip_newlines(state, position)
+	while !token_is(state, position[0], ")")
+		label := parse_argument_label(state, position)
+		slot := argument_binding_slot(bindings, label)
+		if slot < 0
+			store.error[0] = bindings.error[0]
+			return 0
+		end
+		start := load_integer(state.declarations.function_parameter_starts, function)
+		type_name := load_string(state.declarations.parameter_types, start + slot)
+		value := repl_expression(state, position, store, environment, 1, type_name)
+		if environment.flow[repl_flow_kind_slot()] != repl_flow_normal()
+			return environment.flow[repl_flow_value_slot()]
+		end
+		bindings.values[slot] = repl_coerce(store, value.value, type_name)
+		if token_is(state, position[0], ",")
+			position[0] += 1
+		end
+		skip_newlines(state, position)
+		if repl_failed(store)
+			return 0
+		end
+	end
+	position[0] += 1
+	repl_complete_arguments(state, bindings, store)
+	if repl_failed(store)
+		return 0
+	end
+	return repl_call(state, function, bindings.values, store)
+end
+
+# Object evaluation consumes the callee chosen by ordinary checking. Explicit
+# method arguments are skipped, never re-inferred against a retained value.
+# Dispatch consumes the specialization selected by the ordinary checker.
+def repl_newtype_method(mut state: CompilerState, mut position: Array<Integer>, mut store: ReplStore, mut environment: ReplEnvironment, receiver: Integer): Integer
+	if token_is(state, position[0], "<")
+		finish := nominal_application_end(state, position[0] - 1)
+		if finish < 0
+			store.error[0] = "newtype method has no checked type application"
+			return 0
+		end
+		position[0] = finish
+	end
+	encoded := sparse_integer_at(state.callables.checked[0].generic_calls, position[0])
+	if encoded <= 0
+		store.error[0] = "newtype method has no checked callee"
+		return 0
+	end
+	return repl_nominal_method_call(state, position, store, environment, encoded - 1, receiver)
+end
+
+def repl_object_method(mut state: CompilerState, mut position: Array<Integer>, mut store: ReplStore, mut environment: ReplEnvironment, type_name: String, member: String, receiver: Integer): Integer
+	if token_is(state, position[0], "<")
+		finish := nominal_application_end(state, position[0] - 1)
+		if finish < 0
+			store.error[0] = "class method has no checked type application"
+			return 0
+		end
+		position[0] = finish
+	end
+	if receiver < 0 && member == "open" && scoped_resource_name(state, type_name) == "File"
+		return repl_file_acquisition(state, position, store, environment)
+	end
+	encoded := sparse_integer_at(state.callables.checked[0].generic_calls, position[0])
+	if receiver < 0 && member == "new"
+		mut fields: Array<Integer> := []
+		state.nominal.object_instances[find_object_type(state, type_name)].fields.each do |_field|
+			fields.push(0)
+		end
+		value := repl_value(store, type_name, 0, 0.0, "", fields)
+		if encoded > 0
+			repl_nominal_method_call(state, position, store, environment, encoded - 1, value)
+		else
+			position[0] += 1
+			skip_newlines(state, position)
+			position[0] += 1
+		end
+		return value
+	end
+	if encoded <= 0
+		store.error[0] = "class method has no checked callee"
+		return 0
+	end
+	return repl_nominal_method_call(state, position, store, environment, encoded - 1, receiver)
+end

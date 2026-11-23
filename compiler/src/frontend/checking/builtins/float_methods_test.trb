@@ -1,0 +1,15 @@
+import { managed_mir_test_fixture } from testing/mir/managed
+import { describe, test } from trb/std/test
+
+describe("Float receiver MIR") do
+	test("preserves rounding limits and exceptional values without source or block order") do
+		managed_mir_test_fixture("float-rounding-boundaries", 0)
+		managed_mir_test_fixture("float-classification", 0)
+		managed_mir_test_fixture("float-absolute-special", 0)
+	end
+
+	test("retains optional calls and managed captures under forced collection") do
+		managed_mir_test_fixture("float-order-optional", 0)
+		managed_mir_test_fixture("float-managed-calls", 1)
+	end
+end

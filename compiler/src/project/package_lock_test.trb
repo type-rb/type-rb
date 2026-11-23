@@ -1,0 +1,38 @@
+import { package_relative_file_bytes } from project/packages
+import { package_lock_parse } from project/package_lock
+import { package_checksum } from project/package_checksum
+import { describe, expect, test } from trb/std/test
+
+def git_lock_fixture(package: String, imports: String): String
+	return "{\"formatVersion\":1,\"configChecksum\":\"" + package_checksum("{}") + "\",\"imports\":" + imports + ",\"packages\":{" + package + "}}"
+end
+
+describe("Package lock validation") do
+	test("preserves raw relative filename bytes and rejects prefix collisions") do
+		# /r/ followed by a non-UTF-8 byte is a legal Linux filename.
+		expect(package_relative_file_bytes([47, 114], [47, 114, 47, 255])).to_equal([255])
+		expect(package_relative_file_bytes([47, 114], [47, 114, 115, 47, 97]).size()).to_equal(0)
+		expect(package_relative_file_bytes([47], [47, 97])).to_equal([97])
+		expect(package_relative_file_bytes([47, 114], [47, 114])).to_equal([46])
+	end
+
+	test("reads remote identities and independent dependency aliases") do
+		entry := "\"example/value\":{\"version\":\"1.0.0\",\"source\":\"example.invalid/value\",\"revision\":\"abc1234\",\"checksum\":\"" + package_checksum("content") + "\",\"dependencies\":{\"nested\":\"example/value\"}}"
+		lock := package_lock_parse(git_lock_fixture(entry, "{\"value\":\"example/value\"}"))
+		expect(lock.error).to_equal("")
+		expect(lock.aliases.size()).to_equal(1)
+		expect(lock.names.size()).to_equal(1)
+		expect(lock.packages[0].source).to_equal("example.invalid/value")
+		expect(lock.packages[0].aliases[0]).to_equal("nested")
+	end
+
+	test("rejects incomplete, inconsistent and unknown metadata") do
+		["{}", "null", "{\"formatVersion\":1}", git_lock_fixture("", "{}") + "{}", git_lock_fixture("", "{\"missing\":\"example/missing\"}")].each do |source|
+			expect(package_lock_parse(source).error.empty?()).to_be_false()
+		end
+		["\"unknown\":1", "\"path\":\"../local\"", "\"source\":\"example.invalid/value\",\"revision\":\"abc1234\",\"checksum\":\"bad\"", "\"path\":\"../local\",\"source\":\"remote\",\"manifestChecksum\":\"" + package_checksum("manifest") + "\""].each do |invalid|
+			entry := "\"example/value\":{\"version\":\"1.0.0\"," + invalid + "}"
+			expect(package_lock_parse(git_lock_fixture(entry, "{\"value\":\"example/value\"}")).error.empty?()).to_be_false()
+		end
+	end
+end

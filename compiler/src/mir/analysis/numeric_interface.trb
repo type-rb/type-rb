@@ -1,0 +1,112 @@
+import { mir_type_boolean, mir_type_float, mir_type_integer } from mir/model/type_ids
+import { mir_signature_interface } from mir/model/call_kinds
+import { mir_function_control, mir_terminator_return } from mir/model/control
+import { mir_op_integer_to_float, mir_op_object_field, mir_op_object_store, mir_op_scalar_literal } from mir/model/instructions
+import { MirFunction, MirModule, mir_block_index, mir_function_index, mir_value_type } from mir/model/module
+
+def mir_numeric_interface_scalar(type_id: Integer): Boolean
+	if type_id == mir_type_integer() || type_id == mir_type_boolean() || type_id == mir_type_float()
+		return true
+	end
+	return false
+end
+
+# Reuse the numeric expansion owner for one returning block. The receiver is
+# the only managed value; no cloned operation can allocate or call another body.
+def mir_numeric_interface_body(native_module: MirModule, function: MirFunction): Boolean
+	if function.kind != mir_function_control() || function.parameter_count == 0
+		return false
+	end
+	entry := mir_block_index(native_module, function, function.entry_block)
+	if entry < 0
+		return false
+	end
+	block := native_module.blocks[entry]
+	if block.terminator != mir_terminator_return() || block.parameter_count != 0 || block.instruction_count > 32 || !mir_numeric_interface_scalar(mir_value_type(native_module, function.id, block.return_value))
+		return false
+	end
+	receiver := native_module.arguments[function.parameter_start]
+	native_module.values.each do |value|
+		if value.function_id == function.id && value.id != receiver && !mir_numeric_interface_scalar(value.type_id)
+			return false
+		end
+	end
+	mut index := block.instruction_start
+	while index < block.instruction_start + block.instruction_count
+		instruction := native_module.instructions[index]
+		if instruction.kind == mir_op_object_field() || instruction.kind == mir_op_object_store()
+			if instruction.first != receiver
+				return false
+			end
+		elsif instruction.kind < mir_op_scalar_literal() || instruction.kind > mir_op_integer_to_float()
+			return false
+		end
+		index += 1
+	end
+	return true
+end
+
+# These are guarded alternatives, never an exhaustive receiver set. Unknown
+# witnesses keep the original interface call. Canonical owner order determines
+# selection independently of physical witness or function storage order.
+def mir_numeric_interface_targets(native_module: MirModule, callee: Integer): Array<Integer>
+	mut selected: Array<Integer> := []
+	signature := native_module.signatures[callee]
+	if signature.kind != mir_signature_interface()
+		return selected
+	end
+	method := native_module.object_methods[signature.adapter]
+	mut slot := 0
+	native_module.object_methods.each do |previous|
+		if previous.function == callee
+			break
+		end
+		if previous.owner == method.owner
+			slot += 1
+		end
+	end
+	mut index := 0
+	native_module.object_witnesses.each do |witness|
+		if witness.contract == method.owner
+			mut identity := true
+			mut argument := 0
+			witness.arguments[slot].each do |source|
+				if source != argument
+					identity = false
+				end
+				argument += 1
+			end
+			implementation := native_module.object_methods[witness.methods[slot]]
+			body := mir_function_index(native_module, implementation.function)
+			if identity && body >= 0 && mir_numeric_interface_body(native_module, native_module.functions[body])
+				selected.push(index)
+				mut position := selected.size() - 1
+				while position > 0
+					previous := selected[position - 1]
+					if native_module.object_witnesses[previous].owner < witness.owner
+						break
+					end
+					selected[position] = previous
+					position -= 1
+				end
+				selected[position] = index
+			end
+		end
+		index += 1
+	end
+	return selected
+end
+
+def mir_numeric_interface_function(native_module: MirModule, callee: Integer, witness: Integer): Integer
+	method := native_module.object_methods[native_module.signatures[callee].adapter]
+	mut slot := 0
+	native_module.object_methods.each do |previous|
+		if previous.function == callee
+			break
+		end
+		if previous.owner == method.owner
+			slot += 1
+		end
+	end
+	return native_module.object_methods[native_module.object_witnesses[witness].methods[slot]].function
+end

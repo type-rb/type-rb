@@ -1,0 +1,86 @@
+import { mir_type_integer } from mir/model/type_ids
+import { mir_adapter_none, mir_signature_ordinary } from mir/model/call_kinds
+import { mir_function_scalar, mir_terminator_return, mir_terminator_trap } from mir/model/control
+import { mir_op_direct_call, mir_op_scalar_literal } from mir/model/instructions
+import { mir_refine_call_effects } from mir/analysis/call_effects
+import { MirFunction, MirInstruction, MirModule, mir_block_index, mir_value_type } from mir/model/module
+
+# The input module has already passed independent MIR verification. An exact
+# scalar literal return has no reachable effect, even though scalar call
+# summaries conservatively include failure. Names and stored effects are not
+# evidence for this rewrite.
+def mir_integer_literal_return(native_module: MirModule, function: MirFunction): Integer
+	if function.kind != mir_function_scalar() || function.parameter_count != 0 || function.result_type != "Integer" || function.block_count != 2
+		return -1
+	end
+	if function.id < 0 || function.id >= native_module.signatures.size()
+		return -1
+	end
+	signature := native_module.signatures[function.id]
+	if signature.kind != mir_signature_ordinary() || signature.adapter != mir_adapter_none() || signature.parameter_types.size() != 0 || signature.result_type != "Integer"
+		return -1
+	end
+	entry_index := mir_block_index(native_module, function, function.entry_block)
+	if entry_index < 0
+		return -1
+	end
+	entry := native_module.blocks[entry_index]
+	# The entry returns a value; the other scalar block is an empty trap.
+	if entry.terminator != mir_terminator_return() || entry.parameter_count != 0 || entry.instruction_count != 1
+		return -1
+	end
+	mut index := function.block_start
+	while index < function.block_start + function.block_count
+		block := native_module.blocks[index]
+		if index != entry_index && (block.terminator != mir_terminator_trap() || block.parameter_count != 0 || block.instruction_count != 0)
+			return -1
+		end
+		index += 1
+	end
+	literal := native_module.instructions[entry.instruction_start]
+	# A scalar literal retains the verified module value and nonnegative fact.
+	# Negative expressions have a separate unary instruction and stay ordinary.
+	if literal.kind != mir_op_scalar_literal() || literal.failure != -1 || literal.result != entry.return_value || mir_value_type(native_module, function.id, literal.result) != mir_type_integer()
+		return -1
+	end
+	return entry.instruction_start
+end
+
+def mir_fold_integer_literal_calls(mut native_module: MirModule)
+	mut literals: Array<Integer> := []
+	native_module.signatures.each do |_signature|
+		literals.push(-1)
+	end
+	mut any := false
+	native_module.functions.each do |function|
+		literal := mir_integer_literal_return(native_module, function)
+		if literal >= 0
+			literals[function.id] = literal
+			any = true
+		end
+	end
+	if !any
+		return
+	end
+	mut changed := false
+	mut index := 0
+	while index < native_module.instructions.size()
+		instruction := native_module.instructions[index]
+		# Only direct calls participate. Indirect/foreign calls keep their own path.
+		if instruction.kind == mir_op_direct_call()
+			call := native_module.calls[instruction.payload]
+			literal_index := literals[call.callee]
+			if call.argument_count == 0 && literal_index >= 0
+				literal := native_module.instructions[literal_index]
+				native_module.instructions[index] = MirInstruction.new(kind: literal.kind, result: instruction.result, first: literal.first, second: literal.second, payload: literal.payload, failure: -1, source_id: instruction.source_id, line: instruction.line)
+				changed = true
+			end
+		end
+		index += 1
+	end
+	if changed
+		# Callers may now have fewer effects. Rebuild summaries before the
+		# optimizer derives callable, root, loop and numeric plans.
+		mir_refine_call_effects(native_module)
+	end
+end

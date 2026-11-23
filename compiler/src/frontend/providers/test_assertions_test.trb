@@ -1,0 +1,105 @@
+import { CompilerProjectSources, check, emit_qbe, load_package_project_sources_with_tests } from compiler
+import { resolve } from frontend/checking/program/resolution
+import { project_packages_new } from project/packages
+import { append_native_test_runner } from project/test_runner
+import { has_diagnostic } from state/state
+import { load_integer, load_string } from support/storage
+import { expect_compiler_phase } from testing/pipeline
+import { output_source } from testing/compiler
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { logical_run_qbe_arguments } from testing/qbe_runner
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+describe("Standard scalar test assertions") do
+	test("inspects opaque provider values without requiring unused comparison methods") do
+		source := "import { describe, expect, test } from trb/std/test\nimport trb/std/string_builder\ndescribe(\"Opaque\") do\n test(\"nil predicate\") do\n  mut value := StringBuilder.new()\n  value.append(\"kept\")\n  expect(value).to_be_nil()\n end\n test(\"continued\") do\n  expect(1).to_equal(1)\n end\nend\n"
+		path := "/project/src/sample_test.trb"
+		mut state := load_package_project_sources_with_tests("/project/trbconfig.jsonc", CompilerProjectSources.new(paths: [path], sources: [source], error: ""), ["sample_test"], [-1], project_packages_new(""), false, false, [path])
+		expect_compiler_phase(state, "load", !has_diagnostic(state))
+		expect_compiler_phase(state, "runner", append_native_test_runner(state, "human"))
+		expect_compiler_phase(state, "resolve", resolve(state))
+		expect_compiler_phase(state, "check", check(state))
+		mut runtime := output_source(emit_qbe(state))
+		expect_compiler_phase(state, "emit", !has_diagnostic(state))
+		intrinsic_mir_erase(state)
+		expect(output_source(emit_qbe(state))).to_equal(runtime)
+		allocation := "function l $trbn_gc_alloc(l %descriptor, l %payload_size, l %reserved_size) {\n@start"
+		expect(runtime.split(allocation).size()).to_equal(2)
+		runtime = runtime.replace_all(allocation, allocation + "\n call $trbn_gc_collect(w 0)")
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe_arguments(qbe, runtime, [], 1)
+			when Result::Ok(actual)
+				expect(actual).to_equal("FAIL Opaque / nil predicate\n  /project/src/sample_test.trb:7:3: expected <value> to be nil\nPASS Opaque / continued\n\n2 test(s), 1 failure(s)\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+	test("still rejects an actually selected unsupported comparator") do
+		source := "import { describe, expect, test } from trb/std/test\nimport trb/std/string_builder\ndescribe(\"Opaque\") do\n test(\"unsupported comparison\") do\n  value := StringBuilder.new()\n  expect(value).to_equal(value)\n end\nend\n"
+		path := "/project/src/sample_test.trb"
+		mut state := load_package_project_sources_with_tests("/project/trbconfig.jsonc", CompilerProjectSources.new(paths: [path], sources: [source], error: ""), ["sample_test"], [-1], project_packages_new(""), false, false, [path])
+		expect_compiler_phase(state, "load", !has_diagnostic(state))
+		expect_compiler_phase(state, "runner", append_native_test_runner(state, "human"))
+		expect_compiler_phase(state, "resolve", resolve(state))
+		expect(check(state)).to_be_false()
+		expect(load_string(state.diagnostics.messages, 0)).to_equal("test equality requires a supported verified value layout")
+	end
+	test("reports the public assertion argument at its original token") do
+		["to_equal", "to_not_equal"].each do |method|
+			source := "import { describe, expect, test } from trb/std/test\n\ndescribe(\"Types\") do\n\ttest(\"mismatch\") do\n\t\texpect(1)." + method + "(\"one\")\n\tend\nend\n"
+			path := "/project/src/sample_test.trb"
+			mut state := load_package_project_sources_with_tests("/project/trbconfig.jsonc", CompilerProjectSources.new(paths: [path], sources: [source], error: ""), ["sample_test"], [-1], project_packages_new(""), false, false, [path])
+			expect_compiler_phase(state, "load", !has_diagnostic(state))
+			expect_compiler_phase(state, "runner", append_native_test_runner(state, "human"))
+			expect_compiler_phase(state, "resolve", resolve(state))
+			expect(check(state)).to_be_false()
+			expect(load_string(state.diagnostics.messages, 0)).to_equal("argument 1 to " + method + "() has type String, expected Integer")
+			expect(load_integer(state.diagnostics.lines, 0)).to_equal(5)
+			expect(load_integer(state.diagnostics.columns, 0)).to_equal(14 + method.size())
+		end
+	end
+
+	test("does not assign standard assertion diagnostics to an authored lookalike") do
+		source := "import { describe, test } from trb/std/test\nclass Expectation<T>\n def to_equal(value: T)\n end\nend\ndescribe(\"Types\") do\n test(\"mismatch\") do\n  Expectation<Integer>.new().to_equal(\"one\")\n end\nend\n"
+		path := "/project/src/sample_test.trb"
+		mut state := load_package_project_sources_with_tests("/project/trbconfig.jsonc", CompilerProjectSources.new(paths: [path], sources: [source], error: ""), ["sample_test"], [-1], project_packages_new(""), false, false, [path])
+		expect_compiler_phase(state, "load", !has_diagnostic(state))
+		expect_compiler_phase(state, "runner", append_native_test_runner(state, "human"))
+		expect_compiler_phase(state, "resolve", resolve(state))
+		expect(check(state)).to_be_false()
+		expect(load_string(state.diagnostics.messages, 0)).to_equal("expected Integer, found String")
+		expect(load_integer(state.diagnostics.lines, 0)).to_equal(8)
+	end
+
+	test("preserves public assertion failures origins and later cases under collection") do
+		source := "import { describe, expect, test } from trb/std/test\ndef helper()\n expect(10).to_equal(11)\nend\ndescribe(\"Scalars\") do\n test(\"success\") do\n  expect(1).to_equal(1)\n  expect(1).to_not_equal(2)\n  expect(true).to_be_true()\n  expect(false).to_be_false()\n  expect(nil).to_be_nil()\n end\n test(\"equality\") do\n  expect(1).to_equal(2)\n end\n test(\"inequality\") do\n  expect(3).to_not_equal(3)\n end\n test(\"Boolean\") do\n  expect(true).to_be_false()\n end\n test(\"type\") do\n  expect(1).to_be_true()\n end\n test(\"nil\") do\n  expect(5).to_be_nil()\n end\n test(\"helper\") do\n  helper()\n end\n test(\"continued\") do\n  expect(false).to_equal(false)\n end\nend\n"
+		path := "/project/src/sample_test.trb"
+		mut state := load_package_project_sources_with_tests("/project/trbconfig.jsonc", CompilerProjectSources.new(paths: [path], sources: [source], error: ""), ["sample_test"], [-1], project_packages_new(""), false, false, [path])
+		expect_compiler_phase(state, "load", !has_diagnostic(state))
+		expect_compiler_phase(state, "runner", append_native_test_runner(state, "human"))
+		expect_compiler_phase(state, "resolve", resolve(state))
+		expect_compiler_phase(state, "check", check(state))
+		mut runtime := output_source(emit_qbe(state))
+		expect_compiler_phase(state, "emit", !has_diagnostic(state))
+		intrinsic_mir_erase(state)
+		expect(output_source(emit_qbe(state))).to_equal(runtime)
+		allocation := "function l $trbn_gc_alloc(l %descriptor, l %payload_size, l %reserved_size) {\n@start"
+		expect(runtime.split(allocation).size()).to_equal(2)
+		runtime = runtime.replace_all(allocation, allocation + "\n call $trbn_gc_collect(w 0)")
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe_arguments(qbe, runtime, [], 1)
+			when Result::Ok(actual)
+				expect(actual).to_equal("PASS Scalars / success\nFAIL Scalars / equality\n  /project/src/sample_test.trb:14:3: expected 1 to equal 2\nFAIL Scalars / inequality\n  /project/src/sample_test.trb:17:3: expected 3 not to equal 3\nFAIL Scalars / Boolean\n  /project/src/sample_test.trb:20:3: expected true to be false\nFAIL Scalars / type\n  /project/src/sample_test.trb:23:3: expected 1 to be true\nFAIL Scalars / nil\n  /project/src/sample_test.trb:26:3: expected 5 to be nil\nFAIL Scalars / helper\n  /project/src/sample_test.trb:3:2: expected 10 to equal 11\nPASS Scalars / continued\n\n8 test(s), 6 failure(s)\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+end

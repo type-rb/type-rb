@@ -1,0 +1,6 @@
+def read(values: Array<Boolean>): Boolean
+return values[0]
+end
+def main()
+puts(read([1]))
+end

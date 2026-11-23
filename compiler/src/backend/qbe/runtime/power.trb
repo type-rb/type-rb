@@ -1,0 +1,8 @@
+import { QbeOutput, qbe_output_line } from backend/qbe/output
+
+# Exponentiation by squaring keeps the portable Integer bound at every
+# multiplication. The helper is emitted only for programs using Integer **.
+def emit_integer_power_runtime(mut output: QbeOutput)
+	qbe_output_line(output, "data $trbn_negative_power_error = { b \"panic: negative Integer exponent\", b 10 }")
+	qbe_output_line(output, "\nfunction l $trbn_integer_power(l %left, l %right) {\n@start\n %negative =w csltl %right, 0\n jnz %negative, @negative_exponent, @initialize\n@negative_exponent\n call $trbn_fail(l $trbn_negative_power_error, l 33)\n hlt\n@initialize\n %result_slot =l alloc8 8\n %factor_slot =l alloc8 8\n %exponent_slot =l alloc8 8\n storel 1, %result_slot\n storel %left, %factor_slot\n storel %right, %exponent_slot\n jmp @loop\n@loop\n %exponent =l loadl %exponent_slot\n %exponent_nonzero =w cnel %exponent, 0\n jnz %exponent_nonzero, @bit, @done\n@bit\n %odd =l and %exponent, 1\n %odd_nonzero =w cnel %odd, 0\n jnz %odd_nonzero, @multiply, @halve\n@multiply\n %current =l loadl %result_slot\n %factor =l loadl %factor_slot\n %product =l call $trbn_integer_mul(l %current, l %factor)\n storel %product, %result_slot\n jmp @halve\n@halve\n %halved =l shr %exponent, 1\n storel %halved, %exponent_slot\n %halved_nonzero =w cnel %halved, 0\n jnz %halved_nonzero, @square, @done\n@square\n %previous_factor =l loadl %factor_slot\n %squared =l call $trbn_integer_mul(l %previous_factor, l %previous_factor)\n storel %squared, %factor_slot\n jmp @loop\n@done\n %result =l loadl %result_slot\n ret %result\n}\n")
+end

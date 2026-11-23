@@ -1,0 +1,28 @@
+record Box
+	value: Integer
+	values: Array<Integer>
+end
+record Outer
+	box: Box
+end
+def extend(mut values: Array<Integer>)
+	values.push(4)
+end
+def main()
+	mut box := Box.new(value: 1, values: [2])
+	box.values[0] += 1
+	extend(box.values)
+	mut shared := box.values
+	shared.push(5)
+	puts(box.value.to_s())
+	puts(box.values[0])
+	puts(box.values.size())
+	mut outer := Outer.new(box: box)
+	outer.box.values[1] = 6
+	puts(box.values[1])
+	original := box
+	box = Box.new(value: 9, values: [8])
+	puts(original.value)
+	puts(box.value)
+	puts(box.values[0])
+end

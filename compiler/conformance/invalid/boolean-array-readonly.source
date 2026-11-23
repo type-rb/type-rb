@@ -1,0 +1,6 @@
+def change(values: Array<Boolean>)
+values.push(false)
+end
+def main()
+return
+end

@@ -1,0 +1,431 @@
+import { mir_convert_integer_to_string } from mir/model/operation_modes
+import { mir_function_string_concats, mir_string_concat_index } from mir/analysis/string_concats
+import { mir_type_string } from mir/model/type_ids
+import { mir_function_control } from mir/model/control
+import { mir_op_array_join, mir_op_array_new, mir_op_array_push, mir_op_scalar_conversion, mir_op_string_concat, mir_op_string_literal, mir_op_string_size } from mir/model/instructions
+import { mir_effect_none } from mir/model/effects
+import { MirArrayJoin, MirBlock, MirFunction, MirModule, MirRootPlan, MirStringConcat, MirValue } from mir/model/module
+import { MirFlow, mir_build_flow_with_values, mir_flow_blocks, mir_flow_position, mir_flow_type, mir_value_available } from mir/analysis/flow
+import { mir_semantic_type_name } from mir/model/types
+import { mir_instruction_effects } from mir/analysis/call_effects
+import { mir_live_add, mir_live_before, mir_live_equal } from mir/analysis/liveness
+
+def mir_join_site_present(sites: Array<Integer>, site: Integer): Boolean
+	mut index := 0
+	while index < sites.size()
+		if sites[index] == site
+			return true
+		end
+		index += 1
+	end
+	return false
+end
+
+# Mechanical plan lookup shared by root lowering and backend consumption.
+def mir_array_join_elides(plan: MirArrayJoin, instruction: Integer): Boolean
+	if instruction == plan.construction
+		return true
+	end
+	mut index := 0
+	while index < plan.appends.size()
+		if plan.appends[index] == instruction
+			return true
+		end
+		index += 1
+	end
+	return false
+end
+
+# Only canonical semantic uses count. Include call/capture argument spans and
+# terminator arguments, even on unreachable edges or physically reordered blocks.
+def mir_array_join_uses_confined(native_module: MirModule, function: MirFunction, value: Integer, allowed: Array<Integer>): Boolean
+	mut block_index := function.block_start
+	while block_index < function.block_start + function.block_count
+		block := native_module.blocks[block_index]
+		if block.return_value == value || block.condition == value
+			return false
+		end
+		mut argument := block.first_argument_start
+		while argument < block.first_argument_start + block.first_argument_count
+			if native_module.arguments[argument] == value
+				return false
+			end
+			argument += 1
+		end
+		argument = block.second_argument_start
+		while argument < block.second_argument_start + block.second_argument_count
+			if native_module.arguments[argument] == value
+				return false
+			end
+			argument += 1
+		end
+		mut index := block.instruction_start
+		while index < block.instruction_start + block.instruction_count
+			instruction := native_module.instructions[index]
+			uses := mir_live_before(native_module, [value], instruction, [])
+			if uses.size() > 0
+				mut permitted := false
+				allowed.each do |site|
+					if site == index
+						permitted = true
+					end
+				end
+				if !permitted
+					return false
+				end
+			end
+			index += 1
+		end
+		block_index += 1
+	end
+	return true
+end
+
+# The adjacent sole consumer cannot expose the joined String or keep it live
+# across another safe point. Its canonical join still publishes fragment roots
+# because the runtime retains ordinary joining for unsafe UTF-8 boundaries.
+def mir_array_join_size(native_module: MirModule, function: MirFunction, block: MirBlock, join: Integer): Integer
+	size := join + 1
+	if size >= block.instruction_start + block.instruction_count
+		return -1
+	end
+	consumer := native_module.instructions[size]
+	value := native_module.instructions[join].result
+	if consumer.kind != mir_op_string_size() || consumer.first != value
+		return -1
+	end
+	if !mir_array_join_uses_confined(native_module, function, value, [size])
+		return -1
+	end
+	return size
+end
+
+def mir_array_join_literal(native_module: MirModule, flow: MirFlow, value: Integer): Integer
+	position := mir_flow_position(flow, value)
+	if position < 0
+		return -1
+	end
+	instruction := native_module.instructions[position]
+	if instruction.kind != mir_op_string_literal()
+		return -1
+	end
+	# Reference-host recovery can know the point count without having the
+	# literal bytes. Keep that unavailable state on the existing runtime path.
+	data := native_module.literal_data[instruction.payload]
+	if data.points > data.bytes.size()
+		return -1
+	end
+	return instruction.payload
+end
+
+# The separator's ASCII edges prevent even invalid UTF-8 fragments from
+# merging into a code point. Literal data is independently verified first.
+def mir_array_join_separator_literal(native_module: MirModule, flow: MirFlow, join: Integer): Integer
+	literal := mir_array_join_literal(native_module, flow, native_module.instructions[join].second)
+	if literal < 0
+		return -1
+	end
+	data := native_module.literal_data[literal]
+	if data.bytes.size() == 0 || data.bytes[0] >= 128 || data.bytes[data.bytes.size() - 1] >= 128
+		return -1
+	end
+	return literal
+end
+
+# No allocation remains for this plan. Root lowering and code generation use
+# the same verified decision; neither reconstructs it from emitted operands.
+def mir_array_join_size_inline(plan: MirArrayJoin): Boolean
+	if plan.size < 0
+		return false
+	end
+	if plan.elements.size() < 2
+		return true
+	end
+	return plan.separator_literal >= 0
+end
+
+# A nonempty ASCII operand separates the other operand's bytes from any
+# possible cross-boundary UTF-8 sequence. Integer formatting always has digits.
+def mir_array_join_ascii_fragment(native_module: MirModule, flow: MirFlow, value: Integer): Boolean
+	position := mir_flow_position(flow, value)
+	if position < 0
+		return false
+	end
+	instruction := native_module.instructions[position]
+	if instruction.kind == mir_op_scalar_conversion() && instruction.payload == mir_convert_integer_to_string()
+		return true
+	end
+	if instruction.kind != mir_op_string_literal()
+		return false
+	end
+	bytes := native_module.literal_data[instruction.payload].bytes
+	if bytes.size() == 0
+		return false
+	end
+	bytes.each do |byte|
+		if byte >= 128
+			return false
+		end
+	end
+	return true
+end
+
+# A fused concat can contain operands with no pointer representation. Select
+# its complete producer group or leave that group's ordinary fusion intact.
+def mir_join_fragment_group(native_module: MirModule, function: MirFunction, flow: MirFlow, block: MirBlock, position: Integer, allowed: Array<Integer>, concats: Array<MirStringConcat>): Array<Integer>
+	mut group := [position]
+	mut index := 0
+	while index < group.size()
+		instruction := native_module.instructions[group[index]]
+		[instruction.first, instruction.second].each do |value|
+			producer := mir_flow_position(flow, value)
+			if producer >= block.instruction_start && producer < group[index]
+				fused := mir_string_concat_index(concats, producer)
+				if fused >= 0 && concats[fused].fragments.size() == 0 && !mir_join_site_present(group, producer)
+					group.push(producer)
+				end
+			end
+		end
+		index += 1
+	end
+	mut consumers: Array<Integer> := []
+	allowed.each do |site|
+		consumers.push(site)
+	end
+	group.each do |site|
+		consumers.push(site)
+	end
+	index = 0
+	while index < group.size()
+		instruction := native_module.instructions[group[index]]
+		if !mir_array_join_ascii_fragment(native_module, flow, instruction.first) && !mir_array_join_ascii_fragment(native_module, flow, instruction.second)
+			return []
+		end
+		if !mir_array_join_uses_confined(native_module, function, instruction.result, consumers)
+			return []
+		end
+		index += 1
+	end
+	return group
+end
+
+# Counts are captured at each original concat, before any later call or checked
+# failure. Only uses by selected producers and this Array's pushes are allowed.
+# Every added dependency precedes its consumer, so the worklist terminates.
+def mir_array_join_with_size_concats(native_module: MirModule, function: MirFunction, flow: MirFlow, block: MirBlock, plan: MirArrayJoin): MirArrayJoin
+	if !mir_array_join_size_inline(plan) || plan.elements.size() < 2
+		return plan
+	end
+	concats := mir_function_string_concats(native_module, function)
+	mut producers: Array<Integer> := []
+	mut pending: Array<Integer> := []
+	plan.elements.each do |value|
+		pending.push(value)
+	end
+	mut cursor := 0
+	while cursor < pending.size()
+		position := mir_flow_position(flow, pending[cursor])
+		if position >= block.instruction_start && position < plan.construction && !mir_join_site_present(producers, position)
+			instruction := native_module.instructions[position]
+			if instruction.kind == mir_op_string_concat()
+				mut allowed: Array<Integer> := []
+				plan.appends.each do |site|
+					allowed.push(site)
+				end
+				producers.each do |site|
+					allowed.push(site)
+				end
+				group := mir_join_fragment_group(native_module, function, flow, block, position, allowed, concats)
+				group.each do |site|
+					if !mir_join_site_present(producers, site)
+						mir_live_add(producers, site)
+						fragment := native_module.instructions[site]
+						pending.push(fragment.first)
+						pending.push(fragment.second)
+					end
+				end
+			end
+		end
+		cursor += 1
+	end
+	return MirArrayJoin.new(construction: plan.construction, array: plan.array, join: plan.join, size: plan.size, separator_literal: plan.separator_literal, size_concats: producers, appends: plan.appends, elements: plan.elements, element_literals: plan.element_literals)
+end
+
+def mir_array_join_fragment_value(native_module: MirModule, plan: MirArrayJoin, value: Integer): Integer
+	mut index := 0
+	while index < plan.size_concats.size()
+		position := plan.size_concats[index]
+		if native_module.instructions[position].result == value
+			return position
+		end
+		index += 1
+	end
+	return -1
+end
+
+# All fragments precede construction. Admit an already available separator or
+# a static literal defined later in this same block; no allocation is reordered.
+def mir_array_join_separator_safe(native_module: MirModule, flow: MirFlow, block: MirBlock, construction: Integer, join: Integer): Boolean
+	separator := native_module.instructions[join].second
+	if mir_value_available(flow, block, construction, separator)
+		return true
+	end
+	position := mir_flow_position(flow, separator)
+	if position > construction && position < join && native_module.instructions[position].kind == mir_op_string_literal()
+		return true
+	end
+	return false
+end
+
+def mir_function_array_joins(native_module: MirModule, function: MirFunction, values: Array<MirValue>): Array<MirArrayJoin>
+	mut plans: Array<MirArrayJoin> := []
+	if function.kind != mir_function_control()
+		return plans
+	end
+	# Avoid constructing CFG/type indexes in functions without a join.
+	mut found := false
+	mut block_index := function.block_start
+	while block_index < function.block_start + function.block_count
+		block := native_module.blocks[block_index]
+		mut index := block.instruction_start
+		while index < block.instruction_start + block.instruction_count
+			if native_module.instructions[index].kind == mir_op_array_join()
+				found = true
+			end
+			index += 1
+		end
+		block_index += 1
+	end
+	if !found
+		return plans
+	end
+	flow := mir_build_flow_with_values(native_module, function, mir_flow_blocks(native_module, function), values)
+	block_index = function.block_start
+	while block_index < function.block_start + function.block_count
+		block := native_module.blocks[block_index]
+		mut construction := block.instruction_start
+		while construction < block.instruction_start + block.instruction_count
+			array := native_module.instructions[construction]
+			if array.kind == mir_op_array_new() && mir_semantic_type_name(native_module, mir_flow_type(flow, array.result)) == "Array<String>"
+				mut elements: Array<Integer> := []
+				mut appends: Array<Integer> := []
+				mut join := -1
+				mut index := construction + 1
+				while index < block.instruction_start + block.instruction_count
+					instruction := native_module.instructions[index]
+					if instruction.kind == mir_op_array_join() && instruction.first == array.result
+						join = index
+						break
+					end
+					if instruction.kind == mir_op_array_push() && instruction.first == array.result
+						if elements.size() >= 4 || mir_flow_type(flow, instruction.second) != mir_type_string() || !mir_value_available(flow, block, construction, instruction.second)
+							break
+						end
+						elements.push(instruction.second)
+						appends.push(index)
+					elsif mir_instruction_effects(native_module, instruction) != mir_effect_none()
+						# Unrelated calls, mutation, allocation and checked failures
+						# retain the ordinary container and failure ordering.
+						break
+					end
+					index += 1
+				end
+				if join >= 0 && mir_array_join_separator_safe(native_module, flow, block, construction, join)
+					mut allowed := [join]
+					appends.each do |append|
+						allowed.push(append)
+					end
+					if mir_array_join_uses_confined(native_module, function, array.result, allowed)
+						size := mir_array_join_size(native_module, function, block, join)
+						mut element_literals: Array<Integer> := []
+						elements.each do |element|
+							element_literals.push(mir_array_join_literal(native_module, flow, element))
+						end
+						plan := MirArrayJoin.new(construction: construction, array: array.result, join: join, size: size, separator_literal: mir_array_join_separator_literal(native_module, flow, join), size_concats: [], appends: appends, elements: elements, element_literals: element_literals)
+						plans.push(mir_array_join_with_size_concats(native_module, function, flow, block, plan))
+					end
+				end
+			end
+			construction += 1
+		end
+		block_index += 1
+	end
+	# Stable instruction identity, independent of physical block storage order.
+	mut index := 1
+	while index < plans.size()
+		plan := plans[index]
+		mut at := index
+		while at > 0 && plans[at - 1].construction > plan.construction
+			plans[at] = plans[at - 1]
+			at -= 1
+		end
+		plans[at] = plan
+		index += 1
+	end
+	return plans
+end
+
+def mir_array_joins_equal(left: Array<MirArrayJoin>, right: Array<MirArrayJoin>): Boolean
+	if left.size() != right.size()
+		return false
+	end
+	mut index := 0
+	while index < left.size()
+		a := left[index]
+		b := right[index]
+		if a.construction != b.construction || a.array != b.array || a.join != b.join || a.size != b.size || a.separator_literal != b.separator_literal || !mir_live_equal(a.size_concats, b.size_concats) || !mir_live_equal(a.appends, b.appends) || !mir_live_equal(a.elements, b.elements) || !mir_live_equal(a.element_literals, b.element_literals)
+			return false
+		end
+		index += 1
+	end
+	return true
+end
+
+# Canonical liveness sees the Array, including every pre-allocation fragment.
+# Remove elided safepoints and replace each remaining live virtual Array with
+# its already available String owners. Workspace pointers are never GC roots.
+def mir_array_join_roots(native_module: MirModule, ordinary: MirRootPlan, plans: Array<MirArrayJoin>): MirRootPlan
+	if plans.size() == 0
+		return ordinary
+	end
+	mut instructions: Array<Integer> := []
+	mut roots: Array<Array<Integer>> := []
+	mut capacity := 0
+	mut index := 0
+	while index < ordinary.instructions.size()
+		instruction := ordinary.instructions[index]
+		mut elided := false
+		plans.each do |plan|
+			if mir_join_site_present(plan.size_concats, instruction) || mir_array_join_elides(plan, instruction) || (instruction == plan.join && mir_array_join_size_inline(plan))
+				elided = true
+			end
+		end
+		if !elided
+			mut live: Array<Integer> := []
+			ordinary.roots[index].each do |value|
+				mut virtual := false
+				plans.each do |plan|
+					if mir_array_join_fragment_value(native_module, plan, value) >= 0
+						virtual = true
+					end
+					if value == plan.array
+						virtual = true
+						plan.elements.each do |element|
+							mir_live_add(live, element)
+						end
+					end
+				end
+				if !virtual
+					mir_live_add(live, value)
+				end
+			end
+			instructions.push(instruction)
+			roots.push(live)
+			if live.size() > capacity
+				capacity = live.size()
+			end
+		end
+		index += 1
+	end
+	return MirRootPlan.new(function_id: ordinary.function_id, instructions: instructions, roots: roots, capacity: capacity)
+end

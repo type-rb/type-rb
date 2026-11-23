@@ -1,0 +1,63 @@
+# Enum payload matching and Result propagation.
+
+import trb/std/result
+
+enum Command
+	Add(amount: Integer)
+	Scale(factor: Integer)
+	Reset
+end
+
+def command(index: Integer): Command
+	phase := index % 9
+	if phase == 0
+		return Command::Scale(index % 3 + 2)
+	elsif phase == 8
+		return Command::Reset
+	end
+	return Command::Add(index % 11)
+end
+
+def checked(value: Integer): Result<Integer, String>
+	if value > 40
+		return Result<Integer, String>::Err("overflow")
+	end
+	return Result<Integer, String>::Ok(value)
+end
+
+def step(value: Integer, next: Command): Result<Integer, String>
+	case next
+	when Command::Add(amount)
+		return checked(value + amount)
+	when Command::Scale(factor)
+		scaled := try checked(value * factor)
+		return Result<Integer, String>::Ok(scaled % 9973)
+	when Command::Reset
+		return Result<Integer, String>::Ok(1)
+	end
+end
+
+def run(rounds: Integer): Integer
+	mut value := 1
+	mut failures := 0
+	mut checksum := 0
+	mut index := 0
+	while index < rounds
+		case step(value, command(index))
+		when Result::Ok(next_value)
+			value = next_value
+		when Result::Err(_message)
+			failures += 1
+			value = index % 7 + 1
+		end
+		checksum = (checksum + value) % 1000000007
+		index += 1
+	end
+	puts(failures)
+	return checksum
+end
+
+def main()
+	puts(run(8000000))
+	return
+end

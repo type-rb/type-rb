@@ -1,0 +1,18 @@
+def append_first(mut values: Array<String>, index: Integer)
+	if index == 0
+		values.push("c" + "cc")
+	end
+end
+
+def main()
+	mut values := ["a", "b" + "b"]
+	mut total := 0
+	values.each.with_index { |value, index|
+		append_first(values, index);
+		total += value.size() + index
+	}
+	puts(total)
+	(2...4).each() { |value|
+		puts(value)
+	}
+end

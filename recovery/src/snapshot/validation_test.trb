@@ -1,0 +1,176 @@
+import { validate_and_lower } from snapshot/validation
+import { NativeBlock, NativeFunction, NativeInstruction, NativeModule, NativeSource, NativeValueType, verify_native_mir } from snapshot/mir
+import { SourceOrigin } from snapshot/schema
+import { native_read_text } from support/file_system
+import trb/std/process
+import trb/std/result
+import { describe, expect, test } from trb/std/test
+
+def _valid_snapshot(): String
+	return "{\"format\":\"type-rb-bootstrap-snapshot\",\"version\":1,\"module\":\"example/main\",\"sources\":[{\"id\":\"main\",\"path\":\"src/main.trb\"}],\"functions\":[{\"id\":\"example/main#main\",\"name\":\"main\",\"result\":\"Integer\",\"entry\":\"entry\",\"origin\":{\"source\":\"main\",\"startLine\":1,\"startColumn\":1,\"endLine\":5,\"endColumn\":4},\"blocks\":[{\"id\":\"entry\",\"origin\":{\"source\":\"main\",\"startLine\":2,\"startColumn\":2,\"endLine\":4,\"endColumn\":15},\"instructions\":[{\"op\":\"integer_literal\",\"result\":\"v0\",\"value\":40,\"origin\":{\"source\":\"main\",\"startLine\":2,\"startColumn\":8,\"endLine\":2,\"endColumn\":9}},{\"op\":\"integer_literal\",\"result\":\"v1\",\"value\":2,\"origin\":{\"source\":\"main\",\"startLine\":3,\"startColumn\":8,\"endLine\":3,\"endColumn\":8}},{\"op\":\"integer_add_checked\",\"result\":\"v2\",\"left\":\"v0\",\"right\":\"v1\",\"origin\":{\"source\":\"main\",\"startLine\":4,\"startColumn\":9,\"endLine\":4,\"endColumn\":13}},{\"op\":\"return\",\"value\":\"v2\",\"origin\":{\"source\":\"main\",\"startLine\":4,\"startColumn\":2,\"endLine\":4,\"endColumn\":13}}]}]}]}"
+end
+
+def _expect_boundary_error(source: String, code: String, path: String)
+	case validate_and_lower(source)
+	when Result::Ok(_native_module)
+		expect(false).to_be_true()
+	when Result::Err(diagnostic)
+		expect(diagnostic.code).to_equal(code)
+		expect(diagnostic.path).to_equal(path)
+	end
+	return
+end
+
+def _read_fixture(path: String): String
+	case native_read_text(path)
+	when Result::Ok(source)
+		return source
+	when Result::Err(_error)
+		return ""
+	end
+end
+
+describe("Snapshot validation boundary") do
+	test("strictly decodes, lowers, and preserves source origins") do
+		case validate_and_lower(_valid_snapshot())
+		when Result::Ok(native_module)
+			expect(native_module.id).to_equal("example/main")
+			expect(native_module.sources[0].id).to_equal("main")
+			expect(native_module.sources[0].path).to_equal("src/main.trb")
+			expect(native_module.functions.size()).to_equal(1)
+			function := native_module.functions[0]
+			expect(function.origin.start_line).to_equal(1)
+			expect(function.blocks.size()).to_equal(1)
+			expect(function.blocks[0].origin.start_line).to_equal(2)
+			instruction := function.blocks[0].instructions[2]
+			case instruction
+			when NativeInstruction::AddIntegerChecked(result, left, right, origin)
+				expect(result).to_equal("v2")
+				expect(left).to_equal("v0")
+				expect(right).to_equal("v1")
+				expect(origin.source_id).to_equal("main")
+				expect(origin.start_line).to_equal(4)
+			else
+				expect(false).to_be_true()
+			end
+		when Result::Err(_diagnostic)
+			expect(false).to_be_true()
+		end
+	end
+
+	test("rejects malformed JSON deterministically") do
+		_expect_boundary_error("{", "TRBN0001", "")
+	end
+
+	test("rejects unknown fields deterministically") do
+		_expect_boundary_error(
+			"{\"format\":\"type-rb-bootstrap-snapshot\",\"version\":1,\"module\":\"example/main\",\"sources\":[],\"functions\":[],\"unexpected\":true}",
+			"TRBN0002",
+			"/unexpected",
+		)
+	end
+
+	test("rejects unsupported versions deterministically") do
+		_expect_boundary_error(
+			"{\"format\":\"type-rb-bootstrap-snapshot\",\"version\":2,\"module\":\"example/main\",\"sources\":[],\"functions\":[]}",
+			"TRBN0003",
+			"/version",
+		)
+	end
+
+	test("rejects missing required fields deterministically") do
+		_expect_boundary_error("{}", "TRBN0002", "/format")
+	end
+
+	test("rejects unsupported operations deterministically") do
+		_expect_boundary_error(
+			_valid_snapshot().replace_all("integer_literal", "integer_multiply"),
+			"TRBN0003",
+			"/functions/0/blocks/0/instructions/0/op",
+		)
+	end
+
+	test("rejects undefined snapshot values") do
+		source := "{\"format\":\"type-rb-bootstrap-snapshot\",\"version\":1,\"module\":\"example/main\",\"sources\":[{\"id\":\"main\",\"path\":\"src/main.trb\"}],\"functions\":[{\"id\":\"example/main#main\",\"name\":\"main\",\"result\":\"Integer\",\"entry\":\"entry\",\"origin\":{\"source\":\"main\",\"startLine\":1,\"startColumn\":1,\"endLine\":1,\"endColumn\":4},\"blocks\":[{\"id\":\"entry\",\"origin\":{\"source\":\"main\",\"startLine\":1,\"startColumn\":1,\"endLine\":1,\"endColumn\":4},\"instructions\":[{\"op\":\"return\",\"value\":\"missing\",\"origin\":{\"source\":\"main\",\"startLine\":1,\"startColumn\":1,\"endLine\":1,\"endColumn\":4}}]}]}]}"
+		_expect_boundary_error(source, "TRBN0004", "/functions/0/blocks/0/instructions/0/value")
+	end
+
+	test("verifies Native MIR independently from snapshot decoding") do
+		origin := SourceOrigin.new(
+			source_id: "main",
+			start_line: 1,
+			start_column: 1,
+			end_line: 1,
+			end_column: 4,
+		)
+		invalid := NativeModule.new(
+			id: "example/main",
+			sources: [NativeSource.new(id: "main", path: "src/main.trb")],
+			functions: [
+				NativeFunction.new(
+					id: "example/main#main",
+					name: "main",
+					result_type: NativeValueType::Integer,
+					entry: "entry",
+					origin: origin,
+					blocks: [
+						NativeBlock.new(
+							id: "entry",
+							origin: origin,
+							instructions: [NativeInstruction::Return("missing", origin)],
+						),
+					],
+				),
+			],
+		)
+		case verify_native_mir(invalid)
+		when Result::Ok(_valid)
+			expect(false).to_be_true()
+		when Result::Err(diagnostic)
+			expect(diagnostic.code).to_equal("TRBN0004")
+			expect(diagnostic.path).to_equal("/functions/0/blocks/0/instructions/0/value")
+		end
+	end
+
+	test("validates the committed fixture corpus") do
+		root := Process.environment("TYPE_RB_NATIVE_ROOT")
+		if root == nil
+			expect(false).to_be_true()
+		else
+			valid_source := _read_fixture(root + "/fixtures/snapshot-validation/valid/integer-add.json")
+			expect(valid_source.empty?()).to_be_false()
+			case validate_and_lower(valid_source)
+			when Result::Ok(_native_module)
+				expect(true).to_be_true()
+			when Result::Err(_diagnostic)
+				expect(false).to_be_true()
+			end
+
+			_expect_boundary_error(
+				_read_fixture(root + "/fixtures/snapshot-validation/invalid/malformed.json"),
+				"TRBN0001",
+				"",
+			)
+			_expect_boundary_error(
+				_read_fixture(root + "/fixtures/snapshot-validation/invalid/unknown-field.json"),
+				"TRBN0002",
+				"/unexpected",
+			)
+			_expect_boundary_error(
+				_read_fixture(root + "/fixtures/snapshot-validation/invalid/unsupported-version.json"),
+				"TRBN0003",
+				"/version",
+			)
+			_expect_boundary_error(
+				_read_fixture(root + "/fixtures/snapshot-validation/invalid/unknown-source.json"),
+				"TRBN0004",
+				"/functions/0/origin/source",
+			)
+			_expect_boundary_error(
+				_read_fixture(root + "/fixtures/snapshot-validation/invalid/undefined-value.json"),
+				"TRBN0004",
+				"/functions/0/blocks/0/instructions/0/value",
+			)
+		end
+	end
+end

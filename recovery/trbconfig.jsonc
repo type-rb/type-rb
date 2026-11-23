@@ -1,0 +1,8 @@
+{
+  "name": "type-rb-native-recovery",
+  "mode": "go",
+  "sourceDir": "src",
+  "go": {
+    "module": "github.com/type-rb/type-rb-native/recovery"
+  }
+}

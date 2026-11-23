@@ -1,0 +1,62 @@
+import { mir_function_control } from mir/model/control
+import { mir_effect_none } from mir/model/effects
+import { mir_op_callable_new } from mir/model/instructions
+import { mir_type_composite_start } from mir/model/type_ids
+import { mir_type_kind_callable } from mir/model/type_kinds
+import { MirCallablePlan, MirModule } from mir/model/module
+import { mir_flow_blocks, mir_function_value_groups } from mir/analysis/flow
+import { mir_live_before, mir_live_exit, mir_live_incoming_with_concats, mir_managed_add, mir_managed_contains } from mir/analysis/liveness
+
+# A constructor can disappear only when its result has no demanded use.
+# Raw SSA liveness includes returns, stored values, calls and captures, and
+# follows only demanded block parameters through both edges and loop cycles.
+# Capture evaluation and mutable cells remain ordinary, unchanged instructions.
+def mir_unused_callable_allocations(native_module: MirModule): Array<MirCallablePlan>
+	mut result: Array<MirCallablePlan> := []
+	values := mir_function_value_groups(native_module)
+	native_module.functions.each.with_index do |function, function_index|
+		if function.kind != mir_function_control()
+			next
+		end
+		mut needed := false
+		mut block_index := function.block_start
+		while block_index < function.block_start + function.block_count
+			block := native_module.blocks[block_index]
+			mut position := block.instruction_start
+			while position < block.instruction_start + block.instruction_count
+				if native_module.instructions[position].kind == mir_op_callable_new()
+					needed = true
+				end
+				position += 1
+			end
+			block_index += 1
+		end
+		if !needed
+			next
+		end
+		mut callables: Array<Integer> := []
+		values[function_index].each do |value|
+			if value.type_id >= mir_type_composite_start() && native_module.types[value.type_id - mir_type_composite_start()].kind == mir_type_kind_callable()
+				mir_managed_add(callables, value.id)
+			end
+		end
+		blocks := mir_flow_blocks(native_module, function)
+		incoming := mir_live_incoming_with_concats(native_module, function, blocks, callables, [])
+		block_index = function.block_start
+		while block_index < function.block_start + function.block_count
+			block := native_module.blocks[block_index]
+			mut live := mir_live_exit(native_module, function, blocks, callables, block, incoming)
+			mut position := block.instruction_start + block.instruction_count - 1
+			while position >= block.instruction_start
+				instruction := native_module.instructions[position]
+				if instruction.kind == mir_op_callable_new() && !mir_managed_contains(live, instruction.result)
+					result.push(MirCallablePlan.new(instruction: position, callee: instruction.payload, captures: instruction.second, effects: mir_effect_none()))
+				end
+				live = mir_live_before(native_module, callables, instruction, live)
+				position -= 1
+			end
+			block_index += 1
+		end
+	end
+	return result
+end

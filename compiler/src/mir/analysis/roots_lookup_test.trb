@@ -1,0 +1,19 @@
+import { qbe_root_plan_start } from backend/qbe/emit/roots
+import { describe, expect, test } from trb/std/test
+
+describe("MIR root plan block lookup") do
+	test("finds empty and sparse segments in arbitrary block order") do
+		expect(qbe_root_plan_start([], 0)).to_equal(0)
+		instructions := [2, 7, 9, 9007199254740991]
+		starts := [8, 0, 9007199254740990, 10, 2, 3, 9007199254740991]
+		expected := [2, 0, 3, 3, 0, 1, 3]
+		mut index := 0
+		while index < starts.size()
+			expect(qbe_root_plan_start(instructions, starts[index])).to_equal(expected[index])
+			index += 1
+		end
+		expect(qbe_root_plan_start([2, 7, 9], 10)).to_equal(3)
+		expect(qbe_root_plan_start([2, 2, 7], 2)).to_equal(0)
+		expect(qbe_root_plan_start([2, 2, 7], 3)).to_equal(2)
+	end
+end

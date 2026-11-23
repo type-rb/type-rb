@@ -1,0 +1,223 @@
+import { mir_numeric_power_division_mode } from mir/model/numeric_modes
+import { emit_qbe } from compiler
+import { mir_numeric_find, mir_numeric_plans_equal } from mir/analysis/numeric
+import { MirNumericOperation } from mir/model/module
+import { optimize_verified_mir } from mir/passes/optimize
+import { verify_mir } from mir/verify/module
+import { integer_string } from support/literals
+import { array_loop_mir_check } from testing/mir/array_loops
+import { array_mir_test_read } from testing/mir/arrays
+import { control_test_output } from testing/mir/control
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { logical_run_qbe } from testing/qbe_runner
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+def power_division_source(divisor: String): String
+	return "def quotient(value: Integer, other: Integer): Integer\nreturn value / " + divisor + "\nend\ndef main()\nputs(quotient(-19, 7))\nend\n"
+end
+
+describe("MIR power-of-two division") do
+	test("uses the verified nonnegative guard and keeps signed boundary fallbacks") do
+		root := Process.environment("TYPE_RB_NATIVE_ROOT")
+		if root != nil
+			fixture := root + "/compiler/conformance/valid/scalar-guarded-power-division"
+			mut state := array_loop_mir_check(array_mir_test_read(fixture + ".trb"))
+			expect(state.scalar_mir.functions[0].integer_guard).to_equal(67108864)
+			mut expansions := 0
+			state.scalar_mir.numeric_plans[0].each do |plan|
+				if plan.function_id == 0 && plan.call_instruction >= 0
+					expansions += 1
+				end
+			end
+			expect(expansions).to_equal(1)
+			before := control_test_output(emit_qbe(state))
+			mut inside := false
+			mut caller := ""
+			before.split("\n").each do |line|
+				if line.include?("$trbnf1(") && line.include?("function ")
+					inside = true
+				elsif line == "}"
+					inside = false
+				elsif inside
+					caller += line + "\n"
+				end
+			end
+			expect(caller.include?(" =l shr ")).to_be_true()
+			expect(caller.include?(" =l sar ")).to_be_true()
+			expect(caller.include?(", 67108864")).to_be_true()
+			intrinsic_mir_erase(state)
+			optimize_verified_mir(state.scalar_mir)
+			expect(verify_mir(state.scalar_mir, true)).to_equal("")
+			expect(control_test_output(emit_qbe(state))).to_equal(before)
+			qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+			if qbe != nil
+				case logical_run_qbe(qbe, before)
+				when Result::Ok(actual)
+					expect(actual).to_equal(array_mir_test_read(fixture + ".out"))
+				when Result::Err(error)
+					puts(error)
+					expect(false).to_be_true()
+				end
+			end
+		end
+	end
+
+	test("proves every portable power exponent and preserves signed endpoints") do
+		mut divisor := 1
+		mut shift := 0
+		while shift <= 52
+			mut source := "def quotient(value: Integer): Integer\nreturn value / " + integer_string(divisor) + "\nend\ndef main()\n"
+			mut expected := ""
+			[-9007199254740991, -divisor - 1, -divisor, -divisor + 1, -1, 0, 1, divisor - 1, divisor, divisor + 1, 9007199254740991].each do |value|
+				source += "puts(quotient(" + integer_string(value) + "))\n"
+				expected += integer_string(value / divisor) + "\n"
+			end
+			source += "end\n"
+			state := array_loop_mir_check(source)
+			plan := mir_numeric_find(state.scalar_mir.numeric_plans[0], 0, -1, -1)
+			expect(plan.operations[0].mode).to_equal(mir_numeric_power_division_mode())
+			expect(plan.operations[0].divisor).to_equal(divisor)
+			expect(plan.operations[0].shift).to_equal(shift)
+			expect(plan.operations[0].reciprocal).to_equal(0)
+			# Execute representative widths, including both portable endpoints.
+			if shift == 0 || shift == 1 || shift == 3 || shift == 16 || shift == 32 || shift == 52
+				qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+				if qbe != nil
+					case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+					when Result::Ok(actual)
+						expect(actual).to_equal(expected)
+					when Result::Err(error)
+						puts(error)
+						expect(false).to_be_true()
+					end
+				end
+			end
+			if shift < 52
+				divisor *= 2
+			end
+			shift += 1
+		end
+	end
+
+	test("keeps zero negative non-power dynamic and Float division unchanged") do
+		["0", "-2", "3", "7", "4294967295", "9007199254740991", "other"].each do |divisor|
+			state := array_loop_mir_check(power_division_source(divisor))
+			plan := mir_numeric_find(state.scalar_mir.numeric_plans[0], 0, -1, -1)
+			expect(plan.operations[0].mode).to_equal(1)
+		end
+		state := array_loop_mir_check("def quotient(value: Float): Float\nreturn value / 8.0\nend\ndef main()\nputs(quotient(-19.0))\nend\n")
+		plan := mir_numeric_find(state.scalar_mir.numeric_plans[0], 0, -1, -1)
+		expect(plan.operations.size()).to_equal(0)
+		expect(control_test_output(emit_qbe(state)).include?(" =d div ")).to_be_true()
+	end
+
+	test("retains division-by-zero failure and evaluates the dividend once") do
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			state := array_loop_mir_check(power_division_source("0"))
+			case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+			when Result::Ok(_actual)
+				expect(false).to_be_true()
+			when Result::Err(error)
+				expect(error.include?("division by zero")).to_be_true()
+			end
+			ordered := array_loop_mir_check("def dividend(): Integer\nputs(41)\nreturn -19\nend\ndef main()\nputs(dividend() / 8)\nend\n")
+			case logical_run_qbe(qbe, control_test_output(emit_qbe(ordered)))
+			when Result::Ok(actual)
+				expect(actual).to_equal("41\n-2\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("rejects forged divisor exponent reciprocal mode and tested operand") do
+		mut mutation := 0
+		while mutation < 5
+			mut state := array_loop_mir_check(power_division_source("8"))
+			mut plan := mir_numeric_find(state.scalar_mir.numeric_plans[0], 0, -1, -1)
+			original := plan.operations[0]
+			mut divisor := original.divisor
+			mut shift := original.shift
+			mut reciprocal := original.reciprocal
+			mut mode := original.mode
+			mut tested := original.tested_value
+			if mutation == 0
+				divisor = 7
+			elsif mutation == 1
+				shift += 1
+			elsif mutation == 2
+				reciprocal = 1
+			elsif mutation == 3
+				mode = 8
+			else
+				tested = 0
+			end
+			plan.operations[0] = MirNumericOperation.new(tested_value: tested, instruction: original.instruction, mode: mode, divisor: divisor, reciprocal: reciprocal, shift: shift)
+			expect(verify_mir(state.scalar_mir, true)).to_equal("MIR numeric plan differs")
+			mutation += 1
+		end
+	end
+
+	test("rejects missing excess and stale division proofs") do
+		mut mutation := 0
+		while mutation < 3
+			mut state := array_loop_mir_check(power_division_source("8"))
+			mut plan := mir_numeric_find(state.scalar_mir.numeric_plans[0], 0, -1, -1)
+			if mutation == 0
+				state.scalar_mir.numeric_plans[0] = []
+			elsif mutation == 1
+				plan.operations.push(plan.operations[0])
+			else
+				mut index := 0
+				while index < state.scalar_mir.literal_texts.size()
+					if state.scalar_mir.literal_texts[index] == "8"
+						state.scalar_mir.literal_texts[index] = "16"
+					end
+					index += 1
+				end
+			end
+			expect(verify_mir(state.scalar_mir, true)).to_equal("MIR numeric plan differs")
+			mutation += 1
+		end
+	end
+
+	test("rederives proofs after source erasure reordering and reoptimization") do
+		mut state := array_loop_mir_check(power_division_source("8"))
+		plans := state.scalar_mir.numeric_plans[0]
+		before := control_test_output(emit_qbe(state))
+		intrinsic_mir_erase(state)
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+		state.scalar_mir.functions.each do |function|
+			mut left := function.block_start
+			mut right := left + function.block_count - 1
+			while left < right
+				saved := state.scalar_mir.blocks[left]
+				state.scalar_mir.blocks[left] = state.scalar_mir.blocks[right]
+				state.scalar_mir.blocks[right] = saved
+				left += 1
+				right -= 1
+			end
+		end
+		mut pass := 0
+		while pass < 2
+			optimize_verified_mir(state.scalar_mir)
+			expect(verify_mir(state.scalar_mir, true)).to_equal("")
+			expect(mir_numeric_plans_equal(plans, state.scalar_mir.numeric_plans[0])).to_be_true()
+			pass += 1
+		end
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+			when Result::Ok(actual)
+				expect(actual).to_equal("-2\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+end

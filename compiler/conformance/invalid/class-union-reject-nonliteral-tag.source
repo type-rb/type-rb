@@ -1,0 +1,24 @@
+class Loaded
+readonly @kind: String := "loaded"
+@value: String
+def initialize(value: String)
+@value = value + "!"
+end
+end
+class Missing
+readonly @kind: "missing" := "missing"
+@code: Integer := 404
+end
+alias Response = Loaded | Missing
+def read(value: Response): String
+return case value.kind
+when "loaded"
+value.value
+when "missing"
+value.code.to_s()
+end
+end
+
+def main()
+puts(read(Loaded.new("held")))
+end

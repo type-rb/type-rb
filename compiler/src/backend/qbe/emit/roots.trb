@@ -1,0 +1,82 @@
+import { integer_string } from support/literals
+import { QbeEmitContext, emit_label, emit_temporary } from backend/qbe/context
+import { QbeOutput, qbe_output_line } from backend/qbe/output
+
+# Verified root plans are sorted by instruction identity, independently of block
+# storage order. Seek once per block, then advance with its instructions.
+def qbe_root_plan_start(instructions: Array<Integer>, first: Integer): Integer
+	mut low := 0
+	mut high := instructions.size()
+	while low < high
+		middle := low + (high - low) / 2
+		if instructions[middle] < first
+			low = middle + 1
+		else
+			high = middle
+		end
+	end
+	return low
+end
+
+# Each callee preserves its caller's root slots, but may append a managed return
+# and may move the root buffer. Within one MIR block, unchanged leading slots can
+# therefore survive an allocation; the current count must still be restored.
+def qbe_root_common_prefix(previous: Array<Integer>, current: Array<Integer>): Integer
+	mut index := 0
+	while index < previous.size() && index < current.size()
+		if previous[index] != current[index]
+			break
+		end
+		index += 1
+	end
+	return index
+end
+
+# MIR supplies the exact live-before set. For verified borrowed enum returns,
+# reserve the peak only when the first root is actually published; the scalar
+# variant can return without touching the root buffer.
+# Publish changed slots and set the count before each allocating operation,
+# dropping dead temporaries. Never retain a root-buffer address across a call;
+# reserve can move it.
+def emit_mir_roots(roots: Array<Integer>, first_changed: Integer, capacity: Integer, operands: Array<String>, mut context: QbeEmitContext, mut output: QbeOutput)
+	if roots.size() == 0
+		qbe_output_line(output, "\tstorel %temporary_roots, $trbn_gc_temp_count")
+		return
+	end
+	mut base := ""
+	if first_changed < roots.size()
+		if capacity > 0
+			ready := emit_temporary(context)
+			required := emit_temporary(context)
+			reserve := emit_label(context)
+			publish := emit_label(context)
+			qbe_output_line(output, "\t" + ready + " =w loadw %root_reserved")
+			qbe_output_line(output, "\tjnz " + ready + ", " + publish + ", " + reserve)
+			qbe_output_line(output, reserve)
+			qbe_output_line(output, "\t" + required + " =l add %temporary_roots, " + integer_string(capacity))
+			qbe_output_line(output, "\tcall $trbn_gc_temp_reserve(l " + required + ")")
+			qbe_output_line(output, "\tstorew 1, %root_reserved")
+			qbe_output_line(output, "\tjmp " + publish)
+			qbe_output_line(output, publish)
+		end
+		data := emit_temporary(context)
+		offset := emit_temporary(context)
+		base = emit_temporary(context)
+		qbe_output_line(output, "\t" + data + " =l loadl $trbn_gc_temp_data")
+		qbe_output_line(output, "\t" + offset + " =l mul %temporary_roots, 8")
+		qbe_output_line(output, "\t" + base + " =l add " + data + ", " + offset)
+	end
+	mut index := first_changed
+	while index < roots.size()
+		mut address := base
+		if index > 0
+			address = emit_temporary(context)
+			qbe_output_line(output, "\t" + address + " =l add " + base + ", " + integer_string(index * 8))
+		end
+		qbe_output_line(output, "\tstorel " + operands[roots[index]] + ", " + address)
+		index += 1
+	end
+	count := emit_temporary(context)
+	qbe_output_line(output, "\t" + count + " =l add %temporary_roots, " + integer_string(roots.size()))
+	qbe_output_line(output, "\tstorel " + count + ", $trbn_gc_temp_count")
+end

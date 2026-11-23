@@ -1,0 +1,20 @@
+{
+  "workflow": "https://github.com/type-rb/type-rb-native/actions/runs/34423530952",
+  "sourceRevision": "b230d34c1a415eab9f8eaa98c7ed418b57b5bafa",
+  "artifact": {
+    "id": 10132202349,
+    "name": "runtime-worker-smoke-34423530952-1",
+    "size_in_bytes": 14099,
+    "digest": "sha256:6a9bd1e89b193cc64e874aae1612c980db077cc54ec256df8acf7156c82d8381"
+  },
+  "evidence": {
+    "collector-statistics.txt": "collections=175\nautomatic_collections=174\nallocated_bytes=182400576\nreclaimed_bytes=182400576\nlive_bytes=0\npeak_heap_bytes=1047808\n",
+    "compiler-size-bytes.txt": "365856\n",
+    "environment.txt": "Darwin sat12-dp146-d4bec75f-d52a-4aab-8a11-71ff878b47c2-425F4334E8DF.local 23.6.0 Darwin Kernel Version 23.6.0: Tue Jul 21 21:56:54 PDT 2026; root:xnu-10063.141.1.713.39~1/RELEASE_ARM64_VMAPPLE arm64\nApple clang version 15.0.0 (clang-1500.3.9.4)\nTarget: arm64-apple-darwin23.6.0\nThread model: posix\nInstalledDir: /Applications/Xcode_15.4.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin\n/Users/runner/work/_temp/qbe-1.3/qbe [OPTIONS] {file.ssa, -}\n\t-h          prints this help\n\t-o file     output to file\n\t-t <target> generate for a target among:\n\t            amd64_sysv, amd64_apple, amd64_win, arm64, arm64_apple (default), rv64\n\t-d <flags>  dump debug information\n",
+    "gc-trace-analysis.txt": "observation_count=3\nautomatic_observation_count=2\nmanual_observation_count=1\nfinal_collection=175\nmaximum_sampled_live_bytes=3568\nmaximum_root_count=3\nroot_capacity_words=64\n",
+    "identities.txt": "mode=smoke\nprofile=darwin-arm64-v0\nphases=1\nbatches_per_phase=40000\noriginal_jobs_per_batch=128\nprocessed_attempts_per_batch=136\ncompiler_size=365816\nstripped_compiler_size=365856\ncompiler_sha256=dff9826d7edf82cb25785365a603caf71d4bda303591ce8a8c6f8c4f5116a4cf\nqbe_sha256=b75b0622f18e20f987f94dc84712cfbf56c206776df326edc599e0081489d549\nworkload_sha256=56738c1ab9d50f3c1658e490ae20d927fb6a2e2099491913c8072be33731a98e\nqbe_output_sha256=ccfc583706490e0791000c5d037145de53e825553019cab363c7faecbac9995a\nnative_program_sha256=e728f7ddcd723046ac3ce8b08c4699260c7c6082d4adf8d22804f861d8476616\nreference_trb_version=0.4.6-dev\nreference_program_sha256=efa04f4033e93abff0d33277d12eed07d99564461cf5cc8b709d8c95cfa7dae1\n",
+    "invocation.txt": "controller=/bin/sh tools/runtime-worker-soak/runtime-worker-soak.sh\nmode=smoke\ncompiler=/tmp/trbn-recovery.1EwzPn/native-chain-b4/compiler\nqbe=/Users/runner/work/_temp/qbe-1.3/qbe\ncc=/usr/bin/cc\nreference_trb=/Users/runner/work/_temp/trb\nprofile=darwin-arm64-v0\nworkspace=/Users/runner/work/_temp/runtime-worker-smoke-workspace\nevidence=/Users/runner/work/_temp/runtime-worker-smoke-evidence\nruntime_stats=1\nruntime_trace=1\n",
+    "native-runtime.txt": "elapsed_seconds=0.10\n",
+    "reference-runtime.txt": "elapsed_seconds=0.14\n"
+  }
+}

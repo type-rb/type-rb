@@ -1,0 +1,321 @@
+{
+  "format": "type-rb-bootstrap-snapshot",
+  "version": 4,
+  "module": "managed",
+  "entryFunction": "managed#main",
+  "sources": [
+    { "id": "main", "path": "src/main.trb" }
+  ],
+  "types": [
+    { "kind": "string", "id": "String" },
+    { "kind": "array", "id": "Array<String>", "element": "String" },
+    {
+      "kind": "function",
+      "id": "(String) -> String",
+      "parameters": ["String"],
+      "result": "String"
+    }
+  ],
+  "functions": [
+    {
+      "id": "managed#appendSuffix",
+      "name": "appendSuffix",
+      "captures": [
+        {
+          "id": "suffix",
+          "type": "String",
+          "origin": {
+            "source": "main",
+            "startLine": 1,
+            "startColumn": 1,
+            "endLine": 1,
+            "endColumn": 8
+          }
+        }
+      ],
+      "parameters": [
+        {
+          "id": "value",
+          "type": "String",
+          "origin": {
+            "source": "main",
+            "startLine": 1,
+            "startColumn": 1,
+            "endLine": 1,
+            "endColumn": 8
+          }
+        }
+      ],
+      "result": "String",
+      "entry": "append-entry",
+      "origin": {
+        "source": "main",
+        "startLine": 1,
+        "startColumn": 1,
+        "endLine": 3,
+        "endColumn": 4
+      },
+      "blocks": [
+        {
+          "id": "append-entry",
+          "parameters": [],
+          "origin": {
+            "source": "main",
+            "startLine": 2,
+            "startColumn": 1,
+            "endLine": 2,
+            "endColumn": 16
+          },
+          "instructions": [
+            {
+              "op": "string_concat",
+              "result": "joined",
+              "left": "value",
+              "right": "suffix",
+              "origin": {
+                "source": "main",
+                "startLine": 2,
+                "startColumn": 1,
+                "endLine": 2,
+                "endColumn": 16
+              }
+            }
+          ],
+          "terminator": {
+            "op": "return",
+            "value": "joined",
+            "origin": {
+              "source": "main",
+              "startLine": 2,
+              "startColumn": 1,
+              "endLine": 2,
+              "endColumn": 16
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "managed#main",
+      "name": "main",
+      "captures": [],
+      "parameters": [],
+      "result": "Void",
+      "entry": "entry",
+      "origin": {
+        "source": "main",
+        "startLine": 5,
+        "startColumn": 1,
+        "endLine": 18,
+        "endColumn": 4
+      },
+      "blocks": [
+        {
+          "id": "entry",
+          "parameters": [],
+          "origin": {
+            "source": "main",
+            "startLine": 6,
+            "startColumn": 1,
+            "endLine": 17,
+            "endColumn": 12
+          },
+          "instructions": [
+            {
+              "op": "string_literal",
+              "result": "prefix",
+              "value": "hé",
+              "origin": {
+                "source": "main",
+                "startLine": 6,
+                "startColumn": 1,
+                "endLine": 6,
+                "endColumn": 8
+              }
+            },
+            {
+              "op": "string_literal",
+              "result": "suffix",
+              "value": "llo",
+              "origin": {
+                "source": "main",
+                "startLine": 7,
+                "startColumn": 1,
+                "endLine": 7,
+                "endColumn": 8
+              }
+            },
+            {
+              "op": "closure_construct",
+              "result": "append",
+              "type": "(String) -> String",
+              "function": "managed#appendSuffix",
+              "captures": ["suffix"],
+              "origin": {
+                "source": "main",
+                "startLine": 8,
+                "startColumn": 1,
+                "endLine": 8,
+                "endColumn": 12
+              }
+            },
+            {
+              "op": "closure_call",
+              "result": "greeting",
+              "type": "(String) -> String",
+              "closure": "append",
+              "arguments": ["prefix"],
+              "origin": {
+                "source": "main",
+                "startLine": 9,
+                "startColumn": 1,
+                "endLine": 9,
+                "endColumn": 12
+              }
+            },
+            {
+              "op": "array_construct",
+              "result": "parts",
+              "type": "Array<String>",
+              "arguments": ["greeting"],
+              "origin": {
+                "source": "main",
+                "startLine": 10,
+                "startColumn": 1,
+                "endLine": 10,
+                "endColumn": 12
+              }
+            },
+            {
+              "op": "array_push",
+              "type": "Array<String>",
+              "array": "parts",
+              "value": "suffix",
+              "origin": {
+                "source": "main",
+                "startLine": 11,
+                "startColumn": 1,
+                "endLine": 11,
+                "endColumn": 12
+              }
+            },
+            {
+              "op": "integer_literal",
+              "result": "lastIndex",
+              "value": -1,
+              "origin": {
+                "source": "main",
+                "startLine": 12,
+                "startColumn": 1,
+                "endLine": 12,
+                "endColumn": 12
+              }
+            },
+            {
+              "op": "array_get",
+              "result": "last",
+              "type": "Array<String>",
+              "array": "parts",
+              "index": "lastIndex",
+              "origin": {
+                "source": "main",
+                "startLine": 13,
+                "startColumn": 1,
+                "endLine": 13,
+                "endColumn": 12
+              }
+            },
+            {
+              "op": "array_set",
+              "type": "Array<String>",
+              "array": "parts",
+              "index": "lastIndex",
+              "value": "prefix",
+              "origin": {
+                "source": "main",
+                "startLine": 14,
+                "startColumn": 1,
+                "endLine": 14,
+                "endColumn": 12
+              }
+            },
+            {
+              "op": "array_size",
+              "result": "partCount",
+              "type": "Array<String>",
+              "array": "parts",
+              "origin": {
+                "source": "main",
+                "startLine": 15,
+                "startColumn": 1,
+                "endLine": 15,
+                "endColumn": 12
+              }
+            },
+            {
+              "op": "string_size",
+              "result": "characterCount",
+              "value": "greeting",
+              "origin": {
+                "source": "main",
+                "startLine": 16,
+                "startColumn": 1,
+                "endLine": 16,
+                "endColumn": 12
+              }
+            },
+            {
+              "op": "string_index",
+              "result": "lastCharacter",
+              "value": "greeting",
+              "index": "lastIndex",
+              "origin": {
+                "source": "main",
+                "startLine": 16,
+                "startColumn": 1,
+                "endLine": 16,
+                "endColumn": 12
+              }
+            },
+            {
+              "op": "string_equal",
+              "result": "same",
+              "left": "last",
+              "right": "suffix",
+              "origin": {
+                "source": "main",
+                "startLine": 17,
+                "startColumn": 1,
+                "endLine": 17,
+                "endColumn": 12
+              }
+            },
+            {
+              "op": "write_string",
+              "value": "lastCharacter",
+              "newline": true,
+              "origin": {
+                "source": "main",
+                "startLine": 17,
+                "startColumn": 1,
+                "endLine": 17,
+                "endColumn": 12
+              }
+            }
+          ],
+          "terminator": {
+            "op": "return",
+            "value": null,
+            "origin": {
+              "source": "main",
+              "startLine": 18,
+              "startColumn": 1,
+              "endLine": 18,
+              "endColumn": 4
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,131 @@
+import { integer_string } from support/literals
+import { MirInstruction, MirModule, MirSignature } from mir/model/module
+import { mir_call_symbol } from mir/model/intrinsics
+import { mir_storage_name } from mir/model/types
+import { QbeEmitContext, QbeValue, emit_address, emit_temporary, emitted_value, qbe_type } from backend/qbe/context
+import { QbeOutput, qbe_output_line } from backend/qbe/output
+
+def object_dispatch_target(witness: Integer, slot: Integer): String
+	return "trbn_interface_target_" + integer_string(witness) + "_" + integer_string(slot)
+end
+
+# MIR already verifies witness arity, receiver ownership and mapped types.
+# The ABI adapter only checks whether that validated mapping needs a shuffle.
+def object_dispatch_identity(arguments: Array<Integer>): Boolean
+	mut index := 0
+	while index < arguments.size()
+		if arguments[index] != index
+			return false
+		end
+		index += 1
+	end
+	return true
+end
+
+def object_dispatch_parameters(native_module: MirModule, signature: MirSignature): String
+	mut text := ""
+	mut index := 0
+	signature.parameter_types.each do |type_name|
+		if index > 0
+			text += ", "
+		end
+		text += qbe_type(mir_storage_name(native_module, type_name)) + " %p" + integer_string(index)
+		index += 1
+	end
+	return text
+end
+
+def emit_object_dispatch_return(native_module: MirModule, signature: MirSignature, call: String, mut output: QbeOutput)
+	if signature.result_type == "Void"
+		qbe_output_line(output, "\t" + call + "\n\tret\n}")
+	else
+		qbe_output_line(output, "\t%result =" + qbe_type(mir_storage_name(native_module, signature.result_type)) + " " + call + "\n\tret %result\n}")
+	end
+end
+
+# Adapters only translate the verified witness ABI. They do not perform source
+# lookup, resolve inheritance, compare signatures or decide argument binding.
+def emit_object_dispatch(native_module: MirModule, mut output: QbeOutput)
+	if native_module.object_witnesses.size() > 0
+		qbe_output_line(output, "data $trbn_desc_interface = align 8 { l 1, l 1, l 16, l 8 }")
+	end
+	mut witness_index := 0
+	native_module.object_witnesses.each do |witness|
+		mut table := ""
+		mut slot := 0
+		native_module.object_methods.each do |method|
+			if method.owner == witness.contract
+				if slot > 0
+					table += ", "
+				end
+				mut name := object_dispatch_target(witness_index, slot)
+				signature := native_module.signatures[method.function]
+				implementation := native_module.object_methods[witness.methods[slot]]
+				callee := native_module.signatures[implementation.function]
+				if object_dispatch_identity(witness.arguments[slot])
+					name = mir_call_symbol(callee)
+				else
+					mut prefix := ""
+					if signature.result_type != "Void"
+						prefix = qbe_type(mir_storage_name(native_module, signature.result_type)) + " "
+					end
+					qbe_output_line(output, "function " + prefix + "$" + name + "(" + object_dispatch_parameters(native_module, signature) + ") {\n@start")
+					mut arguments := ""
+					mut parameter := 0
+					witness.arguments[slot].each do |source|
+						if parameter > 0
+							arguments += ", "
+						end
+						arguments += qbe_type(mir_storage_name(native_module, callee.parameter_types[parameter])) + " %p" + integer_string(source)
+						parameter += 1
+					end
+					emit_object_dispatch_return(native_module, signature, "call $" + mir_call_symbol(callee) + "(" + arguments + ")", output)
+				end
+				table += "l $" + name
+				slot += 1
+			end
+		end
+		if table == ""
+			table = "l 0"
+		end
+		qbe_output_line(output, "data $trbn_interface_table_" + integer_string(witness_index) + " = align 8 { " + table + " }")
+		witness_index += 1
+	end
+	native_module.object_methods.each do |method|
+		if native_module.objects[method.owner].interface_type
+			signature := native_module.signatures[method.function]
+			mut slot := 0
+			native_module.object_methods.each do |previous|
+				if previous.function == method.function
+					break
+				end
+				if previous.owner == method.owner
+					slot += 1
+				end
+			end
+			mut prefix := ""
+			if signature.result_type != "Void"
+				prefix = qbe_type(mir_storage_name(native_module, signature.result_type)) + " "
+			end
+			qbe_output_line(output, "function " + prefix + "$" + mir_call_symbol(signature) + "(" + object_dispatch_parameters(native_module, signature) + ") {\n@start")
+			qbe_output_line(output, "\t%receiver_slot =l add %p0, 8\n\t%receiver =l loadl %receiver_slot\n\t%table_slot =l add %p0, 16\n\t%table =l loadl %table_slot\n\t%code_slot =l add %table, " + integer_string(slot * 8) + "\n\t%code =l loadl %code_slot")
+			mut arguments := "l %receiver"
+			mut parameter := 1
+			while parameter < signature.parameter_types.size()
+				arguments += ", " + qbe_type(mir_storage_name(native_module, signature.parameter_types[parameter])) + " %p" + integer_string(parameter)
+				parameter += 1
+			end
+			emit_object_dispatch_return(native_module, signature, "call %code(" + arguments + ")", output)
+		end
+	end
+end
+
+def emit_object_conversion(native_module: MirModule, instruction: MirInstruction, operands: Array<String>, mut context: QbeEmitContext, mut output: QbeOutput): QbeValue
+	result := emit_temporary(context)
+	qbe_output_line(output, "\t" + result + " =l call $trbn_gc_alloc(l $trbn_desc_interface, l 16, l 0)")
+	object_slot := emit_address(context, output, result, 8)
+	table_slot := emit_address(context, output, result, 16)
+	qbe_output_line(output, "\tstorel " + operands[instruction.first] + ", " + object_slot)
+	qbe_output_line(output, "\tstorel $trbn_interface_table_" + integer_string(instruction.payload) + ", " + table_slot)
+	return emitted_value(result, "Address")
+end

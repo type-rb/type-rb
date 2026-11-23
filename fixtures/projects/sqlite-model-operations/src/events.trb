@@ -1,0 +1,27 @@
+import { Event } from models
+import { DbResult } from trb/orm
+import { Date, DateTime, Instant, TimeOfDay } from trb/std/time
+
+def exercise_times(): DbResult<Integer>
+	day := Date.parse("2025-03-08")
+	clock := TimeOfDay.parse("12:34:56.123456")
+	local := DateTime.parse("2025-03-08T12:34:56.123456")
+	exact := Instant.parse("2025-03-08T12:34:56.123456789+09:00")
+	row := try Event.create(on_date: day, at_time: clock, local_at: local, exact_at: exact)
+	puts(row.optional_at == nil)
+	saved := try row.update(optional_at: DateTime.parse("2025-03-10T04:05:06.000007"))
+	fetched := try Event.find(saved.id)
+	if fetched != nil
+		puts(fetched.on_date.to_s())
+		puts(fetched.at_time.to_s())
+		puts(fetched.local_at.to_s())
+		puts(fetched.exact_at.to_s())
+		optional := fetched.optional_at
+		if optional != nil
+			puts(optional.to_s())
+		end
+		cleared := try fetched.update(optional_at: nil)
+		puts(cleared.optional_at == nil)
+	end
+	return DbResult<Integer>::Ok(saved.id)
+end

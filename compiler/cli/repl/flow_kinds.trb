@@ -1,0 +1,34 @@
+# Interpreter control state is separate from source loop-transfer tags.
+# The return tag precedes break/continue, so loop tags use the offset below.
+
+def repl_flow_normal(): Integer
+	return 0
+end
+
+def repl_flow_return(): Integer
+	return 1
+end
+
+def repl_flow_break(): Integer
+	return 2
+end
+
+def repl_flow_continue(): Integer
+	return 3
+end
+
+def repl_flow_kind_slot(): Integer
+	return 0
+end
+
+def repl_flow_value_slot(): Integer
+	return 1
+end
+
+def repl_flow_loop_owner_slot(): Integer
+	return 2
+end
+
+def repl_loop_flow_offset(): Integer
+	return 1
+end

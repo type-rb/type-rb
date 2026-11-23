@@ -1,0 +1,1476 @@
+import { emit_sqlite_transaction_runtime } from backend/qbe/runtime/sqlite_transactions
+import { emit_sqlite_error_runtime, emit_sqlite_write_runtime, sqlite_runtime_needed } from backend/qbe/runtime/sqlite_write
+import { emit_sqlite_query_runtime } from backend/qbe/runtime/sqlite_query
+import { orm_model_indices, prepare_orm_models } from frontend/providers/orm_models
+import { prepare_native_jobs } from frontend/providers/jobs_wrappers
+import { emit_process_host_runtime } from backend/qbe/runtime/process
+import { mir_deadlines_enabled } from mir/model/deadlines
+import { emit_deadline_clock_runtime, emit_deadline_runtime } from backend/qbe/runtime/deadlines
+import { append_native_test_runner } from project/test_runner
+import { emit_test_paths_runtime } from backend/qbe/runtime/test_paths
+import { emit_file_scope_runtime } from backend/qbe/emit/file_scopes
+import { emit_oidc_fetch, emit_oidc_rsa, oidc_runtime_needed } from backend/qbe/runtime/oidc
+import { crypto_runtime_needed, emit_crypto_runtime } from backend/qbe/runtime/crypto
+import { compression_runtime_needed, emit_compression_runtime } from backend/qbe/runtime/compression
+import { emit_string_builder_runtime } from backend/qbe/runtime/string_builder
+import { LockedPackage, PackageLock, package_lock_parse } from project/package_lock
+import { PackageContent, package_relative_file_bytes } from project/packages
+import { compiler_string_bytes } from support/compiler_bytes
+import { emit_package_files_runtime } from backend/qbe/runtime/package_files
+import { discover_web_routes } from project/web_routes
+import { emit_test_runtime } from backend/qbe/runtime/test_recovery
+import { emit_network_runtime, network_runtime_needed } from backend/qbe/runtime/network
+import { emit_entropy_runtime } from backend/qbe/runtime/entropy
+import { emit_time_host_runtime } from backend/qbe/runtime/time_host
+import { emit_integer_to_string_runtime } from backend/qbe/runtime/integer_strings
+import { import_kind_module } from state/import_kinds
+import { standard_source_unowned } from state/standard_source_kinds
+import { qbe_runtime_boolean_output_slot, qbe_runtime_float_array_slot, qbe_runtime_float_string_slot, qbe_runtime_hash_mode_slot, qbe_runtime_integer_power_slot, qbe_runtime_process_slot, qbe_runtime_static_strings_slot } from backend/qbe/runtime_slots
+import { mir_signature_compiler_runtime, mir_signature_standard } from mir/model/call_kinds
+import { validate_compilation_units } from frontend/resolution/module_components
+import { qbe_runtime_needs } from backend/qbe/runtime/requirements
+import { mir_program_error } from mir/verify/program
+import { package_checksum, package_checksum_bytes } from project/package_checksum
+import { emit_bytes_runtime } from backend/qbe/emit/bytes
+import { package_manifest_parse, package_requirements_json } from project/package_manifest
+import { package_name_less, package_sorted_indices } from project/package_json
+import { ProjectPackages, ResolvedLocalPackage, package_canonical_import, package_path_safe, project_packages_fail, project_packages_new } from project/packages
+import { emit_object_dispatch } from backend/qbe/emit/object_dispatch
+import { object_abstract_function } from frontend/types/object_types
+import { emit_number_parsing_runtime } from backend/qbe/runtime/number_parsing
+import { emit_float_string_runtime } from backend/qbe/runtime/scalar_strings
+import { emit_mir_globals } from backend/qbe/emit/globals
+import { mir_declare_globals } from mir/lowering/globals
+import { infer_global_types } from frontend/checking/program/globals
+import { emit_closure_adapters } from backend/qbe/emit/callables
+import { load_standard_source, standard_source_kind } from project/standard_library
+import { check_generic_templates } from frontend/checking/program/generics
+import { emit_function } from backend/qbe/emit/functions
+import { mir_function_value_groups } from mir/analysis/flow
+import { analyze_callable_bodies, check_function_body, checked_function_locals, finalize_checked_module } from frontend/checking/program/functions
+import { check_declaration_attributes } from frontend/checking/program/attributes
+import { mir_declare_types } from mir/model/types
+import { compiler_source_slice, lex, lex_module } from frontend/syntax/lexer
+import { emit_hash_lookup_runtime, emit_hash_runtime } from backend/qbe/runtime/hash_runtime
+import { integer_string } from support/literals
+import { mir_declare_signatures } from mir/lowering/calls
+import { parse_module, parse_module_with_tests } from frontend/syntax/parser
+import { path_basename, path_directory, path_join, path_normalize, string_ends_with, string_starts_with, string_without_suffix } from support/path
+import { ProjectConfig, parse_project_config, parse_project_database, project_config_absolute, project_config_below_root, project_config_lower_ascii, project_config_trimmed } from project/config
+import { emit_record_descriptors, emit_static_strings } from backend/qbe/emit/constants
+import { QbeOutput, qbe_output_chunk, qbe_output_line, qbe_output_new } from backend/qbe/output
+import { emit_boolean_puts_runtime, emit_float_array_runtime, emit_float_to_integer_runtime, emit_process_runtime, emit_qbe_runtime_selected } from backend/qbe/runtime/system
+import { emit_integer_power_runtime } from backend/qbe/runtime/power
+import { import_path_value, normalize_import_path, standard_package_target } from frontend/resolution/import_resolution
+import { resolve } from frontend/checking/program/resolution
+import { CompilerState, add_module, compiler_new, compiler_new_with_mode, diagnostic, find_module, find_name_index, has_diagnostic } from state/state
+import { load_integer, load_string, sparse_integer_at, store_integer } from support/storage
+
+record CompilerProjectSources
+	paths: Array<String>
+	sources: Array<String>
+	error: String
+end
+
+def compiler_set_oidc_link(_needed: Boolean)
+end
+
+def compiler_set_sqlite_link(_needed: Boolean)
+end
+
+def compiler_set_crypto_link(_needed: Boolean)
+end
+
+def compiler_set_compression_link(_needed: Boolean)
+end
+
+def compiler_set_network_link(_needed: Boolean)
+	return
+end
+
+def compiler_reset_temporary_storage()
+	return
+end
+
+# These declarations are typed compiler-runtime intrinsics. Their source bodies
+# keep recovery compilation valid; the self-hosted emitter replaces calls from
+# the compiler executable with the matching QBE runtime operations.
+def compiler_file_exists(_path: String): Boolean
+	return false
+end
+
+def compiler_read_source(_path: String): String
+	return ""
+end
+
+def compiler_collect_project_sources(_source_root: String, _out_root: String): CompilerProjectSources
+	return CompilerProjectSources.new(paths: [], sources: [], error: "")
+end
+
+# Collect names before selection. Unselected test bodies are never opened.
+def compiler_collect_test_paths(_source_root: String, _out_root: String): CompilerProjectSources
+	return CompilerProjectSources.new(paths: [], sources: [], error: "")
+end
+
+def compiler_collect_package_files(_root: String): CompilerProjectSources
+	return CompilerProjectSources.new(paths: [], sources: [], error: "")
+end
+
+def compiler_eputs(_value: String)
+	return
+end
+
+def emit_process_arguments(mut output: QbeOutput)
+	qbe_output_line(
+		output,
+		"\t%process_argc =l extsw %argc\n\tstorel %process_argc, $trbn_process_argc\n\tstorel %argv, $trbn_process_argv_pointer",
+	)
+	return
+end
+
+def emit_target_entry(mut output: QbeOutput)
+	qbe_output_line(output, "\nexport function w $main(w %argc, l %argv) {")
+	qbe_output_line(output, "@start")
+	qbe_output_line(output, "\tcall $trbn_gc_trace_initialize()")
+	if output.runtime_flags[qbe_runtime_static_strings_slot()] == 1
+		qbe_output_line(output, "\tcall $trbn_static_strings_initialize()")
+	end
+	if output.runtime_flags[qbe_runtime_process_slot()] == 1
+		emit_process_arguments(output)
+	end
+	qbe_output_line(output, "\tcall $trbn_initialize_globals()")
+	qbe_output_line(output, "\tstorel $trbn_qbe_darwin_arm64, $trbn_selected_qbe_target")
+	qbe_output_line(output, "\tstorel $trbn_dead_strip_darwin, $trbn_selected_dead_strip")
+	qbe_output_line(output, "\tstorel 0, $trbn_project_selected_linker")
+	qbe_output_line(output, "\t%a11 =w ceqw %argc, 11")
+	qbe_output_line(output, "\tjnz %a11, @target_shape, @dispatch")
+	qbe_output_line(output, "@target_shape")
+	qbe_output_line(output, "\t%target_flag_pointer =l add %argv, 72")
+	qbe_output_line(output, "\t%target_flag =l loadl %target_flag_pointer")
+	qbe_output_line(output, "\t%target_flag_comparison =w call $strcmp(l %target_flag, l $trbn_target_option)")
+	qbe_output_line(output, "\t%target_flag_ok =w ceqw %target_flag_comparison, 0")
+	qbe_output_line(output, "\tjnz %target_flag_ok, @target_profile, @dispatch")
+	qbe_output_line(output, "@target_profile")
+	qbe_output_line(output, "\t%profile_pointer =l add %argv, 80")
+	qbe_output_line(output, "\t%profile =l loadl %profile_pointer")
+	qbe_output_line(output, "\t%darwin_comparison =w call $strcmp(l %profile, l $trbn_profile_darwin_arm64)")
+	qbe_output_line(output, "\t%darwin =w ceqw %darwin_comparison, 0")
+	qbe_output_line(output, "\tjnz %darwin, @target_darwin, @target_linux_check")
+	qbe_output_line(output, "@target_darwin")
+	qbe_output_line(output, "\tjmp @invoke_target")
+	qbe_output_line(output, "@target_linux_check")
+	qbe_output_line(output, "\t%linux_comparison =w call $strcmp(l %profile, l $trbn_profile_linux_arm64)")
+	qbe_output_line(output, "\t%linux =w ceqw %linux_comparison, 0")
+	qbe_output_line(output, "\tjnz %linux, @target_linux_arm64, @target_linux_amd64_check")
+	qbe_output_line(output, "@target_linux_arm64")
+	qbe_output_line(output, "\tstorel $trbn_qbe_linux_arm64, $trbn_selected_qbe_target")
+	qbe_output_line(output, "\tjmp @target_linux_common")
+	qbe_output_line(output, "@target_linux_amd64_check")
+	qbe_output_line(output, "\t%linux_amd64_comparison =w call $strcmp(l %profile, l $trbn_profile_linux_amd64)")
+	qbe_output_line(output, "\t%linux_amd64 =w ceqw %linux_amd64_comparison, 0")
+	qbe_output_line(output, "\tjnz %linux_amd64, @target_linux_amd64, @target_error")
+	qbe_output_line(output, "@target_linux_amd64")
+	qbe_output_line(output, "\tstorel $trbn_qbe_linux_amd64, $trbn_selected_qbe_target")
+	qbe_output_line(output, "\tjmp @target_linux_common")
+	qbe_output_line(output, "@target_linux_common")
+	qbe_output_line(output, "\tstorel $trbn_dead_strip_linux, $trbn_selected_dead_strip")
+	qbe_output_line(output, "\tstorel $trbn_project_linker_lld, $trbn_project_selected_linker")
+	qbe_output_line(output, "\tjmp @invoke_target")
+	qbe_output_line(output, "@target_error")
+	qbe_output_line(output, "\tcall $write(w 2, l $trbn_target_error, l 37)")
+	qbe_output_line(output, "\tcall $trbn_gc_finish()")
+	qbe_output_line(output, "\tret 64")
+	qbe_output_line(output, "@invoke_target")
+	qbe_output_line(output, "\t%target_status =w call $trbn_compiler_dispatch(w 9, l %argv)")
+	qbe_output_line(output, "\tcall $trbn_gc_finish()")
+	qbe_output_line(output, "\tret %target_status")
+	qbe_output_line(output, "@dispatch")
+	qbe_output_line(output, "\t%dispatch_status =w call $trbn_compiler_dispatch(w %argc, l %argv)")
+	qbe_output_line(output, "\tcall $trbn_gc_finish()")
+	qbe_output_line(output, "\tret %dispatch_status")
+	qbe_output_line(output, "}")
+	return
+end
+
+def emit_entry(mut state: CompilerState, mut output: QbeOutput)
+	program := state.scalar_mir.program[0]
+	compiler_entry := program.compiler_function
+	if compiler_entry >= 0
+		compiler_file_entry := program.compiler_file_function
+		qbe_output_line(output, "function w $trbn_compiler_dispatch(w %argc, l %argv) {")
+		qbe_output_line(output, "@start")
+		qbe_output_line(
+			output,
+			"\t%a9 =w ceqw %argc, 9\n\tjnz %a9, @bshape, @other\n@bshape\n\t%bcmdp =l add %argv, 8\n\t%bcmd =l loadl %bcmdp\n\t%boc =w call $strcmp(l %bcmd, l $trbn_build)\n\t%bok =w ceqw %boc, 0\n\t%bofp =l add %argv, 24\n\t%bof =l loadl %bofp\n\t%bofc =w call $strcmp(l %bof, l $trbn_output_flag)\n\t%bofo =w ceqw %bofc, 0\n\t%bqfp =l add %argv, 40\n\t%bqf =l loadl %bqfp\n\t%bqfc =w call $strcmp(l %bqf, l $trbn_qbe_flag)\n\t%bqfo =w ceqw %bqfc, 0\n\t%bcfp =l add %argv, 56\n\t%bcf =l loadl %bcfp\n\t%bcfc =w call $strcmp(l %bcf, l $trbn_cc_flag)\n\t%bcfo =w ceqw %bcfc, 0\n\t%bv0 =w and %bok, %bofo\n\t%bv1 =w and %bqfo, %bcfo\n\t%bv =w and %bv0, %bv1\n\tjnz %bv, @build, @usage\n@build\n\t%bspp =l add %argv, 16\n\t%bsp =l loadl %bspp\n\t%bsrc =l call $trbn_read_file(l %bsp)\n\t%bsm =w ceql %bsrc, 0\n\tjnz %bsm, @bread_error, @bpaths\n@bread_error\n\tcall $write(w 2, l $trbn_file_error, l 35)\n\t%bspl =l call $strlen(l %bsp)\n\tcall $write(w 2, l %bsp, l %bspl)\n\tcall $write(w 2, l $trbn_newline, l 1)\n\tret 66\n@bpaths\n\t%bop =l add %argv, 32\n\t%bo =l loadl %bop\n\t%bqp =l add %argv, 48\n\t%bqbe =l loadl %bqp\n\t%bcp =l add %argv, 64\n\t%bcc =l loadl %bcp\n\t%bssa =l call $trbn_c_concat(l %bo, l $trbn_ssa_suffix)\n\t%basm =l call $trbn_c_concat(l %bo, l $trbn_asm_suffix)\n\t%bf =l call $fopen(l %bssa, l $trbn_wb)\n\t%bfm =w ceql %bf, 0\n\tjnz %bfm, @bfile_error, @bredirect\n@bfile_error\n\tcall $trbn_cleanup(l %bssa, l %basm)\n\tcall $write(w 2, l $trbn_intermediate_error, l 42)\n\tret 73\n@bredirect\n\t%bfd =w call $fileno(l %bf)\n\t%bsaved =w call $dup(w 1)\n\t%bfdb =w csltw %bfd, 0\n\t%bsavedb =w csltw %bsaved, 0\n\t%brb =w or %bfdb, %bsavedb\n\tjnz %brb, @bredirect_error, @bset_stdout\n@bset_stdout\n\t%bset =w call $dup2(w %bfd, w 1)\n\t%bsetb =w csltw %bset, 0\n\tjnz %bsetb, @bredirect_error, @bcompile\n@bredirect_error\n\t%bci =w call $close(w %bsaved)\n\t%bfci =w call $fclose(l %bf)\n\tcall $trbn_cleanup(l %bssa, l %basm)\n\tcall $write(w 2, l $trbn_intermediate_error, l 42)\n\tret 73\n@bcompile\n\t%bm =l call $trbn_string_from_c(l $trbn_emit)",
+		)
+		qbe_output_line(
+			output,
+			"\t%bpath =l call $trbn_string_from_c(l %bsp)",
+		)
+		qbe_output_line(
+			output,
+			"\t%bst =l call $trbnf" + integer_string(compiler_file_entry) +
+			"(l %bsrc, l %bpath, l %bm, l 1)",
+		)
+		qbe_output_line(
+			output,
+			"\t%brestore =w call $dup2(w %bsaved, w 1)\n\t%bclosed =w call $close(w %bsaved)\n\t%bfclosed =w call $fclose(l %bf)\n\t%brb0 =w csltw %brestore, 0\n\t%brb1 =w csltw %bclosed, 0\n\t%brb2 =w cnew %bfclosed, 0\n\t%brb3 =w or %brb0, %brb1\n\t%brbad =w or %brb3, %brb2\n\tjnz %brbad, @bpost_error, @bcompiled\n@bpost_error\n\tcall $trbn_cleanup(l %bssa, l %basm)\n\tcall $write(w 2, l $trbn_intermediate_error, l 42)\n\tret 73\n@bcompiled\n\t%bcfail =w cnel %bst, 0\n\tjnz %bcfail, @bcompiler_failed, @bqbe\n@bcompiler_failed\n\tcall $trbn_cleanup(l %bssa, l %basm)\n\tret 1\n@bqbe\n\t%bqs =w call $trbn_run_qbe(l %bqbe, l %bssa, l %basm)\n\t%bqfail =w cnew %bqs, 0\n\tjnz %bqfail, @bqbe_failed, @btemp\n@bqbe_failed\n\tcall $trbn_cleanup(l %bssa, l %basm)\n\tcall $write(w 2, l $trbn_qbe_error, l 21)\n\tret 70\n@btemp\n\t%btmpl =l call $trbn_c_concat(l %bo, l $trbn_temp_suffix)\n\t%bdir =l call $mkdtemp(l %btmpl)\n\t%bdfail =w ceql %bdir, 0\n\tjnz %bdfail, @btemp_failed, @btemp_path\n@btemp_failed\n\tcall $trbn_cleanup(l %bssa, l %basm)\n\tcall $write(w 2, l $trbn_intermediate_error, l 42)\n\tret 73\n@btemp_path\n\t%bbase =l call $trbn_c_basename(l %bo)\n\t%bdp =l call $trbn_c_concat(l %bdir, l $trbn_slash)\n\t%bexe =l call $trbn_c_concat(l %bdp, l %bbase)\n\t%bcs =w call $trbn_project_run_cc(l %bcc, l %basm, l %bexe, l %bqbe)\n\t%bccfail =w cnew %bcs, 0\n\tjnz %bccfail, @bcc_failed, @bpublish\n@bcc_failed\n\tcall $trbn_cleanup(l %bssa, l %basm)\n\tcall $trbn_cleanup_output(l %bexe, l %bdir)\n\tcall $write(w 2, l $trbn_cc_error, l 20)\n\tret 70\n@bpublish\n\t%bpr =w call $rename(l %bexe, l %bo)\n\t%bpf =w cnew %bpr, 0\n\tjnz %bpf, @bpublish_failed, @bsuccess\n@bpublish_failed\n\tcall $trbn_cleanup(l %bssa, l %basm)\n\tcall $trbn_cleanup_output(l %bexe, l %bdir)\n\tcall $write(w 2, l $trbn_publish_error, l 32)\n\tret 73\n@bsuccess\n\tcall $trbn_cleanup(l %bssa, l %basm)\n\tcall $trbn_cleanup_output(l %bexe, l %bdir)\n\tret 0\n@other\n\t%a3 =w ceqw %argc, 3\n\tjnz %a3, @fargs, @hargc\n@hargc\n\t%a4 =w ceqw %argc, 4\n\tjnz %a4, @hargs, @usage\n@hargs\n\t%hfp =l add %argv, 8\n\t%hf =l loadl %hfp\n\t%hfc =w call $strcmp(l %hf, l $trbn_source_arg)\n\t%valid_hf =w ceqw %hfc, 0\n\tjnz %valid_hf, @hidden, @hidden_file_flag\n@hidden_file_flag\n\t%hffc =w call $strcmp(l %hf, l $trbn_source_file_arg)\n\t%valid_hff =w ceqw %hffc, 0\n\tjnz %valid_hff, @hidden, @usage\n@usage\n\tcall $write(w 2, l $trbn_usage_error, l 103)\n\tret 64\n@hidden\n\t%hmp =l add %argv, 16\n\t%hmc =l loadl %hmp\n\t%hm =l call $trbn_string_from_c(l %hmc)\n\t%hsp =l add %argv, 24\n\t%hsc =l loadl %hsp\n\tjnz %valid_hf, @hidden_content, @hidden_file\n@hidden_content\n\t%htext =l call $trbn_string_from_c(l %hsc)\n\tjmp @hidden_source\n@hidden_file\n\t%hfile =l call $trbn_read_file(l %hsc)\n\t%hmissing =w ceql %hfile, 0\n\tjnz %hmissing, @hidden_read_error, @hidden_source\n@hidden_read_error\n\tcall $write(w 2, l $trbn_file_error, l 35)\n\t%hpl =l call $strlen(l %hsc)\n\tcall $write(w 2, l %hsc, l %hpl)\n\tcall $write(w 2, l $trbn_newline, l 1)\n\tret 66\n@hidden_source\n\t%hs =l phi @hidden_content %htext, @hidden_file %hfile",
+		)
+		qbe_output_line(
+			output,
+			"\t%hst =l call $trbnf" + integer_string(compiler_entry) +
+			"(l %hs, l %hm, l 0)",
+		)
+		qbe_output_line(
+			output,
+			"\tret 0\n@fargs\n\t%fmp =l add %argv, 8\n\t%fmc =l loadl %fmp\n\t%cc =w call $strcmp(l %fmc, l $trbn_check)\n\t%cm =w ceqw %cc, 0\n\t%ec =w call $strcmp(l %fmc, l $trbn_emit)\n\t%em =w ceqw %ec, 0\n\t%valid_fm =w or %cm, %em\n\tjnz %valid_fm, @file, @usage\n@file\n\t%pp =l add %argv, 16\n\t%path =l loadl %pp\n\t%src =l call $trbn_read_file(l %path)\n\t%rf =w ceql %src, 0\n\tjnz %rf, @read_error, @compile\n@read_error\n\tcall $write(w 2, l $trbn_file_error, l 35)\n\t%pl =l call $strlen(l %path)\n\tcall $write(w 2, l %path, l %pl)\n\tcall $write(w 2, l $trbn_newline, l 1)\n\tret 66\n@compile\n\t%fm =l call $trbn_string_from_c(l %fmc)",
+		)
+		qbe_output_line(
+			output,
+			"\t%fpath =l call $trbn_string_from_c(l %path)",
+		)
+		qbe_output_line(
+			output,
+			"\t%fst =l call $trbnf" + integer_string(compiler_file_entry) +
+			"(l %src, l %fpath, l %fm, l 1)",
+		)
+		qbe_output_line(output, "\t%failed =w cnel %fst, 0\n\tret %failed")
+	else
+		qbe_output_line(output, "export function w $main(w %argc, l %argv) {")
+		qbe_output_line(output, "@start")
+		qbe_output_line(output, "\tcall $trbn_gc_trace_initialize()")
+		if output.runtime_flags[qbe_runtime_static_strings_slot()] == 1
+			qbe_output_line(output, "\tcall $trbn_static_strings_initialize()")
+		end
+		if output.runtime_flags[qbe_runtime_process_slot()] == 1
+			emit_process_arguments(output)
+		end
+		qbe_output_line(output, "\tcall $trbn_initialize_globals()")
+		main_index := program.main_function
+		qbe_output_line(output, "\tcall $trbnf" + integer_string(main_index) + "()")
+		qbe_output_line(output, "\tcall $trbn_gc_finish()")
+		qbe_output_line(output, "\tret 0")
+	end
+	qbe_output_line(output, "}")
+	if compiler_entry >= 0
+		cli_entry := program.cli_function
+		if cli_entry >= 0
+			output.runtime_flags[qbe_runtime_process_slot()] = 1
+			if program.runtime_error == 1
+				diagnostic(state, "TRBN4005", 1, "Native CLI runtime template is missing")
+				return
+			end
+			if program.runtime_error == 2
+				diagnostic(state, "TRBN4005", 1, "Native CLI runtime template must be a literal String")
+				return
+			end
+			qbe_output_line(output, program.runtime_literal)
+			qbe_output_line(output, "export function w $main(w %argc, l %argv) {\n@start\n\tcall $trbn_gc_trace_initialize()")
+			if output.runtime_flags[qbe_runtime_static_strings_slot()] == 1
+				qbe_output_line(output, "\tcall $trbn_static_strings_initialize()")
+			end
+			emit_process_arguments(output)
+			qbe_output_line(output, "\tcall $trbn_initialize_globals()")
+			qbe_output_line(output, "\t%status =l call $trbnf" + integer_string(cli_entry) + "()\n\tcall $trbn_gc_finish()\n\tret %status\n}")
+		else
+			emit_target_entry(output)
+		end
+	end
+	return
+end
+
+def emit_qbe(mut state: CompilerState): QbeOutput
+	mut output := qbe_output_new(state.scalar_mir.instructions.size() * 24 + 4096, [0, 0, 0, 0, 0, 0, 0, 0])
+	if state.scalar_mir.program.size() != 1
+		diagnostic(state, "TRBN4004", 1, "MIR program metadata is missing")
+		return output
+	end
+	program_error := mir_program_error(state.scalar_mir)
+	if program_error != ""
+		diagnostic(state, "TRBN4004", 1, program_error)
+		return output
+	end
+	program := state.scalar_mir.program[0]
+	emit_static_strings(state, output)
+	if has_diagnostic(state)
+		return output
+	end
+	emit_mir_globals(state.scalar_mir, output)
+	emit_record_descriptors(state, output)
+	emit_closure_adapters(state, output)
+	emit_object_dispatch(state.scalar_mir, output)
+	compiler_runtime := program.compiler_function >= 0
+	emit_qbe_runtime_selected(output, compiler_runtime, qbe_runtime_needs(state.scalar_mir, compiler_runtime), mir_deadlines_enabled(state.scalar_mir))
+	if mir_deadlines_enabled(state.scalar_mir)
+		emit_deadline_clock_runtime(output)
+		emit_deadline_runtime(output)
+	end
+	if compiler_runtime
+		emit_package_files_runtime(output)
+		emit_test_paths_runtime(output)
+	end
+	emit_bytes_runtime(state.scalar_mir, output)
+	emit_file_scope_runtime(state.scalar_mir, output)
+	emit_time_host_runtime(state.scalar_mir, output)
+	emit_process_host_runtime(state.scalar_mir, output)
+	sqlite_needed := sqlite_runtime_needed(state.scalar_mir)
+	compiler_set_sqlite_link(sqlite_needed)
+	if sqlite_needed
+		emit_sqlite_write_runtime(output)
+		emit_sqlite_error_runtime(output)
+		emit_sqlite_query_runtime(output)
+		emit_sqlite_transaction_runtime(output)
+	end
+	emit_entropy_runtime(state.scalar_mir, output)
+	emit_string_builder_runtime(state.scalar_mir, output)
+	compiler_set_oidc_link(oidc_runtime_needed(state.scalar_mir))
+	if oidc_runtime_needed(state.scalar_mir)
+		emit_oidc_rsa(output)
+		emit_oidc_fetch(output, mir_deadlines_enabled(state.scalar_mir))
+	end
+	mut crypto_needed := crypto_runtime_needed(state.scalar_mir)
+	if oidc_runtime_needed(state.scalar_mir)
+		crypto_needed = true
+	end
+	compiler_set_crypto_link(crypto_needed)
+	emit_crypto_runtime(state.scalar_mir, output)
+	compiler_set_compression_link(compression_runtime_needed(state.scalar_mir))
+	emit_compression_runtime(state.scalar_mir, output)
+	compiler_set_network_link(network_runtime_needed(state.scalar_mir))
+	emit_network_runtime(state.scalar_mir, output)
+	emit_test_runtime(state.scalar_mir, output)
+	function_count := state.scalar_mir.signatures.size()
+	value_groups := mir_function_value_groups(state.scalar_mir)
+	mut function_index := 0
+	# Flat recovery and CLI input retain their source fallbacks. Ordinary compiler
+	# intrinsics are omitted by declaration identity, independent of source order.
+	mut omit_intrinsics := false
+	if compiler_runtime && state.scalar_mir.source_count[0] > 1 && program.cli_function < 0
+		omit_intrinsics = true
+	end
+	while function_index < function_count
+		mut intrinsic := false
+		if omit_intrinsics
+			signature := state.scalar_mir.signatures[function_index]
+			intrinsic = signature.kind == mir_signature_compiler_runtime()
+		end
+		if !intrinsic && state.scalar_mir.signatures[function_index].kind < mir_signature_standard()
+			emit_function(state, function_index, value_groups, output)
+			compiler_reset_temporary_storage()
+		end
+		function_index += 1
+	end
+	emit_entry(state, output)
+	if output.runtime_flags[qbe_runtime_boolean_output_slot()] == 1
+		emit_boolean_puts_runtime(output)
+	end
+	if output.runtime_flags[qbe_runtime_float_string_slot()] == 1
+		emit_float_string_runtime(output)
+	end
+	if output.runtime_flags[qbe_runtime_hash_mode_slot()] > 0
+		emit_hash_runtime(output)
+		if state.scalar_mir.hash_lookup_reuse[0].size() > 0
+			emit_hash_lookup_runtime(output)
+		end
+	end
+	if output.runtime_flags[qbe_runtime_float_array_slot()] == 1
+		emit_float_array_runtime(output)
+	end
+	if output.runtime_flags[qbe_runtime_process_slot()] == 1
+		emit_process_runtime(output)
+		emit_number_parsing_runtime(output)
+		emit_integer_to_string_runtime(output)
+		emit_float_to_integer_runtime(output)
+	end
+	if output.runtime_flags[qbe_runtime_integer_power_slot()] == 1
+		emit_integer_power_runtime(output)
+	end
+	return output
+end
+
+def print_diagnostic(state: CompilerState, file_mode: Boolean)
+	mut message := ""
+	module_index := load_integer(state.diagnostics.modules, 0)
+	if module_index > 0
+		message += load_string(state.module_graph.module_files, module_index) + ":"
+	end
+	message += load_string(state.diagnostics.codes, 0) + ":"
+	message += integer_string(load_integer(state.diagnostics.lines, 0))
+	message += ":"
+	message += load_string(state.diagnostics.messages, 0)
+	if file_mode
+		compiler_eputs(message)
+	else
+		puts(message)
+	end
+	return
+end
+
+def compile_state(mut state: CompilerState, mode: String, file_mode: Boolean): Integer
+	if !has_diagnostic(state)
+		resolve(state)
+	end
+	if !has_diagnostic(state)
+		check(state)
+	end
+	if has_diagnostic(state)
+		print_diagnostic(state, file_mode)
+		return 1
+	end
+	if mode == "check"
+		puts("ok")
+		return 0
+	end
+	if mode == "emit-qbe"
+		output := emit_qbe(state)
+		if has_diagnostic(state)
+			print_diagnostic(state, file_mode)
+			return 1
+		end
+		mut position := [0]
+		while position[0] < output.lines.used[0]
+			puts(qbe_output_chunk(output, position))
+		end
+		return 0
+	end
+	message := "TRBN4006:1:unsupported compiler mode " + mode
+	if file_mode
+		compiler_eputs(message)
+	else
+		puts(message)
+	end
+	return 64
+end
+
+def compiler_main(source: String, mode: String, file_mode: Boolean): Integer
+	mut state := compiler_new(source.size() * 3 + 16)
+	lex(state, source)
+	if !has_diagnostic(state)
+		parse_module(state, 0, state.module_graph.entry_module[0])
+	end
+	return compile_state(state, mode, file_mode)
+end
+
+def compiler_file_main(source: String, path: String, mode: String, file_mode: Boolean): Integer
+	if path_basename(path) == "trbconfig.jsonc"
+		mut state := load_configured_project(source, path)
+		return compile_state(state, mode, file_mode)
+	end
+	mut state := load_file_root(source, path)
+	return compile_state(state, mode, file_mode)
+end
+
+def project_error_state(path: String, line: Integer, message: String): CompilerState
+	mut state := compiler_new(1024)
+	module_index := add_module(state, "trbconfig", path)
+	state.module_graph.entry_module[0] = module_index
+	state.module_graph.active_module[0] = module_index
+	diagnostic(state, "TRBN4010", line, message)
+	return state
+end
+
+def project_join(root: String, relative: String): String
+	if relative == "."
+		return root
+	end
+	return path_join(root, relative)
+end
+
+def project_module_name(
+		mut state: CompilerState,
+		source_root: String,
+		path: String,
+	): String
+	mut prefix := source_root
+	if prefix != "/"
+		prefix += "/"
+	end
+	if !string_starts_with(path, prefix)
+		diagnostic(state, "TRBN4010", 1, "project source is outside configured sourceDir")
+	else
+		if !string_ends_with(path, ".trb")
+			diagnostic(state, "TRBN4010", 1, "project source does not end in .trb")
+		else
+			name := compiler_source_slice(path, prefix.size(), path.size() - 4)
+			if name != ""
+				return name
+			end
+			diagnostic(
+				state,
+				"TRBN4010",
+				1,
+				"project source has an empty module name",
+			)
+		end
+	end
+	return ""
+end
+
+def string_starts_at(value: String, start: Integer, prefix: String): Boolean
+	mut index := 0
+	while index < prefix.size()
+		if value[start + index] != prefix[index]
+			return false
+		end
+		index += 1
+	end
+	return true
+end
+
+def project_source_declares_main(source: String): Boolean
+	mut index := 0
+	while index + 9 <= source.size()
+		if string_starts_at(source, index, "def main(")
+			if index == 0
+				return true
+			end
+			if source[index - 1] == "\n"
+				return true
+			end
+		end
+		index += 1
+	end
+	return false
+end
+
+def project_append_import_target(
+		module_lookup: Hash<String, Integer>,
+		normalized: String,
+		mut order: Array<Integer>,
+		mut included: Array<Integer>,
+	): Array<Integer>
+	mut target := find_name_index(module_lookup, normalized)
+	if target < 0
+		target = find_name_index(module_lookup, normalized + "/index")
+	end
+	if target >= 0
+		if included[target] == 0
+			order.push(target)
+			included[target] = 1
+		end
+	end
+	return order
+end
+
+def project_bare_import_path(raw: String): String
+	mut finish := raw.size()
+	mut index := 0
+	while index < raw.size()
+		if raw[index] == " "
+			finish = index
+			index = raw.size()
+		else
+			if raw[index] == "\t"
+				finish = index
+				index = raw.size()
+			else
+				index += 1
+			end
+		end
+	end
+	return compiler_source_slice(raw, 0, finish)
+end
+
+def project_append_imports(
+		module_lookup: Hash<String, Integer>,
+		source: String,
+		mut order: Array<Integer>,
+		mut included: Array<Integer>,
+		aliases: Array<String>,
+		canonical_names: Array<String>,
+	): Array<Integer>
+	mut index := 0
+	while index + 6 <= source.size()
+		if string_starts_at(source, index, " from ")
+			mut cursor := index + 6
+			mut collecting := true
+			while collecting
+				if cursor >= source.size()
+					collecting = false
+				else
+					if source[cursor] == "\n"
+						collecting = false
+					else
+						cursor += 1
+					end
+				end
+			end
+			raw := compiler_source_slice(source, index + 6, cursor)
+			normalized := package_canonical_import(import_path_value(raw), aliases, canonical_names)
+			order = project_append_import_target(
+				module_lookup,
+				normalized,
+				order,
+				included,
+			)
+			index = cursor
+		end
+		index += 1
+	end
+	index = 0
+	while index + 7 <= source.size()
+		mut line_start := index == 0
+		if index > 0
+			if source[index - 1] == "\n"
+				line_start = true
+			end
+		end
+		if line_start
+			if string_starts_at(source, index, "import ")
+				cursor := index + 7
+				if cursor < source.size()
+					if source[cursor] != "{"
+						mut line_finish := cursor
+						mut scanning := true
+						while scanning
+							if line_finish >= source.size()
+								scanning = false
+							else
+								if source[line_finish] == "\n"
+									scanning = false
+								else
+									line_finish += 1
+								end
+							end
+						end
+						raw := compiler_source_slice(source, cursor, line_finish)
+						path := project_bare_import_path(raw)
+						normalized := package_canonical_import(import_path_value(path), aliases, canonical_names)
+						order = project_append_import_target(
+							module_lookup,
+							normalized,
+							order,
+							included,
+						)
+					end
+				end
+			end
+		end
+		index += 1
+	end
+	return order
+end
+
+def project_source_order(bundle: CompilerProjectSources, names: Array<String>, owners: Array<Integer>, packages: ProjectPackages): Array<Integer>
+	mut entry := -1
+	mut included: Array<Integer> := []
+	mut module_lookup: Hash<String, Integer> := {}
+	mut index := 0
+	while index < bundle.paths.size()
+		included.push(0)
+		name := names[index]
+		module_lookup[name] = index
+		if project_source_declares_main(bundle.sources[index])
+			entry = index
+		end
+		index += 1
+	end
+	if entry < 0
+		mut unchanged: Array<Integer> := []
+		index = 0
+		while index < bundle.paths.size()
+			unchanged.push(index)
+			index += 1
+		end
+		return unchanged
+	end
+
+	mut order := [entry]
+	included[entry] = 1
+	mut cursor := 0
+	while cursor < order.size()
+		mut aliases := packages.aliases
+		mut canonical_names := packages.names
+		owner := owners[order[cursor]]
+		if owner >= 0
+			aliases = packages.packages[owner].aliases
+			canonical_names = packages.packages[owner].names
+		end
+		order = project_append_imports(
+			module_lookup,
+			bundle.sources[order[cursor]],
+			order,
+			included,
+			aliases,
+			canonical_names,
+		)
+		cursor += 1
+	end
+	index = 0
+	while index < bundle.paths.size()
+		if included[index] == 0
+			order.push(index)
+		end
+		index += 1
+	end
+
+	return order
+end
+
+def project_select_entry(mut state: CompilerState): Boolean
+	mut entry := -1
+	mut function_index := 0
+	while function_index < state.declarations.function_count[0]
+		if load_string(state.declarations.function_names, function_index) == "main"
+			module_index := load_integer(state.declarations.function_modules, function_index)
+			if entry >= 0
+				state.module_graph.active_module[0] = module_index
+				diagnostic(
+					state,
+					"TRBN4010",
+					load_integer(state.declarations.function_lines, function_index),
+					"project has more than one top-level main function",
+				)
+				return false
+			end
+			entry = module_index
+		end
+		function_index += 1
+	end
+	if entry < 0
+		state.module_graph.active_module[0] = 0
+		diagnostic(state, "TRBN4010", 1, "project must declare exactly one top-level main function")
+		return false
+	end
+	state.module_graph.entry_module[0] = entry
+	state.module_graph.active_module[0] = entry
+	return true
+end
+
+def module_root_peer(name: String): String
+	if string_ends_with(name, "/index")
+		return string_without_suffix(name, "/index")
+	end
+	return name + "/index"
+end
+
+def validate_project_module_roots(mut state: CompilerState): Boolean
+	mut module_index := 0
+	while module_index < state.module_graph.module_count[0]
+		name := load_string(state.module_graph.module_names, module_index)
+		peer_name := module_root_peer(name)
+		peer := find_module(state, peer_name)
+		if peer >= 0
+			if peer < module_index
+				state.module_graph.active_module[0] = module_index
+				diagnostic(
+					state,
+					"TRBN4003",
+					1,
+					"module paths " + name + " and " + peer_name + " define the same import root",
+				)
+				return false
+			end
+		end
+		module_index += 1
+	end
+	return true
+end
+
+def validate_new_module_root(mut state: CompilerState, name: String, line: Integer): Boolean
+	peer_name := module_root_peer(name)
+	if find_module(state, peer_name) >= 0
+		diagnostic(
+			state,
+			"TRBN4003",
+			line,
+			"module paths " + name + " and " + peer_name + " define the same import root",
+		)
+		return false
+	end
+	return true
+end
+
+def resolve_project_imports(mut state: CompilerState, owners: Array<Integer>, packages: ProjectPackages): Boolean
+	mut module_index := 0
+	while module_index < state.module_graph.module_count[0]
+		mut import_index := load_integer(state.module_graph.module_import_starts, module_index)
+		import_end := import_index + load_integer(state.module_graph.module_import_counts, module_index)
+		while import_index < import_end
+			state.module_graph.active_module[0] = module_index
+			raw_path := load_string(state.module_graph.import_paths, import_index)
+			line := load_integer(state.module_graph.import_lines, import_index)
+			mut normalized := normalize_import_path(state, raw_path, line)
+			if module_index < owners.size()
+				owner := owners[module_index]
+				if owner >= 0
+					normalized = package_canonical_import(normalized, packages.packages[owner].aliases, packages.packages[owner].names)
+				else
+					normalized = package_canonical_import(normalized, packages.aliases, packages.names)
+				end
+			end
+			if has_diagnostic(state)
+				return false
+			end
+			mut target := standard_package_target(normalized)
+			owned_kind := standard_source_kind(normalized)
+			if owned_kind > 0
+				target = load_standard_source(state, owned_kind, line)
+				if has_diagnostic(state)
+					return false
+				end
+			elsif target < -1
+				if load_integer(state.module_graph.import_kinds, import_index) != import_kind_module()
+					diagnostic(state, "TRBN4003", line, "supported standard packages require a bare import")
+					return false
+				end
+			else
+				if normalized == "trb"
+					diagnostic(state, "TRBN4003", line, "package imports are not supported by this compiler subset")
+					return false
+				end
+				if string_starts_with(normalized, "trb/")
+					diagnostic(state, "TRBN4003", line, "package imports are not supported by this compiler subset")
+					return false
+				end
+				target = find_module(state, normalized)
+				if target < 0
+					target = find_module(state, normalized + "/index")
+				end
+				if target < 0
+					diagnostic(state, "TRBN4003", line, "cannot resolve project import " + raw_path)
+					return false
+				end
+			end
+			store_integer(state.module_graph.import_targets, import_index, target)
+			import_index += 1
+		end
+		module_index += 1
+	end
+	if !validate_compilation_units(state, owners)
+		return false
+	end
+	state.module_graph.active_module[0] = state.module_graph.entry_module[0]
+	return true
+end
+
+# Read-only package loading is shared by check, build, run and REPL. It never
+# resolves a ref, downloads a repository or rewrites the lock.
+def compiler_package_root(locked: LockedPackage, project_root: String): String
+	if locked.path != ""
+		if string_starts_with(locked.path, "/")
+			return path_normalize(locked.path)
+		end
+		return path_normalize(path_join(project_root, locked.path))
+	end
+	return path_join(path_join(project_root, ".trb/packages"), compiler_source_slice(locked.checksum, 7, locked.checksum.size()))
+end
+
+def compiler_package_content(root: String): PackageContent
+	if !package_path_safe(root)
+		return PackageContent.new(checksum: "", error: "package path contains NUL")
+	end
+	files := compiler_collect_package_files(root)
+	if files.error != ""
+		return PackageContent.new(checksum: "", error: "cannot read regular package files: " + files.error)
+	end
+	mut bytes: Array<Integer> := []
+	root_bytes := compiler_string_bytes(root)
+	mut index := 0
+	while index < files.paths.size()
+		name := package_relative_file_bytes(root_bytes, compiler_string_bytes(files.paths[index]))
+		if name.size() == 0
+			return PackageContent.new(checksum: "", error: "package file is outside its root")
+		end
+		compiler_string_bytes(integer_string(name.size()) + ":").each do |byte|
+			bytes.push(byte)
+		end
+		name.each do |byte|
+			bytes.push(byte)
+		end
+		bytes.push(58)
+		compiler_string_bytes(files.sources[index]).each do |byte|
+			bytes.push(byte)
+		end
+		bytes.push(0)
+		index += 1
+	end
+	return PackageContent.new(checksum: package_checksum_bytes(bytes), error: "")
+end
+
+def compiler_load_locked_package(mut packages: ProjectPackages, locked: LockedPackage, project_root: String, mode: String)
+	root := compiler_package_root(locked, project_root)
+	if !package_path_safe(root)
+		project_packages_fail(packages, "package path contains NUL")
+		return
+	end
+	if locked.checksum != ""
+		content := compiler_package_content(root)
+		if content.error != ""
+			project_packages_fail(packages, content.error)
+			return
+		end
+		if content.checksum != locked.checksum
+			project_packages_fail(packages, "TypeRB package " + locked.name + " checksum mismatch in cache")
+			return
+		end
+	end
+	manifest_path := path_join(root, "trbpackage.json")
+	if !compiler_file_exists(manifest_path)
+		project_packages_fail(packages, "cannot read package manifest " + manifest_path)
+		return
+	end
+	manifest := package_manifest_parse(compiler_read_source(manifest_path))
+	if manifest.error != ""
+		project_packages_fail(packages, manifest.error)
+		return
+	end
+	if locked.path != "" && manifest.checksum != locked.manifest_checksum
+		project_packages_fail(packages, "local TypeRB package manifest changed: " + locked.name + "; run trb install")
+		return
+	end
+	if manifest.name != locked.name || manifest.version != locked.version
+		project_packages_fail(packages, "locked package identity differs from manifest: " + locked.name)
+		return
+	end
+	mut supported := false
+	manifest.modes.each do |declared|
+		if declared == mode
+			supported = true
+		end
+	end
+	if !supported
+		project_packages_fail(packages, "TypeRB package " + manifest.name + " does not support mode " + mode)
+		return
+	end
+	if !package_path_safe(manifest.source_dir) || !compiler_file_exists(path_join(path_join(root, manifest.source_dir), "."))
+		project_packages_fail(packages, "package sourceDir must be a readable directory")
+		return
+	end
+	packages.packages.push(ResolvedLocalPackage.new(root: root, path: locked.path, source: locked.source, revision: locked.revision, checksum: locked.checksum, manifest: manifest, aliases: locked.aliases, names: locked.names))
+	packages.loading.push(false)
+end
+
+def compiler_load_package_lock(config: ProjectConfig, config_path: String, lock: PackageLock): ProjectPackages
+	mut packages := project_packages_new(package_checksum(package_requirements_json(config.packages)))
+	if lock.error != ""
+		project_packages_fail(packages, lock.error)
+		return packages
+	end
+	if lock.checksum != packages.checksum
+		project_packages_fail(packages, "trb.lock does not match trbconfig.jsonc; run trb install")
+		return packages
+	end
+	mut index := 0
+	while index < lock.aliases.size()
+		packages.aliases.push(lock.aliases[index])
+		packages.names.push(lock.names[index])
+		index += 1
+	end
+	root := path_normalize(path_directory(config_path))
+	lock.packages.each do |locked|
+		if packages.error[0] == ""
+			compiler_load_locked_package(packages, locked, root, config.mode)
+		end
+	end
+	return packages
+end
+
+def load_project_packages(config: ProjectConfig, config_path: String): ProjectPackages
+	mut packages := project_packages_new(package_checksum(package_requirements_json(config.packages)))
+	if config.packages.size() == 0
+		return packages
+	end
+	project_root := path_normalize(path_directory(config_path))
+	lock_path := path_join(project_root, "trb.lock")
+	if !compiler_file_exists(lock_path)
+		project_packages_fail(packages, "TypeRB packages are not installed; run trb install")
+		return packages
+	end
+	return compiler_load_package_lock(config, config_path, package_lock_parse(compiler_read_source(lock_path)))
+end
+
+def load_configured_project(config_source: String, config_path: String): CompilerState
+	config := parse_project_config(config_source)
+	if config.error != ""
+		return project_error_state(config_path, config.error_line, config.error)
+	end
+	root := path_directory(config_path)
+	source_root := path_normalize(project_join(root, config.source_dir))
+	out_root := path_normalize(project_join(root, config.out_dir))
+	bundle := compiler_collect_project_sources(source_root, out_root)
+	if bundle.error != ""
+		return project_error_state(config_path, 1, "cannot collect project source " + bundle.error)
+	end
+	return load_configured_sources(config, config_path, source_root, out_root, bundle)
+end
+
+def load_configured_test_sources(config: ProjectConfig, config_path: String, source_root: String, out_root: String, bundle: CompilerProjectSources, tests: Array<String>, reporter: String): CompilerState
+	mut state := load_configured_sources_with_tests(config, config_path, source_root, out_root, bundle, false, false, tests)
+	if !has_diagnostic(state)
+		append_native_test_runner(state, reporter)
+	end
+	return state
+end
+
+# Module identities and diagnostic filenames are separate: local packages may
+# live outside sourceDir and still have a stable configured import prefix.
+def project_append_source_names(
+		mut state: CompilerState,
+		source_root: String,
+		prefix: String,
+		bundle: CompilerProjectSources,
+		mut names: Array<String>,
+	): Boolean
+	if bundle.paths.size() != bundle.sources.size()
+		diagnostic(state, "TRBN4010", 1, "project source adapter returned mismatched paths and sources")
+		return false
+	end
+	mut index := 0
+	while index < bundle.paths.size()
+		name := project_module_name(state, source_root, bundle.paths[index])
+		if has_diagnostic(state)
+			return false
+		end
+		if prefix == ""
+			names.push(name)
+		else
+			names.push(prefix + "/" + name)
+		end
+		index += 1
+	end
+	return true
+end
+
+def load_configured_sources(
+		config: ProjectConfig,
+		config_path: String,
+		source_root: String,
+		out_root: String,
+		bundle: CompilerProjectSources,
+	): CompilerState
+	return load_configured_sources_with_mode(config, config_path, source_root, out_root, bundle, true, false)
+end
+
+def load_configured_sources_with_mode(config: ProjectConfig, config_path: String, source_root: String, out_root: String, bundle: CompilerProjectSources, require_entry: Boolean, interactive: Boolean): CompilerState
+	return load_configured_sources_with_tests(config, config_path, source_root, out_root, bundle, require_entry, interactive, [])
+end
+
+def load_configured_sources_with_tests(config: ProjectConfig, config_path: String, source_root: String, out_root: String, bundle: CompilerProjectSources, require_entry: Boolean, interactive: Boolean, tests: Array<String>): CompilerState
+	packages := load_project_packages(config, config_path)
+	if packages.error[0] != ""
+		return project_error_state(config_path, 1, packages.error[0])
+	end
+	mut validation := compiler_new(1024)
+	mut names: Array<String> := []
+	if !project_append_source_names(validation, source_root, "", bundle, names)
+		return project_error_state(config_path, 1, load_string(validation.diagnostics.messages, 0))
+	end
+	mut owners: Array<Integer> := []
+	bundle.paths.each do |_path|
+		owners.push(-1)
+	end
+	mut paths := bundle.paths
+	mut sources := bundle.sources
+	# Configuration maps have reference-sorted traversal, independent of JSON order.
+	mut pending: Array<String> := []
+	config.local_packages.each do |package|
+		pending.push(package.name)
+	end
+	mut consumed := 0
+	while consumed < pending.size()
+		mut selected := -1
+		mut index := 0
+		while index < pending.size()
+			if pending[index] != ""
+				if selected < 0
+					selected = index
+				elsif package_name_less(pending[index], pending[selected])
+					selected = index
+				end
+			end
+			index += 1
+		end
+		package := config.local_packages[selected]
+		mut package_root := package.path
+		if !string_starts_with(package_root, "/")
+			package_root = project_join(path_directory(config_path), package_root)
+		end
+		package_root = path_normalize(package_root)
+		if !package_path_safe(package_root)
+			return project_error_state(config_path, 1, "local package path contains NUL")
+		end
+		collected := compiler_collect_project_sources(package_root, out_root)
+		if collected.error != ""
+			return project_error_state(config_path, 1, "local package " + package.name + ": " + collected.error)
+		end
+		if collected.paths.size() == 0
+			return project_error_state(config_path, 1, "local package " + package.name + " has no .trb files at " + package_root)
+		end
+		if !project_append_source_names(validation, package_root, package.name, collected, names)
+			return project_error_state(config_path, 1, load_string(validation.diagnostics.messages, 0))
+		end
+		index = 0
+		while index < collected.paths.size()
+			paths.push(collected.paths[index])
+			sources.push(collected.sources[index])
+			owners.push(-selected - 2)
+			index += 1
+		end
+		pending[selected] = ""
+		consumed += 1
+	end
+	mut package_names: Array<String> := []
+	packages.packages.each do |package|
+		package_names.push(package.manifest.name)
+	end
+	package_order := package_sorted_indices(package_names)
+	package_order.each do |owner|
+		package := packages.packages[owner]
+		package_root := path_normalize(path_join(package.root, package.manifest.source_dir))
+		collected := compiler_collect_project_sources(package_root, package_root)
+		if collected.error != "" || collected.paths.size() == 0
+			return project_error_state(config_path, 1, "TypeRB package " + package.manifest.name + " has no readable .trb files below " + package_root)
+		end
+		if !project_append_source_names(validation, package_root, package.manifest.name, collected, names)
+			return project_error_state(config_path, 1, load_string(validation.diagnostics.messages, 0))
+		end
+		mut file := 0
+		while file < collected.paths.size()
+			paths.push(collected.paths[file])
+			sources.push(collected.sources[file])
+			owners.push(owner)
+			file += 1
+		end
+	end
+	mut state := load_package_project_sources_with_tests(config_path, CompilerProjectSources.new(paths: paths, sources: sources, error: ""), names, owners, packages, require_entry, interactive, tests)
+	if !has_diagnostic(state) && find_module(state, "trb/orm/index") >= 0
+		models := orm_model_indices(state)
+		if (models.size() > 0 || config.orm_options != "") && !has_diagnostic(state)
+			if config.orm_options == ""
+				return project_error_state(config_path, 1, "trb/orm requires packageOptions.trb/orm")
+			end
+			mut option_error := [""]
+			options := parse_project_database(config.orm_options, [0], [1], option_error, [0], true)
+			if option_error[0] != ""
+				return project_error_state(config_path, 1, "packageOptions.trb/orm: " + option_error[0])
+			end
+			if project_config_lower_ascii(project_config_trimmed(options.adapter)) != "sqlite" || !options.source_present
+				return project_error_state(config_path, 1, "trb/orm requires the SQLite adapter and a database source")
+			end
+			mut lock_path := project_config_trimmed(options.lock)
+			if !project_config_below_root(lock_path)
+				return project_error_state(config_path, 1, "trb/orm schemaLock must stay below the project root")
+			end
+			if lock_path == ""
+				lock_path = "db/schema.lock.json"
+			end
+			lock_path = project_join(path_directory(config_path), lock_path)
+			if !compiler_file_exists(lock_path)
+				return project_error_state(lock_path, 1, "trb/orm requires a readable SQLite schema lock")
+			end
+			mut database := project_config_trimmed(options.value)
+			if database != "" && !project_config_absolute(database)
+				database = project_join(path_directory(config_path), database)
+			end
+			prepare_orm_models(state, models, compiler_read_source(lock_path), database, project_config_trimmed(options.environment))
+		end
+	end
+	if !has_diagnostic(state) && find_module(state, "trb/jobs/index") >= 0
+		prepare_native_jobs(state, config.jobs_configuration)
+	end
+	return state
+end
+
+def load_project_sources(config_path: String, source_root: String, bundle: CompilerProjectSources): CompilerState
+	return load_project_sources_with_entry(config_path, source_root, bundle, true)
+end
+
+def load_named_project_sources(config_path: String, bundle: CompilerProjectSources, names: Array<String>): CompilerState
+	return load_named_project_sources_with_entry(config_path, bundle, names, true)
+end
+
+def load_package_project_sources(config_path: String, bundle: CompilerProjectSources, names: Array<String>, owners: Array<Integer>, packages: ProjectPackages): CompilerState
+	return load_package_project_sources_with_entry(config_path, bundle, names, owners, packages, true)
+end
+
+def load_project_sources_with_entry(
+		config_path: String,
+		source_root: String,
+		bundle: CompilerProjectSources,
+		require_entry: Boolean,
+	): CompilerState
+	mut validation := compiler_new(1024)
+	mut names: Array<String> := []
+	if !project_append_source_names(validation, source_root, "", bundle, names)
+		return project_error_state(config_path, 1, load_string(validation.diagnostics.messages, 0))
+	end
+	return load_named_project_sources_with_entry(config_path, bundle, names, require_entry)
+end
+
+def load_named_project_sources_with_entry(config_path: String, bundle: CompilerProjectSources, names: Array<String>, require_entry: Boolean): CompilerState
+	mut owners: Array<Integer> := []
+	bundle.paths.each do |_path|
+		owners.push(-1)
+	end
+	return load_package_project_sources_with_entry(config_path, bundle, names, owners, project_packages_new(""), require_entry)
+end
+
+def load_package_project_sources_with_entry(config_path: String, bundle: CompilerProjectSources, names: Array<String>, owners: Array<Integer>, packages: ProjectPackages, require_entry: Boolean): CompilerState
+	return load_package_project_sources_with_mode(config_path, bundle, names, owners, packages, require_entry, false)
+end
+
+def load_package_project_sources_with_mode(config_path: String, bundle: CompilerProjectSources, names: Array<String>, owners: Array<Integer>, packages: ProjectPackages, require_entry: Boolean, interactive: Boolean): CompilerState
+	return load_package_project_sources_with_tests(config_path, bundle, names, owners, packages, require_entry, interactive, [])
+end
+
+def load_package_project_sources_with_tests(config_path: String, bundle: CompilerProjectSources, names: Array<String>, owners: Array<Integer>, packages: ProjectPackages, require_entry: Boolean, interactive: Boolean, tests: Array<String>): CompilerState
+	if bundle.paths.size() == 0
+		return project_error_state(config_path, 1, "no production .trb files found")
+	end
+	if bundle.paths.size() != bundle.sources.size() || names.size() != bundle.paths.size() || owners.size() != names.size()
+		return project_error_state(config_path, 1, "project source adapter returned mismatched paths and sources")
+	end
+	order := project_source_order(bundle, names, owners, packages)
+	mut ordered_owners: Array<Integer> := []
+	mut state := compiler_new_with_mode(4194304, interactive)
+	mut module_index := 0
+	while module_index < order.size()
+		state.module_graph.active_module[0] = module_index
+		index := order[module_index]
+		name := names[index]
+		previous := find_module(state, name)
+		if previous >= 0
+			return project_error_state(bundle.paths[index], 1, "module path " + name + " is already provided by " + load_string(state.module_graph.module_files, previous))
+		end
+		add_module(state, name, bundle.paths[index])
+		ordered_owners.push(owners[index])
+		module_index += 1
+	end
+	if !validate_project_module_roots(state)
+		return state
+	end
+	module_index = 0
+	while module_index < state.module_graph.module_count[0]
+		state.module_graph.active_module[0] = module_index
+		start := state.source_tokens.token_count[0]
+		lex_module(state, bundle.sources[order[module_index]], module_index)
+		mut selected_test := false
+		if ordered_owners[module_index] == -1
+			tests.each do |path|
+				if path == bundle.paths[order[module_index]]
+					selected_test = true
+				end
+			end
+		end
+		if !has_diagnostic(state)
+			parse_module_with_tests(state, start, module_index, selected_test)
+		end
+		if has_diagnostic(state)
+			return state
+		end
+		module_index += 1
+	end
+	if !discover_web_routes(state, ordered_owners)
+		return state
+	end
+	if require_entry
+		if !project_select_entry(state)
+			return state
+		end
+	else
+		state.module_graph.entry_module[0] = 0
+	end
+	resolve_project_imports(state, ordered_owners, packages)
+	return state
+end
+
+# REPL package imports use the same validated graph and canonical ownership as
+# ordinary configured compilation, with a separate synthetic interactive entry.
+def load_configured_repl(config_path: String, source: String): CompilerState
+	config := parse_project_config(compiler_read_source(config_path))
+	if config.error != ""
+		return project_error_state(config_path, config.error_line, config.error)
+	end
+	root := path_directory(config_path)
+	source_root := path_normalize(project_join(root, config.source_dir))
+	out_root := path_normalize(project_join(root, config.out_dir))
+	mut bundle := compiler_collect_project_sources(source_root, out_root)
+	if bundle.error != ""
+		return project_error_state(config_path, 1, bundle.error)
+	end
+	entry_path := path_join(source_root, "__repl__.trb")
+	bundle.paths.each do |path|
+		if path == entry_path
+			return project_error_state(path, 1, "project file conflicts with the REPL entry")
+		end
+	end
+	bundle.paths.push(entry_path)
+	bundle.sources.push(source)
+	mut state := load_configured_sources_with_mode(config, config_path, source_root, out_root, bundle, false, true)
+	if !has_diagnostic(state)
+		entry := find_module(state, "__repl__")
+		state.module_graph.entry_module[0] = entry
+		state.module_graph.active_module[0] = entry
+	end
+	return state
+end
+
+def load_file_root(entry_source: String, entry_path: String): CompilerState
+	return load_file_root_with_mode(entry_source, entry_path, false)
+end
+
+def load_file_root_with_mode(entry_source: String, entry_path: String, interactive: Boolean): CompilerState
+	return load_file_root_with_overlays(entry_source, entry_path, interactive, [], [])
+end
+
+def file_root_overlay_index(paths: Array<String>, path: String): Integer
+	mut i := 0
+	while i < paths.size()
+		if paths[i] == path
+			return i
+		end
+		i += 1
+	end
+	return -1
+end
+
+def file_root_source(path: String, index: Integer, overlay_sources: Array<String>): String
+	if index >= 0
+		return overlay_sources[index]
+	end
+	return compiler_read_source(path)
+end
+
+def load_file_root_with_overlays(entry_source: String, entry_path: String, interactive: Boolean, overlay_paths: Array<String>, overlay_sources: Array<String>): CompilerState
+	mut state := compiler_new_with_mode(4194304, interactive)
+	root := path_directory(entry_path)
+	entry_name := string_without_suffix(path_basename(entry_path), ".trb")
+	entry_module := add_module(state, entry_name, entry_path)
+	state.module_graph.entry_module[0] = entry_module
+	mut sources := [entry_source]
+	mut module_index := 0
+	while module_index < state.module_graph.module_count[0]
+		state.module_graph.active_module[0] = module_index
+		if sparse_integer_at(state.standard_modules, module_index) == standard_source_unowned()
+			start := state.source_tokens.token_count[0]
+			lex_module(state, sources[module_index], module_index)
+			if !has_diagnostic(state)
+				parse_module(state, start, module_index)
+			end
+		end
+		if has_diagnostic(state)
+			return state
+		end
+		mut import_index := load_integer(state.module_graph.module_import_starts, module_index)
+		import_end := import_index + load_integer(state.module_graph.module_import_counts, module_index)
+		while import_index < import_end
+			state.module_graph.active_module[0] = module_index
+			raw_path := load_string(state.module_graph.import_paths, import_index)
+			line := load_integer(state.module_graph.import_lines, import_index)
+			normalized := normalize_import_path(state, raw_path, line)
+			if has_diagnostic(state)
+				return state
+			end
+			mut target := standard_package_target(normalized)
+			owned_kind := standard_source_kind(normalized)
+			if owned_kind > 0
+				target = load_standard_source(state, owned_kind, line)
+				# A provider can load more than one owned dependency. Keep every
+				# source slot aligned before appending another authored module.
+				while sources.size() < state.module_graph.module_count[0]
+					sources.push("")
+				end
+				if has_diagnostic(state)
+					return state
+				end
+			elsif target < -1
+				if load_integer(state.module_graph.import_kinds, import_index) != import_kind_module()
+					diagnostic(state, "TRBN4003", line, "supported standard packages require a bare import")
+					return state
+				end
+			else
+				if normalized == "trb"
+					diagnostic(state, "TRBN4003", line, "package imports are not supported by this compiler subset")
+					return state
+				end
+				if string_starts_with(normalized, "trb/")
+					diagnostic(state, "TRBN4003", line, "package imports are not supported by this compiler subset")
+					return state
+				end
+				target = find_module(state, normalized)
+			end
+			if target == -1
+				direct_path := path_join(root, normalized + ".trb")
+				direct_overlay := file_root_overlay_index(overlay_paths, direct_path)
+				if direct_overlay >= 0 || compiler_file_exists(direct_path)
+					if !validate_new_module_root(state, normalized, line)
+						return state
+					end
+					target = add_module(state, normalized, direct_path)
+					sources.push(file_root_source(direct_path, direct_overlay, overlay_sources))
+				else
+					index_name := normalized + "/index"
+					target = find_module(state, index_name)
+					if target < 0
+						index_path := path_join(root, normalized + "/index.trb")
+						index_overlay := file_root_overlay_index(overlay_paths, index_path)
+						if index_overlay < 0 && !compiler_file_exists(index_path)
+							diagnostic(state, "TRBN4003", line, "cannot resolve project import " + raw_path)
+							return state
+						end
+						if !validate_new_module_root(state, index_name, line)
+							return state
+						end
+						target = add_module(state, index_name, index_path)
+						sources.push(file_root_source(index_path, index_overlay, overlay_sources))
+					end
+				end
+			end
+			store_integer(state.module_graph.import_targets, import_index, target)
+			import_index += 1
+		end
+		module_index += 1
+	end
+	state.module_graph.active_module[0] = state.module_graph.entry_module[0]
+	return state
+end
+
+# The driver owns the runtime lifetime boundary after each shared body check.
+def check_function(mut state: CompilerState, function_index: Integer): Boolean
+	mut locals := checked_function_locals(state, function_index)
+	checked := check_function_body(state, function_index, locals)
+	compiler_reset_temporary_storage()
+	return checked
+end
+
+def check(mut state: CompilerState): Boolean
+	mut annotation_index := 0
+	while annotation_index < state.source_tokens.internal_type_annotations.size()
+		annotation := state.source_tokens.internal_type_annotations[annotation_index]
+		line := load_integer(state.source_tokens.token_lines, annotation.origin)
+		if annotation.source_id != state.module_graph.entry_module[0] || line < state.nominal.projected_type_lines[0] || line >= state.nominal.projected_type_lines[1]
+			state.module_graph.active_module[0] = annotation.source_id
+			diagnostic(state, "TRBN4004", line, "Nil is an internal flow type; use an explicit nullable type annotation")
+			return false
+		end
+		annotation_index += 1
+	end
+	if !infer_global_types(state)
+		return false
+	end
+	if !check_generic_templates(state)
+		return false
+	end
+	if !check_declaration_attributes(state)
+		return false
+	end
+	if !analyze_callable_bodies(state)
+		return false
+	end
+	mir_declare_types(state)
+	mir_declare_signatures(state)
+	mir_declare_globals(state)
+	mut function_index := 0
+	while function_index < state.declarations.function_count[0]
+		if !object_abstract_function(state, function_index)
+			check_function(state, function_index)
+		end
+		function_index += 1
+	end
+	return finalize_checked_module(state)
+end
+
+def main()
+	return
+end

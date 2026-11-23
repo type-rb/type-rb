@@ -1,0 +1,8 @@
+case	candidate	status	stderr_empty	stdout_exact
+fannkuch-redux	typerb-native	0	true	true
+fannkuch-redux	typerb-go	0	true	true
+fannkuch-redux	c	0	true	true
+fannkuch-redux	cpp	0	true	true
+fannkuch-redux	go	0	true	true
+fannkuch-redux	rust	0	true	true
+fannkuch-redux	java	0	true	true

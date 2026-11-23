@@ -1,0 +1,77 @@
+def mark(): Integer
+	puts("prefix")
+	return 1
+end
+
+def from_index(mut values: Hash<String, Integer>): Integer
+	value := values[if true
+		return 7
+	else
+		return 8
+	end]
+	return value
+end
+
+def from_fetch(mut values: Hash<String, Integer>): Integer
+	value := values.fetch(if true
+		return 9
+	else
+		return 10
+	end)
+	return value
+end
+
+def from_literal(): Integer
+	value := {"first" => mark(), "second" => if true
+		return 11
+	else
+		return 12
+	end}
+	return value.size()
+end
+
+def from_array(): Integer
+	value := [mark(), if true
+		return 13
+	else
+		return 14
+	end]
+	return value.size()
+end
+
+record Packet
+	first: Integer
+	second: Integer
+end
+
+def from_record(): Integer
+	value := Packet.new(first: if true
+		return 15
+	else
+		return 16
+	end, second: mark())
+	return value.first
+end
+
+def from_push(mut values: Array<Integer>): Integer
+	values.push(if true
+		return 17
+	else
+		return 18
+	end)
+	return values.size()
+end
+
+def main()
+	mut values := {"saved" => 3}
+	puts(from_index(values))
+	puts(values["saved"])
+	puts(from_fetch(values))
+	puts(values["saved"])
+	puts(from_literal())
+	puts(from_array())
+	puts(from_record())
+	mut items := [1]
+	puts(from_push(items))
+	puts(items.size())
+end

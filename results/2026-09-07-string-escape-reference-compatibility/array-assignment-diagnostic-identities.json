@@ -1,0 +1,40 @@
+{
+  "baseline": {
+    "revision": "ac633935a7f248470c59d22666da14c819a131fa",
+    "compiler_sha256": "ed16ad3c638a9aa4dba5bb19fb4ef5b5a15ef129a0422d4421be5792357dfb9c",
+    "compiler_bytes": 349240
+  },
+  "candidate": {
+    "revision": "885414012e0aa891d1af99f30069e60da300a6cb",
+    "compiler_sha256": "c8b9046697f2d217f2c5125fbb2f93f0a1e39de1817540e13b56cf75e773b24a",
+    "compiler_bytes": 349256
+  },
+  "same_feature": {
+    "revision": "90435186fc5c06b662c06cb80584575e28d9d064",
+    "compiler_sha256": "f77f23b5b6d7f2088fe8900cfc830a94a8456e1d29a1b96417c340c14ae1de55",
+    "compiler_bytes": 349256
+  },
+  "tools": {
+    "qbe_sha256": "bd16f2eeef52167f59e9eede726fc924c3564752e2ba9e728fbcfecbf51ffbc0",
+    "cc_sha256": "b8763cf250e607a778bb4603cecb5b90338814d0a3dfcba0d57b1de242f610e9",
+    "target": "darwin-arm64-v0"
+  },
+  "method": {
+    "warmups": 2,
+    "retained": 7,
+    "ordering": "rotate baseline, same_feature, candidate per round",
+    "measurement": "direct process with /usr/bin/time -lp and Python monotonic wall clock",
+    "scope": "local Darwin arm64 diagnostic, not hosted acceptance",
+    "compiler_build": "each exact source revision; output must match its compiler identity",
+    "applications": "identical source bytes across all roles",
+    "inputs": {
+      "spectral-norm": [
+        100,
+        5500
+      ],
+      "integer-array-reduction": "100000 elements, 1000 rounds",
+      "float-array-reduction": "10 elements, 10000000 rounds"
+    },
+    "cpu_zero": "spectral-norm100 CPU ratios unavailable due timer granularity"
+  }
+}

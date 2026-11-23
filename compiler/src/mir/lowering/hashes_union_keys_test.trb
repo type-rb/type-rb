@@ -1,0 +1,54 @@
+import { check } from compiler
+import { compiler_test_instruction_with_cell } from testing/compiler
+import { managed_mir_test_fixture } from testing/mir/managed
+import { logical_checked_source } from testing/pipeline
+import { hash_key_storage_type, hash_scalar_key } from frontend/types/hash_types
+import { literal_integer_type, literal_string_type } from frontend/types/literal_types
+import { union_type } from frontend/types/union_types
+import { mir_hash_key_flags } from mir/lowering/hashes
+import { verify_mir } from mir/verify/module
+import { describe, expect, test } from trb/std/test
+
+describe("Literal union Hash key MIR") do
+	test("admits one non-nullable scalar domain while retaining its union identity") do
+		numbers := union_type([literal_integer_type("0"), literal_integer_type("-2")])
+		labels := union_type([literal_string_type(""), literal_string_type("alpha")])
+		expect(hash_key_storage_type(numbers)).to_equal("Integer")
+		expect(hash_key_storage_type(labels)).to_equal("String")
+		expect(hash_scalar_key(union_type([literal_integer_type("0"), literal_string_type("")]))).to_be_false()
+		expect(hash_scalar_key(numbers + "?")).to_be_false()
+	end
+	test("preserves boxed keys through growth deletion copies snapshots and forced collection") do
+		managed_mir_test_fixture("union-hash-keys-mir", 2)
+	end
+	test("rejects a different key constraint even when its scalar payload is equal") do
+		mut state := logical_checked_source("def main()\nfirst: 1 | 2 := 1\nother: 1 | 3 := 1\nvalues := {first => 2}\nothers := {other => 3}\nputs(values[first])\nputs(others[other])\nend\n")
+		expect(check(state)).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		mut indexes: Array<Integer> := []
+		state.scalar_mir.instructions.each.with_index do |instruction, index|
+			if instruction.kind == 28
+				indexes.push(index)
+			end
+		end
+		expect(indexes.size()).to_equal(2)
+		first := state.scalar_mir.instructions[indexes[0]]
+		other := state.scalar_mir.instructions[indexes[1]]
+		state.scalar_mir.instructions[indexes[0]] = compiler_test_instruction_with_cell(first, 3, other.second)
+		expect(verify_mir(state.scalar_mir, true).empty?()).to_be_false()
+		state.scalar_mir.instructions[indexes[0]] = first
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	end
+	test("keeps integer and String union key layouts distinct from ordinary scalar keys") do
+		mut state := logical_checked_source("def main()\nnumber: 0 | 1 := 0\nlabel: \"a\" | \"b\" := \"a\"\nnumbers := {number => 2}\nlabels := {label => 3}\nordinary := {\"a\" => 4}\nputs(numbers.size() + labels.size() + ordinary.size())\nend\n")
+		expect(check(state)).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		mut flags: Array<Integer> := []
+		state.scalar_mir.types.each.with_index do |row, index|
+			if row.kind == 3
+				flags.push(mir_hash_key_flags(state.scalar_mir, index + 9))
+			end
+		end
+		expect(flags).to_equal([4, 5, 1])
+	end
+end

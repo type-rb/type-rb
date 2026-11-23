@@ -1,0 +1,192 @@
+import { checked_category_value } from frontend/types/value_categories
+import { checked_compare_equal, checked_compare_greater_equal, checked_comparison_operator_offset, checked_float_add, checked_float_operator_offset, checked_float_power, checked_integer_add, checked_integer_operator_offset, checked_integer_power, checked_integer_remainder, checked_operator_invalid, checked_string_concat } from frontend/types/operator_plans
+import { binary_add, binary_and, binary_divide, binary_equal, binary_not_equal, binary_or, binary_power, binary_remainder } from frontend/types/operators
+import { enum_payloadless, find_enum_type } from frontend/types/enum_types
+import { object_value_assignable } from frontend/types/object_types
+import { CheckedValue, checked_value } from frontend/checking/body/values
+import { mir_logical_plan } from mir/model/module
+import { binary_operator_id } from frontend/syntax/syntax_forms
+import { type_display } from frontend/resolution/type_resolution
+import { CompilerState, diagnostic, diagnostic_at } from state/state
+import { store_integer } from support/storage
+
+def type_diagnostic(
+		mut state: CompilerState,
+		line: Integer,
+		message: String,
+	): CheckedValue
+	diagnostic(state, "TRBN4004", line, message)
+	return checked_value("Invalid", checked_category_value(), 9007199254740991, 0)
+end
+
+def numeric_type(type_name: String): Boolean
+	if type_name == "Integer"
+		return true
+	end
+	return type_name == "Float"
+end
+
+def operator_diagnostic(mut state: CompilerState, operator: String, left: String, right: String, origin: Integer): CheckedValue
+	mut message := "operator " + operator + " does not support " + type_display(state, left)
+	if right != ""
+		message += " and " + type_display(state, right)
+	end
+	diagnostic_at(state, "TRBN4004", origin, message)
+	return checked_value("Invalid", checked_category_value(), 9007199254740991, 0)
+end
+
+def check_expected(
+		mut state: CompilerState,
+		actual: String,
+		expected: String,
+		line: Integer,
+	): Boolean
+	if expected == "" || actual == "Never"
+		return true
+	end
+	assignable := object_value_assignable(state, actual, expected)
+	if assignable
+		return true
+	end
+	diagnostic(
+		state,
+		"TRBN4004",
+		line,
+		"expected " + type_display(state, expected) + ", found " + type_display(state, actual),
+	)
+	return false
+end
+
+def check_expected_argument(mut state: CompilerState, actual: String, expected: String, line: Integer, origin: Integer, context: String): Boolean
+	if context == ""
+		return check_expected(state, actual, expected, line)
+	end
+	if expected == "" || actual == "Never" || object_value_assignable(state, actual, expected)
+		return true
+	end
+	diagnostic_at(state, "TRBN4004", origin, context + " has type " + type_display(state, actual) + ", expected " + type_display(state, expected))
+	return false
+end
+
+def checked_binary_plan_type(plan: Integer): String
+	if plan >= checked_integer_add()
+		if plan <= checked_integer_power()
+			return "Integer"
+		end
+	end
+	if plan >= checked_float_add()
+		if plan <= checked_float_power()
+			return "Float"
+		end
+	end
+	if plan >= checked_compare_equal()
+		if plan <= checked_compare_greater_equal()
+			return "Boolean"
+		end
+	end
+	if plan == checked_string_concat()
+		return "String"
+	end
+	return "Invalid"
+end
+
+def binary_result_type(
+		mut state: CompilerState,
+		operator: String,
+		left: String,
+		right: String,
+		line: Integer,
+		origin: Integer,
+	): String
+	if left == "Range<Integer>" || right == "Range<Integer>"
+		diagnostic(state, "TRBN4004", line, "Range comparison is not supported")
+		return "Invalid"
+	end
+	operator_id := binary_operator_id(operator)
+	if operator_id >= binary_or()
+		if operator_id <= binary_and()
+			mut right_type := right
+			if right_type == "Never"
+				right_type = "Boolean"
+			end
+			plan := mir_logical_plan(operator_id, left, right_type)
+			if plan == checked_operator_invalid()
+				operator_diagnostic(state, operator, left, right, origin)
+				return "Invalid"
+			end
+			store_integer(state.callables.checked[0].checked_operator_plans, origin, plan)
+			return "Boolean"
+		end
+	end
+	enum_index := find_enum_type(state, left)
+	if enum_index >= 0 && left == right && (operator_id == binary_equal() || operator_id == binary_not_equal()) && enum_payloadless(state, enum_index)
+		return "Boolean"
+	end
+	mut numeric_pair := false
+	if numeric_type(left)
+		if numeric_type(right)
+			numeric_pair = true
+		end
+	end
+	if left != right
+		if !numeric_pair
+			operator_diagnostic(state, operator, left, right, origin)
+			return "Invalid"
+		end
+	end
+	mut numeric_tag := checked_integer_operator_offset()
+	if left == "Float"
+		numeric_tag = checked_float_operator_offset()
+	end
+	if right == "Float"
+		numeric_tag = checked_float_operator_offset()
+	end
+	mut plan := checked_operator_invalid()
+	if operator_id >= binary_add()
+		if operator_id <= binary_divide() || operator_id == binary_power()
+			if numeric_pair
+				if operator_id == binary_power()
+					if numeric_tag == checked_integer_operator_offset()
+						plan = checked_integer_power()
+					else
+						plan = checked_float_power()
+					end
+				else
+					plan = numeric_tag + operator_id
+				end
+			else
+				if operator_id == binary_add()
+					if left == "String"
+						plan = checked_string_concat()
+					end
+				end
+			end
+		else
+			if operator_id == binary_remainder()
+				if left == "Integer"
+					if right == "Integer"
+						plan = checked_integer_remainder()
+					end
+				end
+			else
+				if numeric_pair
+					plan = checked_comparison_operator_offset() + operator_id
+				else
+					if operator_id <= binary_not_equal()
+						if left == right
+							if left == "Boolean" || left == "String"
+								plan = checked_comparison_operator_offset() + operator_id
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+	if plan != checked_operator_invalid()
+		store_integer(state.callables.checked[0].checked_operator_plans, origin, plan)
+		return checked_binary_plan_type(plan)
+	end
+	operator_diagnostic(state, operator, left, right, origin)
+	return "Invalid"
+end

@@ -1,0 +1,208 @@
+import { EnumDefinition, EnumField, EnumPattern, EnumVariant } from frontend/types/enum_model
+import { check, emit_qbe } from compiler
+import { lex } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { compiler_new } from state/state
+import { load_string } from support/storage
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { logical_run_qbe } from testing/qbe_runner
+import { control_test_output } from testing/mir/control
+import { compiler_test_instruction_with_cell } from testing/compiler
+import { verify_mir } from mir/verify/module
+import { MirField, MirType } from mir/model/module
+import { string_starts_with } from support/path
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+describe("MIR enum values") do
+	test("preserves nominal payloads, patterns and lifetime with erased source") do
+		sources := [
+			"enum Color\nRed\nBlue\nend\ndef label(color: Color): String\ncase color\nwhen Color::Red\nreturn \"red\"\nwhen Color::Blue\nreturn \"blue\"\nend\nend\ndef main()\nputs(label(Color::Red))\nputs(Color::Red == Color::Red)\nputs(Color::Red != Color::Blue)\nend\n",
+			"enum Token\nText(value: String)\nNumber(value: Float)\nEOF\nend\ndef label(token: Token): String\nreturn case token\nwhen Token::Text(value)\nvalue + \"!\"\nwhen Token::Number(value)\nvalue.to_i().to_s()\nwhen Token::EOF\n\"end\"\nend\nend\ndef main()\nvalues := [Token::Text(\"hello\"), Token::Number(7), Token::EOF]\nvalues.each do |value|\nputs(label(value))\nend\nend\n",
+			"enum Change\nPair(id: Integer, *, before: String, after: String)\nend\ndef mark(value: String): String\nputs(value)\nreturn value\nend\ndef label(change: Change): String\ncase change\nwhen Change::Pair(id, after: next_value, before: previous)\nreturn id.to_s() + previous + next_value\nend\nend\ndef main()\nputs(label(Change::Pair(1, after: mark(\"new\"), before: mark(\"old\"))))\nend\n",
+			"enum Chain\nEnd\nLink(value: Integer, tail: Chain)\nend\ndef total(chain: Chain): Integer\ncase chain\nwhen Chain::End\nreturn 0\nwhen Chain::Link(value, tail)\nreturn value + total(tail)\nend\nend\ndef main()\nchain := Chain::Link(1, Chain::Link(2, Chain::End))\nlookup := {\"chain\" => chain}\nputs(total(lookup[\"chain\"]))\nend\n",
+			"enum Value\nText(value: String)\nEmpty\nend\ndef label(value: Value): String\ntext := \"outer\"\ncase value\nwhen Value::Text(text)\nputs(text)\nwhen Value::Empty\nputs(\"empty\")\nend\nreturn text\nend\ndef main()\nputs(label(Value::Text(\"inner\")))\nend\n",
+			"enum Value\nText(value: String?)\nEmpty\nend\nrecord Holder\nvalue: Value?\nend\ndef label(holder: Holder): String\nif holder.value == nil\nreturn \"none\"\nend\ncase holder.value\nwhen Value::Text(text)\nif text != nil\nreturn text\nend\nreturn \"nil\"\nwhen Value::Empty\nreturn \"empty\"\nend\nend\ndef main()\nputs(label(Holder.new(value: Value::Text(\"hello\"))))\nputs(label(Holder.new(value: Value::Text(nil))))\nputs(label(Holder.new(value: nil)))\nend\n",
+			"enum Action\nTick(value: Integer)\nSkip\nStop\nend\ndef select(value: Action): Action\nputs(\"select\")\nreturn value\nend\ndef main()\nvalues := [Action::Tick(2), Action::Skip, Action::Tick(3), Action::Stop, Action::Tick(99)]\nmut i := 0\nmut total := 0\nwhile i < values.size()\nvalue := values[i]\ni += 1\ncase select(value)\nwhen Action::Tick(number)\ntotal += number\nwhen Action::Skip\nnext\nwhen Action::Stop\nbreak\nend\nputs(total)\nend\nputs(i)\nputs(total)\nend\n",
+			"enum Box\nHold(values: Array<String>, extra: String)\nEmpty\nend\ndef main()\nmut values := [\"he\" + \"ld\"]\nbox := Box::Hold(values, \"ex\" + \"tra\")\nvalues.push(\"later\")\ncase box\nwhen Box::Hold(items, extra)\nputs(items.size())\nputs(items[0] + extra)\nwhen Box::Empty\nputs(\"unused\")\nend\nend\n",
+			"enum Tree\nNode(value: Node)\nLeaf\nend\nrecord Node\nvalue: String\ntail: Tree\nend\ndef label(tree: Tree): String\ncase tree\nwhen Tree::Node(node)\nreturn node.value + label(node.tail)\nwhen Tree::Leaf\nreturn \"!\"\nend\nend\ndef main()\nputs(label(Tree::Node(Node.new(value: \"held\", tail: Tree::Leaf))))\nend\n"
+		]
+		outputs := ["red\ntrue\ntrue\n", "hello!\n7\nend\n", "new\nold\n1oldnew\n", "3\n", "inner\nouter\n", "hello\nnil\nnone\n", "select\n2\nselect\nselect\n5\nselect\n4\n5\n", "2\nheldextra\n", "held!\n"]
+		mut index := 0
+		sources.each do |source|
+			mut state := compiler_new(source.size() + 1)
+			valid := lex(state, source) && parse_module(state, 0, state.module_graph.entry_module[0]) && resolve(state) && check(state)
+			if !valid
+				puts(index)
+				puts(load_string(state.diagnostics.messages, 0))
+			end
+			expect(valid).to_be_true()
+			if valid
+				before := control_test_output(emit_qbe(state))
+				if index == 0
+					expect(before.include?("data $trbn_static_enum0 = align 8 { l 0, l 0 }")).to_be_true()
+					expect(before.include?("data $trbn_static_enum1 = align 8 { l 0, l 1 }")).to_be_true()
+					expect(before.include?("call $trbn_gc_alloc(l $trbn_desc_enum")).to_be_false()
+				end
+				if index == 1
+					expect(before.include?("data $trbn_static_enum2 = align 8 { l 0, l 2 }")).to_be_true()
+					expect(before.include?("call $trbn_gc_alloc(l $trbn_desc_enum0")).to_be_true()
+				end
+				intrinsic_mir_erase(state)
+				mut row := 0
+				while row < state.nominal.enums.size()
+					state.nominal.enums[row] = EnumDefinition.new(name: "unavailable", source_id: -1, line: -1, variant_start: 0, variant_count: 0)
+					row += 1
+				end
+				row = 0
+				while row < state.nominal.enum_variants.size()
+					state.nominal.enum_variants[row] = EnumVariant.new(owner: -1, name: "unavailable", line: -1, field_start: 0, field_count: 0)
+					row += 1
+				end
+				row = 0
+				while row < state.nominal.enum_fields.size()
+					state.nominal.enum_fields[row] = EnumField.new(name: "unavailable", type_name: "Invalid", line: -1, named_only: false)
+					row += 1
+				end
+				row = 0
+				state.callables.checked_bodies.each do |body|
+					row = 0
+					while row < body.enum_patterns.size()
+						body.enum_patterns[row] = EnumPattern.new(origin: -1, variant: -1, bindings: [])
+						row += 1
+					end
+					body.enum_pattern_origins.used[0] = 0
+				end
+				expect(control_test_output(emit_qbe(state))).to_equal(before)
+				state.scalar_mir.functions.each do |function|
+					mut left := function.block_start
+					mut right := left + function.block_count - 1
+					while left < right
+						saved := state.scalar_mir.blocks[left]
+						state.scalar_mir.blocks[left] = state.scalar_mir.blocks[right]
+						state.scalar_mir.blocks[right] = saved
+						left += 1
+						right -= 1
+					end
+				end
+				expect(verify_mir(state.scalar_mir, true)).to_equal("")
+				qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+				if qbe != nil
+					mut forced := ""
+					mut ordinary := false
+					control_test_output(emit_qbe(state)).split("\n").each do |line|
+						if string_starts_with(line, "function ")
+							ordinary = line.include?("$trbnf")
+						end
+						if line == "}"
+							ordinary = false
+						end
+						if ordinary && (line.include?("call $trbn_array_new(") || line.include?("call $trbn_array_push_") || line.include?("call $trbn_string_concat(") || line.include?("call $trbn_gc_alloc(") || line.include?("call $trbn_hash_") || line.include?("call $trbnf"))
+							forced += "\tcall $trbn_gc_collect(w 0)\n"
+						end
+						forced += line + "\n"
+					end
+					case logical_run_qbe(qbe, forced)
+					when Result::Ok(actual)
+						expect(actual).to_equal(outputs[index])
+					when Result::Err(error)
+						puts(error)
+						expect(false).to_be_true()
+					end
+				end
+			end
+			index += 1
+		end
+	end
+
+	test("rejects nonexhaustive, wrong nominal, malformed and mutable patterns") do
+		sources := ["enum E\nA\nA\nend\ndef main()\nend\n",
+			"enum E\nA\nB\nend\ndef main()\ncase E::A\nwhen E::A\nputs(1)\nend\nend\n",
+			"enum E\nA\nend\ndef main()\ncase E::A\nwhen E::A\nputs(1)\nwhen E::A\nputs(2)\nend\nend\n",
+			"enum E\nA\nend\nenum F\nA\nend\ndef main()\nputs(E::A == F::A)\nend\n",
+			"enum E\nA\nend\ndef main()\nx := E::A()\nend\n",
+			"enum E\nA(value: Integer)\nend\ndef main()\nx := E::A\nend\n",
+			"enum E\nA(value: Integer)\nend\ndef main()\ncase E::A(1)\nwhen E::A(value)\nvalue = 2\nend\nend\n",
+			"enum E\nA(value: Integer)\nend\ndef main()\ncase E::A(1)\nwhen E::A\nputs(1)\nend\nend\n",
+			"enum E\nA(first: Integer, second: String)\nend\ndef main()\ncase E::A(1, \"x\")\nwhen E::A(value, value)\nputs(value)\nend\nend\n",
+			"enum E\nA(value: String)\nend\ndef main()\nputs(E::A(\"a\") == E::A(\"b\"))\nend\n",
+			"enum E\nA(id: Integer, *, text: String)\nend\ndef main()\nx := E::A(1, \"bad\")\nend\n",
+			"enum E\nA(id: Integer, *, text: String)\nend\ndef main()\nx := E::A(id: 1, text: \"bad\")\nend\n",
+			"enum E\nA(id: Integer, *, text: String)\nend\ndef main()\nx := E::A(1, text: \"bad\", text: \"bad\")\nend\n",
+			"enum E\nA(id: Integer, *, text: String)\nend\ndef main()\ncase E::A(1, text: \"bad\")\nwhen E::A(id, text)\nputs(id)\nputs(text)\nend\nend\n"]
+		mut index := 0
+		sources.each do |source|
+			mut state := compiler_new(source.size() + 1)
+			valid := lex(state, source) && parse_module(state, 0, state.module_graph.entry_module[0]) && resolve(state) && check(state)
+			if valid
+				puts(index)
+			end
+			expect(valid).to_be_false()
+			index += 1
+		end
+	end
+
+	test("rejects forged enum operations before backend or roots consume them") do
+		source := "enum E\nText(value: String)\nEmpty\nend\ndef main()\ncase E::Text(\"ok\")\nwhen E::Text(value)\nputs(value)\nwhen E::Empty\nputs(\"empty\")\nend\nend\n"
+		mut state := compiler_new(source.size() + 1)
+		expect(lex(state, source) && parse_module(state, 0, state.module_graph.entry_module[0]) && resolve(state) && check(state)).to_be_true()
+		mut index := 0
+		while index < state.scalar_mir.instructions.size()
+			instruction := state.scalar_mir.instructions[index]
+			if instruction.kind >= 37 && instruction.kind <= 40
+				state.scalar_mir.instructions[index] = compiler_test_instruction_with_cell(instruction, 4, 99999)
+				expect(verify_mir(state.scalar_mir, true) != "").to_be_true()
+				state.scalar_mir.instructions[index] = instruction
+				state.scalar_mir.instructions[index] = compiler_test_instruction_with_cell(instruction, 2, 99999)
+				expect(verify_mir(state.scalar_mir, true) != "").to_be_true()
+				state.scalar_mir.instructions[index] = instruction
+			end
+			index += 1
+		end
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	end
+	test("rejects corrupt nominal catalogs and payload descriptors") do
+		source := "enum E\nPair(left: String, right: Integer)\nEmpty\nend\ndef main()\n_value := E::Pair(\"ok\", 1)\nend\n"
+		mut state := compiler_new(source.size() + 1)
+		expect(lex(state, source) && parse_module(state, 0, state.module_graph.entry_module[0]) && resolve(state) && check(state)).to_be_true()
+		definition := state.scalar_mir.enums[0]
+		bad_definitions := [
+			EnumDefinition.new(name: definition.name, source_id: -1, line: definition.line, variant_start: definition.variant_start, variant_count: definition.variant_count),
+			EnumDefinition.new(name: definition.name, source_id: definition.source_id, line: definition.line, variant_start: 1, variant_count: definition.variant_count),
+			EnumDefinition.new(name: definition.name, source_id: definition.source_id, line: definition.line, variant_start: definition.variant_start, variant_count: 0)]
+		bad_definitions.each do |row|
+			state.scalar_mir.enums[0] = row
+			expect(verify_mir(state.scalar_mir, true) != "").to_be_true()
+		end
+		state.scalar_mir.enums[0] = definition
+		variant := state.scalar_mir.enum_variants[0]
+		bad_variants := [
+			EnumVariant.new(owner: 999, name: variant.name, line: variant.line, field_start: variant.field_start, field_count: variant.field_count),
+			EnumVariant.new(owner: variant.owner, name: variant.name, line: variant.line, field_start: variant.field_start, field_count: 999),
+			EnumVariant.new(owner: variant.owner, name: "", line: variant.line, field_start: variant.field_start, field_count: variant.field_count)]
+		bad_variants.each do |row|
+			state.scalar_mir.enum_variants[0] = row
+			expect(verify_mir(state.scalar_mir, true) != "").to_be_true()
+		end
+		state.scalar_mir.enum_variants[0] = variant
+		field := state.scalar_mir.enum_fields[0]
+		bad_fields := [
+			MirField.new(owner: 1, name: field.name, type_id: field.type_id, source_id: field.source_id, line: field.line),
+			MirField.new(owner: field.owner, name: field.name, type_id: 9999, source_id: field.source_id, line: field.line),
+			MirField.new(owner: field.owner, name: "right", type_id: field.type_id, source_id: field.source_id, line: field.line),
+			MirField.new(owner: field.owner, name: field.name, type_id: field.type_id, source_id: 999, line: field.line)]
+		bad_fields.each do |row|
+			state.scalar_mir.enum_fields[0] = row
+			expect(verify_mir(state.scalar_mir, true) != "").to_be_true()
+		end
+		state.scalar_mir.enum_fields[0] = field
+		type_row := state.scalar_mir.types[0]
+		state.scalar_mir.types[0] = MirType.new(kind: 8, name: type_row.name, element: type_row.element, key: type_row.key, declaration: 999)
+		expect(verify_mir(state.scalar_mir, true) != "").to_be_true()
+		state.scalar_mir.types[0] = type_row
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	end
+
+end

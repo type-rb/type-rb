@@ -1,0 +1,44 @@
+import { check } from compiler
+import { managed_mir_test_fixture } from testing/mir/managed
+import { logical_checked_source } from testing/pipeline
+import { lex } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { compiler_new, has_diagnostic } from state/state
+import { load_integer, load_string } from support/storage
+import { verify_mir } from mir/verify/module
+import { describe, expect, test } from trb/std/test
+
+describe("Lexical boundary MIR") do
+	test("keeps suffixed names and literal operators after source erasure and collection") do
+		managed_mir_test_fixture("lexical-callables-mir", 4)
+	end
+	test("distinguishes nullable type punctuation from callable suffixes") do
+		mut state := compiler_new(32)
+		expect(lex(state, "Integer? ready? save! value!=2")).to_be_true()
+		expect(load_string(state.source_tokens.token_texts, 0)).to_equal("Integer")
+		expect(load_string(state.source_tokens.token_texts, 1)).to_equal("?")
+		expect(load_string(state.source_tokens.token_texts, 2)).to_equal("ready?")
+		expect(load_string(state.source_tokens.token_texts, 3)).to_equal("save!")
+		expect(load_string(state.source_tokens.token_texts, 4)).to_equal("value!")
+		expect(load_string(state.source_tokens.token_texts, 5)).to_equal("=")
+	end
+	test("keeps reserved words as literal Hash labels and Symbol names") do
+		mut state := logical_checked_source("def main()\nvalues := {alias: 1, (newtype): 2, __trb_saved: 3}\nputs(values[:alias] + values[:newtype] + values[:__trb_saved])\nend\n")
+		expect(check(state)).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	end
+	test("rejects reserved declarations at their authored line") do
+		sources := ["def read(alias: Integer): Integer\nreturn alias\nend\ndef main()\nputs(read(1))\nend\n", "def main()\n__trb_saved := 1\nputs(__trb_saved)\nend\n", "def main()\n[1].each { |newtype| puts(newtype) }\nend\n"]
+		sources.each.with_index do |source, index|
+			mut state := compiler_new(source.size() + 1)
+			expect(lex(state, source)).to_be_true()
+			expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_false()
+			expect(has_diagnostic(state)).to_be_true()
+			mut line := 2
+			if index == 0
+				line = 1
+			end
+			expect(load_integer(state.diagnostics.lines, 0)).to_equal(line)
+		end
+	end
+end

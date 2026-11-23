@@ -1,0 +1,19 @@
+import { ReplStore, repl_integer, repl_value } from repl/model
+
+def repl_range_array(mut store: ReplStore, receiver: Integer): Integer
+	mut cursor := store.integers[store.children[receiver][0]]
+	bound := store.integers[store.children[receiver][1]]
+	exclusive := store.integers[store.children[receiver][2]]
+	mut values: Array<Integer> := []
+	while cursor <= bound
+		if cursor == bound && exclusive == 1
+			break
+		end
+		values.push(repl_integer(store, cursor))
+		if cursor == bound
+			break
+		end
+		cursor += 1
+	end
+	return repl_value(store, "Array<Integer>", 0, 0.0, "", values)
+end

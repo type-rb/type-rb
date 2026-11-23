@@ -1,0 +1,6 @@
+def main()
+	if 2 ** 53 == 0
+		return
+	end
+	return
+end

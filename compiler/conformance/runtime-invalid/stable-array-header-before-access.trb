@@ -1,0 +1,14 @@
+def reordered(input: Array<Integer>, unused: Integer): Integer
+	mut total := 0
+	mut index := 0
+	while index < input.size()
+		index += 1
+		total += input[index]
+	end
+	return total
+end
+
+def main()
+	puts(reordered([7], 0).to_s())
+	return
+end

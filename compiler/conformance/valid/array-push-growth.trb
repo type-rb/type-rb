@@ -1,0 +1,25 @@
+def grow(mut values: Array<Integer>): Integer
+	values.push(9007199254740991)
+	return -9007199254740991
+end
+
+def main()
+	mut values: Array<Integer> := []
+	mut retained := values
+	mut index := 0
+	while index < 1100
+		retained.push(index)
+		index += 1
+	end
+	values.push(grow(retained))
+	mut total := 0
+	mut cursor := 0
+	while cursor < 1100
+		total += values[cursor]
+		cursor += 1
+	end
+	puts(values.size())
+	puts(total)
+	puts(values[1100])
+	puts(values[1101])
+end

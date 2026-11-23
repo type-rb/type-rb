@@ -1,0 +1,135 @@
+import { time_codec_name } from frontend/providers/time_codecs
+import { attribute_record_field } from frontend/types/attribute_kinds
+import { find_enum_type } from frontend/types/enum_types
+import { hash_key_type, hash_value_type } from frontend/types/hash_types
+import { find_newtype_type } from frontend/types/newtype_types
+import { nullable_element } from frontend/types/nullable_types
+import { raw_enum_type } from frontend/types/raw_enum_types
+import { array_element_type, find_record_type, generic_instance_for_type, type_display } from frontend/resolution/type_resolution
+import { token_kind_string } from state/token_kinds
+import { CompilerState, diagnostic, has_diagnostic } from state/state
+import { load_integer, load_string } from support/storage
+
+# Child indices form a finite schema tree. Canonical types remain independent
+# of private generated aliases and of source spelling in another module.
+record JsonCodecSchema
+	kind: String
+	type_name: String
+	display: String
+	children: Array<Integer>
+	names: Array<String>
+	wire_names: Array<String>
+end
+
+def json_codec_wire_name(state: CompilerState, target: String, record_index: Integer, member: String): String
+	source := load_integer(state.declarations.record_modules, record_index)
+	mut name := load_string(state.declarations.record_names, record_index)
+	instance := generic_instance_for_type(state, target)
+	if instance >= 0
+		name = state.type_resolution.generic_definitions[state.type_resolution.generic_instances[instance].definition].name
+	end
+	state.parsed.attributes.each do |attribute|
+		if attribute.source_id == source && attribute.kind == attribute_record_field() && attribute.owner == name && attribute.member == member && attribute.name == "@json" && attribute.arguments.size() > 0
+			argument := attribute.arguments[0]
+			if argument.finish == argument.start + 1 && load_integer(state.source_tokens.token_kinds, argument.start) == token_kind_string()
+				raw := load_string(state.source_tokens.token_texts, argument.start)
+				mut wire := ""
+				mut index := 0
+				while index < raw.size() && raw[index] != ","
+					wire += raw[index]
+					index += 1
+				end
+				if wire == ""
+					return member
+				end
+				return wire
+			end
+		end
+	end
+	return member
+end
+
+def json_codec_schema(mut state: CompilerState, target: String, inbound: Boolean, line: Integer, visiting: Array<String>, mut schemas: Array<JsonCodecSchema>): Integer
+	if visiting.size() >= 128
+		diagnostic(state, "TRBN4003", line, "JSON codec schema exceeds the compiler nesting limit")
+		return -1
+	end
+	mut kind := ""
+	mut children: Array<Integer> := []
+	mut names: Array<String> := []
+	mut wires: Array<String> := []
+	mut path: Array<String> := []
+	visiting.each { |entry| path.push(entry) }
+	path.push(target)
+	optional := nullable_element(target)
+	array := array_element_type(target)
+	hash := hash_value_type(target)
+	nominal := find_newtype_type(state, target)
+	raw := raw_enum_type(state, find_enum_type(state, target))
+	record_index := find_record_type(state, target)
+	if optional != ""
+		kind = "nullable"
+		children.push(json_codec_schema(state, optional, inbound, line, path, schemas))
+	elsif target == "Boolean" || target == "Integer" || target == "Float" || target == "String"
+		kind = target
+	elsif time_codec_name(state, target) != ""
+		kind = "time"
+	elsif array != ""
+		kind = "array"
+		children.push(json_codec_schema(state, array, inbound, line, path, schemas))
+	elsif hash != "" && hash_key_type(target) == "String"
+		kind = "hash"
+		children.push(json_codec_schema(state, hash, inbound, line, path, schemas))
+	elsif nominal >= 0
+		if inbound && state.nominal.newtypes[nominal].closed
+			diagnostic(state, "TRBN4003", line, "JSON decoding cannot construct closed newtype " + type_display(state, target))
+			return -1
+		end
+		kind = "newtype"
+		children.push(json_codec_schema(state, state.nominal.newtypes[nominal].representation, inbound, line, path, schemas))
+	elsif raw != ""
+		kind = "enum"
+		children.push(json_codec_schema(state, raw, inbound, line, path, schemas))
+	elsif record_index >= 0
+		if generic_instance_for_type(state, target) >= 0
+			diagnostic(state, "TRBN4003", line, "generic record JSON codecs are not supported yet")
+			return -1
+		end
+		mut recursive := false
+		visiting.each do |entry|
+			if entry == target
+				recursive = true
+			end
+		end
+		if recursive
+			diagnostic(state, "TRBN4003", line, "recursive JSON codec record " + type_display(state, target) + " is not supported yet")
+			return -1
+		end
+		kind = "record"
+		mut seen: Hash<String, Integer> := {}
+		mut index := load_integer(state.declarations.record_field_starts, record_index)
+		finish := index + load_integer(state.declarations.record_field_counts, record_index)
+		while index < finish && !has_diagnostic(state)
+			name := load_string(state.declarations.field_names, index)
+			wire := json_codec_wire_name(state, target, record_index, name)
+			if wire == "-" || seen.key?(wire)
+				diagnostic(state, "TRBN4003", line, "record " + type_display(state, target) + " has an unsupported or duplicate JSON field name")
+				return -1
+			end
+			seen[wire] = 1
+			names.push(name)
+			wires.push(wire)
+			children.push(json_codec_schema(state, load_string(state.declarations.field_types, index), inbound, line, path, schemas))
+			index += 1
+		end
+	else
+		diagnostic(state, "TRBN4003", line, "JSON codec type " + type_display(state, target) + " is not supported")
+		return -1
+	end
+	if has_diagnostic(state)
+		return -1
+	end
+	index := schemas.size()
+	schemas.push(JsonCodecSchema.new(kind: kind, type_name: target, display: type_display(state, target), children: children, names: names, wire_names: wires))
+	return index
+end

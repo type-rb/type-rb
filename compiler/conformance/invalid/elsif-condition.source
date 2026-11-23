@@ -1,0 +1,7 @@
+def main()
+if true
+return
+elsif 1
+return
+end
+end

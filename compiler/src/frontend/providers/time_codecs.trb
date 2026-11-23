@@ -1,0 +1,156 @@
+import { find_object_type } from frontend/types/object_types
+import { find_import_binding, find_visible_alias } from frontend/resolution/declaration_lookup
+import { json_provider_kind } from frontend/providers/json_declarations
+import { web_binding_kind } from frontend/providers/web_declarations
+import { array_element_type, find_record_type, resolve_type_name } from frontend/resolution/type_resolution
+import { hash_value_type } from frontend/types/hash_types
+import { nullable_element } from frontend/types/nullable_types
+import { find_newtype_type } from frontend/types/newtype_types
+import { standard_source_time } from state/standard_source_kinds
+import { CompilerState, diagnostic } from state/state
+import { load_integer, load_string, sparse_integer_at } from support/storage
+
+def time_codec_name(state: CompilerState, target: String): String
+	object := find_object_type(state, target)
+	if object < 0
+		return ""
+	end
+	row := state.nominal.objects[state.nominal.object_instances[object].definition]
+	if sparse_integer_at(state.standard_modules, row.source_id) != standard_source_time() || row.interface_type || row.parameters.size() > 0
+		return ""
+	end
+	if row.name == "Date" || row.name == "TimeOfDay" || row.name == "DateTime" || row.name == "Instant" || row.name == "Duration" || row.name == "TimeZone"
+		return row.name
+	end
+	return ""
+end
+
+# The pinned reference distinguishes authored type spelling from declaration
+# identity. Preserve its alias restrictions before generic cache lookup while
+# allowing canonical fields reached through renamed imports in another module.
+def time_codec_spelling_valid(mut state: CompilerState, owner: Integer, raw: String, line: Integer, depth: Integer): Boolean
+	if depth >= 128 || sparse_integer_at(state.standard_modules, owner) > 0
+		return true
+	end
+	mut child := nullable_element(raw)
+	if child == ""
+		child = array_element_type(raw)
+	end
+	if child == ""
+		child = hash_value_type(raw)
+	end
+	if child != ""
+		return time_codec_spelling_valid(state, owner, child, line, depth + 1)
+	end
+	alias_index := find_visible_alias(state, owner, raw)
+	if alias_index >= 0
+		row := state.type_resolution.type_aliases[alias_index]
+		if row.parameters.size() == 0
+			return time_codec_spelling_valid(state, row.source_id, row.target, line, depth + 1)
+		end
+	end
+	target := resolve_type_name(state, owner, raw, false)
+	nominal := find_newtype_type(state, target)
+	if nominal >= 0
+		row := state.nominal.newtypes[nominal]
+		return time_codec_spelling_valid(state, row.source_id, row.target, line, depth + 1)
+	end
+	name := time_codec_name(state, target)
+	if name != "" && raw != name
+		diagnostic(state, "TRBN4003", line, "renamed time codec types are not supported yet")
+		return false
+	end
+	return true
+end
+
+def time_codec_arguments_valid(mut state: CompilerState, definition: Integer, arguments: Array<String>, line: Integer): Boolean
+	if json_provider_kind(state, definition) == 0 && web_binding_kind(state, definition) == 0
+		return true
+	end
+	arguments.each do |argument|
+		if !time_codec_spelling_valid(state, state.module_graph.active_module[0], argument, line, 0)
+			return false
+		end
+	end
+	return true
+end
+
+def time_codec_method_arguments_valid(mut state: CompilerState, object: Integer, member: String, arguments: Array<String>, line: Integer): Boolean
+	row := state.nominal.objects[state.nominal.object_instances[object].definition]
+	row.methods.each do |method|
+		if method.name == member && method.generic_function >= 0
+			if !time_codec_arguments_valid(state, method.generic_function, arguments, line)
+				return false
+			end
+		end
+	end
+	return true
+end
+
+def time_codec_names_valid(mut state: CompilerState, target: String, owner: Integer, line: Integer, depth: Integer, visiting: Array<String>, field_context: Boolean): Boolean
+	if depth >= 128 || sparse_integer_at(state.standard_modules, owner) > 0
+		return true
+	end
+	visiting.each do |seen|
+		if seen == target
+			return true
+		end
+	end
+	mut path: Array<String> := []
+	visiting.each { |seen| path.push(seen) }
+	path.push(target)
+	name := time_codec_name(state, target)
+	if name != ""
+		if !field_context
+			canonical := find_import_binding(state, owner, name)
+			if canonical < 0 || load_string(state.module_graph.import_declarations, canonical) != name
+				diagnostic(state, "TRBN4003", line, "time codec values require a canonical " + name + " import")
+				return false
+			end
+		end
+		start := load_integer(state.module_graph.module_import_starts, owner)
+		finish := start + load_integer(state.module_graph.module_import_counts, owner)
+		mut binding := start
+		while binding < finish
+			source := load_integer(state.module_graph.import_targets, binding)
+			declaration := load_string(state.module_graph.import_declarations, binding)
+			if source >= 0 && sparse_integer_at(state.standard_modules, source) == standard_source_time() && (declaration == name || declaration == "")
+				return true
+			end
+			binding += 1
+		end
+		diagnostic(state, "TRBN4003", line, "time codecs require an explicit " + name + " import")
+		return false
+	end
+	mut child := nullable_element(target)
+	if child == ""
+		child = array_element_type(target)
+	end
+	if child == ""
+		child = hash_value_type(target)
+	end
+	nominal := find_newtype_type(state, target)
+	if child == "" && nominal >= 0
+		child = state.nominal.newtypes[nominal].representation
+	end
+	if child != ""
+		return time_codec_names_valid(state, child, owner, line, depth + 1, path, field_context)
+	end
+	record_index := find_record_type(state, target)
+	if record_index >= 0
+		mut index := load_integer(state.declarations.record_field_starts, record_index)
+		finish := index + load_integer(state.declarations.record_field_counts, record_index)
+		while index < finish
+			source := load_integer(state.declarations.record_modules, record_index)
+			raw := load_string(state.parsed.field_type_names, index)
+			if raw != "" && !time_codec_spelling_valid(state, source, raw, line, depth + 1)
+				return false
+			end
+			if !time_codec_names_valid(state, load_string(state.declarations.field_types, index), owner, line, depth + 1, path, true)
+				return false
+			end
+			index += 1
+		end
+	end
+	return true
+end

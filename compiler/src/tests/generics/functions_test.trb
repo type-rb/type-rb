@@ -1,0 +1,126 @@
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { verify_mir } from mir/verify/module
+import { GenericFunction, GenericFunctionInstance } from frontend/types/generic_model
+import { check, emit_qbe } from compiler
+import { lex } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { compiler_new } from state/state
+import { load_string } from support/storage
+import { logical_run_qbe } from testing/qbe_runner
+import { control_test_output } from testing/mir/control
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+describe("MIR generic functions") do
+	test("checks and executes concrete signatures with shared authored bodies") do
+		sources := ["def identity<T>(value: T): T\nreturn value\nend\ndef main()\nputs(identity<Integer>(7))\nputs(identity<String>(\"held\"))\nend\n",
+			"def identity<T>(value: T, *, other: T = value): T\nreturn other\nend\ndef main()\nputs(identity<Integer>(7))\nputs(identity<String>(\"held\"))\nend\n",
+			"def choose<T>(value: T, depth: Integer): T\nif depth == 0\nreturn value\nend\nreturn choose<T>(value, depth - 1)\nend\ndef main()\nputs(choose<Integer>(7, 3))\nend\n",
+			"record Box<T>\nvalue: T\nend\ndef box<T>(value: T): Box<T>\nreturn Box<T>.new(value: value)\nend\ndef main()\nputs(box<Integer>(7).value)\nputs(box<String>(\"held\").value)\nend\n",
+			"def present<T>(value: T?): T?\nreturn value\nend\ndef main()\nx := present<Integer>(nil)\nputs(x == nil)\nend\n",
+			"import trb/std/result\ndef forward<T>(value: Result<T, String>): Result<T, String>\nfound := try value\nreturn Result<T, String>::Ok(found)\nend\ndef main()\ncase forward<Integer>(Result<Integer, String>::Ok(7))\nwhen Result::Ok(value)\nputs(value)\nwhen Result::Err(error)\nputs(error)\nend\nend\n",
+			"def first<T>(values: Array<T>): T\nreturn values[0]\nend\ndef wrap<T>(value: T): Array<T>\nreturn [value]\nend\ndef lookup<T>(value: T): T\ntable := {\"key\" => value}\nreturn table[\"key\"]\nend\ndef main()\nputs(first<String>(wrap<String>(\"array\")))\nputs(first<Integer>([7]))\nputs(lookup<String>(\"hash\"))\nend\n",
+			"enum Box<T>\nValue(value: T)\nOther(value: T)\ndef get(fallback: T): T\ncase self\nwhen Box::Value(value)\nreturn value\nwhen Box::Other(_value)\nreturn fallback\nend\nend\nend\ndef main()\nputs(Box<String>::Value(\"held\").get(\"unused\"))\nputs(Box<Integer>::Other(0).get(7))\nend\n",
+			"enum Box<T>\nValue(value: T)\nOther(value: T)\ndef get(fallback: T): T\ncase self\nwhen Box::Value(value)\nreturn value\nwhen Box::Other(_value)\nreturn fallback\nend\nend\ndef forward(value: T): T\nreturn self.get(value)\nend\nend\ndef main()\nputs(Box<String>::Value(\"held\").forward(\"unused\"))\nend\n",
+			"enum Box<T>\nValue(value: T)\nOther(value: T)\ndef get(fallback: T): T\ncase self\nwhen Box::Value(value)\nreturn value\nwhen Box::Other(_value)\nreturn fallback\nend\nend\ndef forward(value: T): T\nreturn get(value)\nend\nend\ndef main()\nputs(Box<String>::Value(\"held\").forward(\"unused\"))\nend\n",
+			"enum Box<T>\nValue(value: T)\nOther(value: T)\ndef get(fallback: T): T\ncase self\nwhen Box::Value(value)\nreturn value\nwhen Box::Other(_value)\nreturn fallback\nend\nend\ndef reader(value: T): () -> T\nreturn fn(): T; return get(value); end\nend\nend\ndef main()\nread := Box<String>::Value(\"held\").reader(\"unused\")\nputs(read())\nend\n",
+			"enum Box<T>\nValue(value: T)\nOther(value: T)\ndef get(fallback: T): T\ncase self\nwhen Box::Value(value)\nreturn value\nwhen Box::Other(_value)\nreturn fallback\nend\nend\ndef reader(value: T): () -> T\nreturn fn(): T; return self.get(value); end\nend\nend\ndef main()\nread := Box<String>::Value(\"held\").reader(\"unused\")\nputs(read())\nend\n",
+			"enum Box<T>\nValue(value: T)\nOther(value: T)\ndef select(value: T, *, other: T = value): T\nreturn other\nend\nend\ndef main()\nputs(Box<String>::Value(\"self\").select(\"default\"))\nputs(Box<Integer>::Value(0).select(1, other: 7))\nend\n",
+			"enum Box<T>\nValue(value: T)\nOther(value: T)\ndef repeat(value: T, count: Integer): T\nif count == 0\nreturn value\nend\nreturn repeat(value, count - 1)\nend\nend\ndef main()\nputs(Box<String>::Value(\"self\").repeat(\"recursive\", 3))\nend\n",
+			"enum Box<T>\nValue(value: T)\nOther(value: T)\ndef copy(value: T): Box<T>\nreturn Box<T>::Value(value)\nend\ndef get(fallback: T): T\ncase self\nwhen Box::Value(value)\nreturn value\nwhen Box::Other(_value)\nreturn fallback\nend\nend\nend\ndef main()\nputs(Box<String>::Other(\"old\").copy(\"new\").get(\"unused\"))\nend\n",
+			"record Wrapper<T>\nvalue: T\nend\nenum Box<T>\nValue(value: T)\nOther(value: T)\ndef wrap(value: T): Wrapper<T>\nreturn Wrapper<T>.new(value: value)\nend\nend\ndef main()\nputs(Box<String>::Value(\"self\").wrap(\"nested\").value)\nend\n",
+			"enum Box<T>\nValue(value: T)\nOther(value: T)\ndef show(value: T): T\nreturn value\nend\nend\ndef main()\nempty: Box<String>? := nil\nputs(empty&.show(\"unused\") == nil)\nvalue: Box<String>? := Box<String>::Value(\"self\")\nfound := value&.show(\"present\")\nif found != nil\nputs(found)\nend\nend\n",
+			"enum Box<T>\nValue(value: T)\nOther(value: T)\ndef get(fallback: T): T\ncase self\nwhen Box::Value(value)\nreturn value\nwhen Box::Other(_value)\nreturn fallback\nend\nend\nend\ndef main()\nputs(Box<Array<String>>::Value([\"array\"]).get([])[0])\nend\n",
+			"enum Box<T>\nValue(value: T)\nOther(value: T)\ndef get(fallback: T): T\ncase self\nwhen Box::Value(value)\nreturn value\nwhen Box::Other(_value)\nreturn fallback\nend\nend\nend\nalias TextBox = Box<String>\ndef main()\nputs(TextBox::Value(\"alias\").get(\"unused\"))\nend\n",
+			"module Domain\nenum Box<T>\nValue(value: T)\nOther(value: T)\ndef get(fallback: T): T\ncase self\nwhen Box::Value(value)\nreturn value\nwhen Box::Other(_value)\nreturn fallback\nend\nend\nend\nend\ndef main()\nputs(Domain::Box<String>::Value(\"nested\").get(\"unused\"))\nend\n",
+			"enum Box<T>\nValue(value: T)\nOther(value: T)\ndef _get(fallback: T): T\ncase self\nwhen Box::Value(value)\nreturn value\nwhen Box::Other(_value)\nreturn fallback\nend\nend\ndef get(value: T): T\nreturn _get(value)\nend\nend\ndef main()\nputs(Box<String>::Value(\"private\").get(\"unused\"))\nend\n"]
+		outputs := ["7\nheld\n", "7\nheld\n", "7\n", "7\nheld\n", "true\n", "7\n", "array\n7\nhash\n", "held\n7\n", "held\n", "held\n", "held\n", "held\n", "default\n7\n", "recursive\n", "new\n", "nested\n", "true\npresent\n", "array\n", "alias\n", "nested\n", "private\n"]
+		mut index := 0
+		sources.each do |source|
+			mut state := compiler_new(source.size() * 8 + 1024)
+			valid := lex(state, source) && parse_module(state, 0, state.module_graph.entry_module[0]) && resolve(state) && check(state)
+			if !valid
+				puts(index)
+				puts(load_string(state.diagnostics.messages, 0))
+			end
+			expect(valid).to_be_true()
+			if valid
+				before := control_test_output(emit_qbe(state))
+				intrinsic_mir_erase(state)
+				state.nominal.function_receivers.used[0] = 0
+				mut item := 0
+				while item < state.type_resolution.generic_functions.size()
+					state.type_resolution.generic_functions[item] = GenericFunction.new(receiver_type: "", name: "unavailable", source_id: -1, line: -1, type_parameters: [], parameters: [], result_type: "Invalid", body_start: -1, body_finish: -1)
+					item += 1
+				end
+				item = 0
+				while item < state.type_resolution.generic_function_instances.size()
+					state.type_resolution.generic_function_instances[item] = GenericFunctionInstance.new(application_key: "unavailable", definition: -1, arguments: [], function: -1)
+					item += 1
+				end
+				state.callables.checked_bodies.each do |body|
+					body.generic_calls.used[0] = 0
+					body.generic_application_finishes.used[0] = 0
+					body.generic_binding[0] = 0
+				end
+				expect(verify_mir(state.scalar_mir, true)).to_equal("")
+				expect(control_test_output(emit_qbe(state))).to_equal(before)
+				qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+				if qbe != nil
+					mut forced := ""
+					mut ordinary := false
+					before.split("\n").each do |line|
+						if line.start_with?("function ")
+							ordinary = line.include?("$trbnf")
+						end
+						if line == "}"
+							ordinary = false
+						end
+						if ordinary && (line.include?("call $trbn_gc_alloc(") || line.include?("call $trbnf") || line.include?("call $trbn_array_") || line.include?("call $trbn_hash_"))
+							forced += "\tcall $trbn_gc_collect(w 0)\n"
+						end
+						forced += line + "\n"
+					end
+					case logical_run_qbe(qbe, forced)
+					when Result::Ok(actual)
+						expect(actual).to_equal(outputs[index])
+					when Result::Err(error)
+						puts(error)
+						expect(false).to_be_true()
+					end
+				end
+			end
+			index += 1
+		end
+	end
+	test("rejects invalid unused templates independently of concrete calls") do
+		sources := ["def bad<T>(value: T): T\nreturn unknown\nend\ndef main()\nend\n",
+			"def bad<T>(value: T): T\nreturn value + value\nend\ndef main()\nend\n",
+			"def bad<T>(value: T): T\nreturn value + value\nend\ndef main()\nputs(bad<Integer>(3))\nend\n",
+			"def bad<T>(value: T): T\nreturn 7\nend\ndef main()\nend\n",
+			"def bad<T>(value: T): T\nif true\nreturn value\nend\nend\ndef main()\nend\n",
+			"def bad<T>(value: T): T\nmut copy := value\nreturn copy\nend\ndef main()\nend\n",
+			"def bad<T>(value: T = 7): T\nreturn value\nend\ndef main()\nend\n",
+			"def identity<T>(value: T): T\nreturn value\nend\ndef main()\nidentity := 1\nputs(identity<Integer>(7))\nend\n",
+			"def identity<T>(value: T): T\nreturn value\nend\ndef main()\nputs(identity<Integer, String>(7))\nend\n",
+			"def identity<T>(value: T): T\nreturn value\nend\ndef main()\nputs(identity<String>(7))\nend\n",
+			"enum Box<T>\nValue(value: T)\nOther(value: T)\ndef _get(fallback: T): T\ncase self\nwhen Box::Value(value)\nreturn value\nwhen Box::Other(_value)\nreturn fallback\nend\nend\nend\ndef main()\nputs(Box<String>::Value(\"private\")._get(\"unused\"))\nend\n",
+			"enum Box<T>\nValue(value: T)\nOther(value: T)\ndef bad(value: T): T\nreturn unknown\nend\nend\ndef main()\n\nend\n",
+			"enum Box<T>\nValue(value: T)\nOther(value: T)\ndef bad(value: T): T\nreturn value + value\nend\nend\ndef main()\n\nend\n",
+			"enum Box<T>\nValue(value: T)\nOther(value: T)\ndef bad(value: T): T\nreturn 1\nend\nend\ndef main()\n\nend\n",
+			"enum Box<T>\nValue(value: T)\nOther(value: T)\ndef bad(value: T): T\nreturn value + value\nend\nend\ndef main()\nputs(Box<Integer>::Value(1).bad(2))\nend\n",
+			"enum Box<T>\nValue(value: T)\nOther(value: T)\ndef get(fallback: T): T\ncase self\nwhen Box::Value(value)\nreturn value\nwhen Box::Other(_value)\nreturn fallback\nend\nend\nend\ndef main()\nputs(Box<String>::Value(\"held\").get(7))\nend\n",
+			"enum Box<T>\nValue(value: T)\nOther(value: T)\ndef get(fallback: T): T\ncase self\nwhen Box::Value(value)\nreturn value\nwhen Box::Other(_value)\nreturn fallback\nend\nend\nend\ndef main()\nputs(Box<String>::Value(\"held\").get())\nend\n",
+			"enum Box<T>\nValue(value: T)\nOther(value: T)\ndef get(fallback: T): T\ncase self\nwhen Box::Value(value)\nreturn value\nwhen Box::Other(_value)\nreturn fallback\nend\nend\nend\ndef main()\nputs(Box<String>::Value(\"held\").get(\"a\", \"b\"))\nend\n",
+			"enum Box<T>\nValue(value: T)\nOther(value: T)\ndef bad(value: T)\nself = Box<T>::Value(value)\nend\nend\ndef main()\n\nend\n",
+			"enum Box<T>\nValue(value: T)\nOther(value: T)\ndef get(fallback: T): T\ncase self\nwhen Box::Value(value)\nreturn value\nwhen Box::Other(_value)\nreturn fallback\nend\nend\ndef get(fallback: T): T\ncase self\nwhen Box::Value(value)\nreturn value\nwhen Box::Other(_value)\nreturn fallback\nend\nend\nend\ndef main()\n\nend\n"]
+		sources.each do |source|
+			mut state := compiler_new(source.size() * 8 + 1024)
+			valid := lex(state, source) && parse_module(state, 0, state.module_graph.entry_module[0]) && resolve(state) && check(state)
+			expect(valid).to_be_false()
+		end
+	end
+
+end

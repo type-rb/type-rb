@@ -1,0 +1,6 @@
+import { report } from app/summary
+
+def main()
+	puts(report(5000000))
+	return
+end

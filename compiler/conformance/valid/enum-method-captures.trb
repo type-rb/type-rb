@@ -1,0 +1,22 @@
+enum State
+	Ready
+	def select(value: String, *, suffix: String = value): String
+		return value + suffix
+	end
+	def text(): String
+		return "held"
+	end
+	def reader(): () -> String
+		return fn(): String
+			return text()
+		end
+	end
+end
+def main()
+	read := State::Ready.reader()
+	puts(read())
+	puts(State::Ready.select("a"))
+	puts(State::Ready.select("b", suffix: "!"))
+	values := [1, 2, 3]
+	puts(values.select { |value| value > 1 }.size())
+end

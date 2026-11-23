@@ -1,0 +1,178 @@
+import { check, compiler_collect_project_sources, compiler_file_exists, compiler_read_source, CompilerProjectSources, load_configured_sources_with_mode, load_file_root_with_overlays, project_error_state } from compiler
+import { resolve } from frontend/checking/program/resolution
+import { find_visible_function, find_visible_record } from frontend/resolution/declaration_lookup
+import { lsp_file_uri, lsp_offset, lsp_range, lsp_token } from lsp/positions
+import { parse_project_config } from project/config
+import { package_json_quote } from project/package_json
+import { CheckedScopeQuery } from state/callable_state
+import { CompilerState, has_diagnostic } from state/state
+import { string_ends_with, string_starts_with } from support/path
+import { load_integer, load_string, sparse_integer_at } from support/storage
+
+record LspWorkspace
+	config: String
+	entry: String
+	root: String
+	output: String
+	text: Hash<String, String>
+	uris: Hash<String, String>
+	versions: Hash<String, Integer>
+	files: Array<String>
+end
+
+def lsp_source(workspace: LspWorkspace, path: String): String
+	if workspace.text.key?(path)
+		return workspace.text[path]
+	end
+	return compiler_file_exists(path) ? compiler_read_source(path) : ""
+end
+
+def lsp_owns(workspace: LspWorkspace, path: String): Boolean
+	if path == "" || !string_ends_with(path, ".trb")
+		return false
+	end
+	if workspace.config == ""
+		return path == workspace.entry || workspace.files.include?(path)
+	end
+	if !string_starts_with(path, workspace.root + "/") || string_starts_with(path, workspace.output + "/")
+		return false
+	end
+	return !path.include?("/.trb/") && !path.include?("/.git/") && !path.include?("/node_modules/")
+end
+
+def lsp_configured(workspace: LspWorkspace): CompilerState
+	config := parse_project_config(compiler_read_source(workspace.config))
+	if config.error != ""
+		return project_error_state(workspace.config, config.error_line, config.error)
+	end
+	bundle := compiler_collect_project_sources(workspace.root, workspace.output)
+	if bundle.error != ""
+		return project_error_state(workspace.config, 1, "cannot collect project source " + bundle.error)
+	end
+	mut paths := bundle.paths.dup()
+	mut sources := bundle.sources.dup()
+	workspace.text.keys().each do |path|
+		mut i := 0
+		while i < paths.size() && paths[i] != path
+			i += 1
+		end
+		if i < paths.size()
+			sources[i] = workspace.text[path]
+		elsif lsp_owns(workspace, path) && !string_ends_with(path, "_test.trb")
+			paths.push(path)
+			sources.push(workspace.text[path])
+		end
+	end
+	return load_configured_sources_with_mode(config, workspace.config, workspace.root, workspace.output, CompilerProjectSources.new(paths: paths, sources: sources, error: ""), false, false)
+end
+
+def lsp_analyze(mut workspace: LspWorkspace, queries: Array<CheckedScopeQuery> = []): CompilerState
+	mut paths := workspace.text.keys()
+	mut sources: Array<String> := []
+	paths.each { |path| sources.push(workspace.text[path]) }
+	mut state := workspace.config == "" ? load_file_root_with_overlays(lsp_source(workspace, workspace.entry), workspace.entry, false, paths, sources) : lsp_configured(workspace)
+	if !has_diagnostic(state)
+		if workspace.config == ""
+			while !workspace.files.empty?()
+				workspace.files.pop()
+			end
+			mut i := 0
+			while i < state.module_graph.module_count[0]
+				path := load_string(state.module_graph.module_files, i)
+				if string_starts_with(path, "/")
+					workspace.files.push(path)
+				end
+				i += 1
+			end
+		end
+		resolve(state)
+	end
+	if !has_diagnostic(state)
+		queries.each { |query| state.callables.scope_queries.push(query) }
+		check(state)
+	end
+	return state
+end
+
+def lsp_document_uri(workspace: LspWorkspace, path: String): String
+	return workspace.uris.key?(path) ? workspace.uris[path] : lsp_file_uri(path)
+end
+
+def lsp_files(workspace: LspWorkspace): String
+	mut quoted: Array<String> := []
+	workspace.files.each { |path| quoted.push(package_json_quote(path)) }
+	return "[" + quoted.join(",") + "]"
+end
+
+def lsp_diagnostics(workspace: LspWorkspace, state: CompilerState, path: String): String
+	if !has_diagnostic(state)
+		return "[]"
+	end
+	owner := load_integer(state.diagnostics.modules, 0)
+	if owner < 0 || owner >= state.module_graph.module_count[0] || load_string(state.module_graph.module_files, owner) != path
+		return "[]"
+	end
+	source := lsp_source(workspace, path)
+	line := load_integer(state.diagnostics.lines, 0)
+	column := sparse_integer_at(state.diagnostics.columns, 0)
+	mut start := lsp_offset(source, line - 1, 0)
+	if start < 0
+		start = source.size()
+	end
+	mut finish := start
+	if column > 0
+		token := lsp_token(source, -1, line, column, "")
+		if token.start >= 0
+			start = token.start
+			finish = token.finish
+		end
+	end
+	return "[{\"range\":" + lsp_range(source, start, finish) + ",\"severity\":1,\"code\":" + package_json_quote(load_string(state.diagnostics.codes, 0)) + ",\"source\":\"trbn\",\"message\":" + package_json_quote(load_string(state.diagnostics.messages, 0)) + "}]"
+end
+
+def lsp_definition(workspace: LspWorkspace, mut state: CompilerState, path: String, line: Integer, column: Integer): String
+	if !lsp_owns(workspace, path) || has_diagnostic(state)
+		return "null"
+	end
+	mut owner := 0
+	while owner < state.module_graph.module_count[0] && load_string(state.module_graph.module_files, owner) != path
+		owner += 1
+	end
+	if owner >= state.module_graph.module_count[0]
+		return "null"
+	end
+	source := lsp_source(workspace, path)
+	token := lsp_token(source, lsp_offset(source, line, column), -1, -1, "")
+	if token.text == "" || token.previous == "." || token.previous == "::"
+		return "null"
+	end
+	mut target := -1
+	mut target_line := 0
+	mut name := ""
+	record_id := find_visible_record(state, owner, token.text)
+	if record_id >= 0
+		target = load_integer(state.declarations.record_modules, record_id)
+		target_line = load_integer(state.declarations.record_lines, record_id)
+		name = load_string(state.declarations.record_names, record_id)
+	elsif token.following == "("
+		function := find_visible_function(state, owner, token.text)
+		if function >= 0
+			target = load_integer(state.declarations.function_modules, function)
+			target_line = load_integer(state.declarations.function_lines, function)
+			name = load_string(state.declarations.function_names, function)
+		end
+	end
+	if target < 0
+		return "null"
+	end
+	file := load_string(state.module_graph.module_files, target)
+	if !string_starts_with(file, "/")
+		return "null"
+	end
+	authored := lsp_source(workspace, file)
+	found := lsp_token(authored, -1, target_line, -1, name)
+	if found.start < 0
+		return "null"
+	end
+	return "{\"uri\":" + package_json_quote(lsp_document_uri(workspace, file)) + ",\"range\":" + lsp_range(authored, found.start, found.finish) + "}"
+end

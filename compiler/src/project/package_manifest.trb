@@ -1,0 +1,281 @@
+import { json_array, json_null, json_number, json_object, json_string } from project/json_kinds
+import { ProjectPackageRequirement, project_config_declared_mode, project_config_trimmed, project_config_valid_package_name } from project/config
+import { PackageJson, package_json_digit, package_json_fail, package_json_member, package_json_parse, package_json_quote, package_json_string_field, package_sorted_indices } from project/package_json
+import { package_checksum } from project/package_checksum
+import { path_normalize, string_starts_with } from support/path
+
+record PackageManifest
+	name: String
+	version: String
+	source_dir: String
+	modes: Array<String>
+	packages: Array<ProjectPackageRequirement>
+	checksum: String
+	error: String
+end
+
+def package_requirement_names(packages: Array<ProjectPackageRequirement>): Array<String>
+	mut names: Array<String> := []
+	packages.each do |package|
+		names.push(package.name)
+	end
+	return names
+end
+
+def package_requirements_json(packages: Array<ProjectPackageRequirement>): String
+	order := package_sorted_indices(package_requirement_names(packages))
+	mut result := "{"
+	mut index := 0
+	while index < order.size()
+		if index > 0
+			result += ","
+		end
+		package := packages[order[index]]
+		result += package_json_quote(package.name) + ":"
+		if package.source == "" && package.path == ""
+			result += package_json_quote(package.version)
+		else
+			result += "{"
+			mut separator := ""
+			if package.source != ""
+				result += "\"source\":" + package_json_quote(package.source)
+				separator = ","
+			end
+			if package.version != ""
+				result += separator + "\"version\":" + package_json_quote(package.version)
+				separator = ","
+			end
+			if package.path != ""
+				result += separator + "\"path\":" + package_json_quote(package.path)
+			end
+			result += "}"
+		end
+		index += 1
+	end
+	return result + "}"
+end
+
+def package_json_requirements(mut document: PackageJson, id: Integer): Array<ProjectPackageRequirement>
+	mut result: Array<ProjectPackageRequirement> := []
+	if id < 0 || document.nodes[id].kind == json_null()
+		return result
+	end
+	node := document.nodes[id]
+	if node.kind != json_object()
+		package_json_fail(document, "packages must be an object")
+		return result
+	end
+	order := package_sorted_indices(node.keys)
+	order.each do |index|
+		name := node.keys[index]
+		child := document.nodes[node.children[index]]
+		mut version := ""
+		mut path := ""
+		mut source := ""
+		if child.kind == json_string()
+			version = child.text
+		elsif child.kind == json_object()
+			child.keys.each do |key|
+				if key != "version" && key != "path" && key != "source"
+					package_json_fail(document, "unknown package requirement field " + key)
+				end
+			end
+			version = package_json_string_field(document, node.children[index], "version")
+			path = package_json_string_field(document, node.children[index], "path")
+			source = package_json_string_field(document, node.children[index], "source")
+		else
+			package_json_fail(document, "package requirement must be a version or object")
+		end
+		if !project_config_valid_package_name(name)
+			package_json_fail(document, "invalid dependency name " + package_json_quote(name))
+		end
+		if project_config_trimmed(path) != ""
+			clean := path_normalize(path)
+			if string_starts_with(path, "/") || clean == ".." || string_starts_with(clean, "../")
+				package_json_fail(document, "dependency " + name + " path must stay below the package root")
+			end
+			if project_config_trimmed(version) != "" || project_config_trimmed(source) != ""
+				package_json_fail(document, "dependency " + name + " path cannot be combined with source or version")
+			end
+		elsif project_config_trimmed(version) == ""
+			package_json_fail(document, "dependency " + name + " requires a version or path")
+		end
+		result.push(ProjectPackageRequirement.new(name: name, source: source, version: version, path: path))
+	end
+	return result
+end
+
+def package_version_identifier(value: String, numeric: Boolean): Boolean
+	if value == ""
+		return false
+	end
+	mut index := 0
+	while index < value.size()
+		character := value[index]
+		if !package_json_digit(character)
+			if numeric
+				return false
+			end
+			mut valid := character == "-"
+			mut letter := 0
+			alphabet := "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+			while letter < alphabet.size()
+				if character == alphabet[letter]
+					valid = true
+				end
+				letter += 1
+			end
+			if !valid
+				return false
+			end
+		end
+		index += 1
+	end
+	if numeric && value.size() > 1 && value[0] == "0"
+		return false
+	end
+	return true
+end
+
+def package_version_valid(raw: String): Boolean
+	value := project_config_trimmed(raw)
+	mut index := 0
+	if value.size() > 0 && value[0] == "v"
+		index = 1
+	end
+	mut components := 0
+	mut part := ""
+	mut section := 0
+	while index <= value.size()
+		mut character := ""
+		if index < value.size()
+			character = value[index]
+		end
+		if character == "" || character == "." || (section == 0 && character == "-") || (section != 2 && character == "+")
+			if !package_version_identifier(part, section == 0)
+				return false
+			end
+			if section == 1 && part.size() > 1 && part[0] == "0"
+				mut only_digits := true
+				mut digit := 0
+				while digit < part.size()
+					if !package_json_digit(part[digit])
+						only_digits = false
+					end
+					digit += 1
+				end
+				if only_digits
+					return false
+				end
+			end
+			if section == 0
+				components += 1
+				if components > 3
+					return false
+				end
+			end
+			if character == "-" || character == "+"
+				if components != 3
+					return false
+				end
+				section = 1
+				if character == "+"
+					section = 2
+				end
+			end
+			part = ""
+		else
+			part += character
+		end
+		index += 1
+	end
+	return true
+end
+
+def package_manifest_parse(source: String): PackageManifest
+	mut document := package_json_parse(source)
+	root := document.nodes[0]
+	if root.kind != json_object()
+		package_json_fail(document, "package manifest must be an object")
+	end
+	root.keys.each do |key|
+		if key != "formatVersion" && key != "name" && key != "version" && key != "sourceDir" && key != "modes" && key != "packages"
+			mut known := false
+			if key == "nativeDependencies" || key == "declarationProviders" || key == "declarationAdapters" || key == "runtimeAdapters" || key == "adapterTests" || key == "nativeTypeProviders" || key == "compilerExtension"
+				known = true
+			end
+			if !known
+				package_json_fail(document, "unknown package manifest field " + key)
+			else
+				child := document.nodes[package_json_member(document, 0, key)]
+				if (key == "compilerExtension" && child.kind != json_null()) || (child.kind != json_null() && (child.kind != json_object() || child.keys.size() != 0))
+					package_json_fail(document, "package manifest field " + key + " is not implemented")
+				end
+			end
+		end
+	end
+	format := package_json_member(document, 0, "formatVersion")
+	if format < 0
+		package_json_fail(document, "unsupported formatVersion; expected 1")
+	elsif document.nodes[format].kind != json_number() || document.nodes[format].text != "1"
+		package_json_fail(document, "unsupported formatVersion; expected 1")
+	end
+	name := package_json_string_field(document, 0, "name")
+	version := package_json_string_field(document, 0, "version")
+	mut source_dir := package_json_string_field(document, 0, "sourceDir")
+	if source_dir == ""
+		source_dir = "src"
+	end
+	if !project_config_valid_package_name(name)
+		package_json_fail(document, "invalid package name " + package_json_quote(name))
+	end
+	if !package_version_valid(version)
+		package_json_fail(document, "version must be a semantic version; got " + package_json_quote(version))
+	end
+	clean := path_normalize(source_dir)
+	if string_starts_with(source_dir, "/") || clean == ".." || string_starts_with(clean, "../")
+		package_json_fail(document, "sourceDir must stay below the package root")
+	end
+	mut modes: Array<String> := []
+	modes_id := package_json_member(document, 0, "modes")
+	if modes_id >= 0 && document.nodes[modes_id].kind != json_null()
+		if document.nodes[modes_id].kind != json_array()
+			package_json_fail(document, "modes must be an array")
+		else
+			document.nodes[modes_id].children.each do |child|
+				mode := document.nodes[child]
+				if mode.kind != json_string() || !project_config_declared_mode(mode.text)
+					package_json_fail(document, "unsupported package mode " + package_json_quote(mode.text))
+				end
+				modes.each do |previous|
+					if previous == mode.text
+						package_json_fail(document, "duplicate package mode " + package_json_quote(mode.text))
+					end
+				end
+				modes.push(mode.text)
+			end
+		end
+	end
+	if modes.size() == 0
+		modes = ["go", "ruby", "typescript", "trb"]
+	end
+	packages := package_json_requirements(document, package_json_member(document, 0, "packages"))
+	mut canonical := "{\"formatVersion\":1,\"name\":" + package_json_quote(name) + ",\"version\":" + package_json_quote(version) + ",\"sourceDir\":" + package_json_quote(source_dir) + ",\"modes\":["
+	mut index := 0
+	while index < modes.size()
+		if index > 0
+			canonical += ","
+		end
+		canonical += package_json_quote(modes[index])
+		index += 1
+	end
+	canonical += "]"
+	if packages.size() > 0
+		canonical += ",\"packages\":" + package_requirements_json(packages)
+	end
+	if package_json_member(document, 0, "compilerExtension") >= 0
+		canonical += ",\"compilerExtension\":null"
+	end
+	canonical += "}"
+	return PackageManifest.new(name: name, version: version, source_dir: source_dir, modes: modes, packages: packages, checksum: package_checksum(canonical), error: document.error[0])
+end

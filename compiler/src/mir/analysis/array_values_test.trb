@@ -1,0 +1,218 @@
+import { emit_qbe } from compiler
+import { binary_equal, binary_not_equal } from frontend/types/operators
+import { mir_op_array_store, mir_op_scalar_binary } from mir/model/instructions
+import { mir_terminator_branch } from mir/model/control
+import { mir_scalar_boolean_and, mir_scalar_boolean_or } from mir/model/scalar_operators
+import { MirArrayReadGuard, mir_instruction_with_payload } from mir/model/module
+import { mir_block } from mir/build/blocks
+import { mir_array_reused_value } from mir/analysis/array_values
+import { mir_build_flow, mir_flow_aliases, mir_flow_blocks, mir_flow_position } from mir/analysis/flow
+import { optimize_verified_mir } from mir/passes/optimize
+import { verify_mir } from mir/verify/module
+import { CompilerState } from state/state
+import { array_loop_mir_check } from testing/mir/array_loops
+import { compiler_test_instruction_with_cell } from testing/compiler
+import { control_test_output } from testing/mir/control
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { logical_run_qbe } from testing/qbe_runner
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+def guarded_array_values_source(main: String): String
+	return "def update(left: Array<Integer>, mut right: Array<Integer>, mut third: Array<Integer>, limit: Integer): Integer\nmut index := 0\nmut total := 0\nwhile index < limit\nold := left[index]\nright[index] = old + 1\ntotal += left[index]\nthird[index] = old + 2\ntotal += left[index]\nindex += 1\nend\nreturn total\nend\nrecord Box\nitems: Array<Integer>\nend\ndef main()\n" + main + "\nend\n"
+end
+
+def guarded_array_value_count(state: CompilerState): Integer
+	mut count := 0
+	state.scalar_mir.array_read_guards[0].each do |guard|
+		if guard.loaded_value >= 0
+			count += 1
+		end
+	end
+	return count
+end
+
+def guarded_array_values_run(output: String, expected: String)
+	qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+	if qbe != nil
+		case logical_run_qbe(qbe, output)
+		when Result::Ok(actual)
+			expect(actual).to_equal(expected)
+		when Result::Err(error)
+			puts(error)
+			expect(false).to_be_true()
+		end
+	end
+end
+
+describe("MIR guarded Array values") do
+	test("reuses primitive reads only on the distinct-owner arm and preserves aliases") do
+		source := guarded_array_values_source("puts(update([2, 4], [0, 0], [0, 0], 2))\nmut values := [2, 4]\nbox := Box.new(items: values)\nputs(update(box.items, values, [0, 0], 2))\nmut shared := [2, 4]\nputs(update(shared, shared, shared, 2))\nputs(update([], [], [], 0))\nputs(update([], [], [], -1))")
+		mut state := array_loop_mir_check(source)
+		expect(guarded_array_value_count(state)).to_equal(2)
+		before := control_test_output(emit_qbe(state))
+		intrinsic_mir_erase(state)
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+		state.scalar_mir.functions.each do |function|
+			mut left := function.block_start
+			mut right := left + function.block_count - 1
+			while left < right
+				saved := state.scalar_mir.blocks[left]
+				state.scalar_mir.blocks[left] = state.scalar_mir.blocks[right]
+				state.scalar_mir.blocks[right] = saved
+				left += 1
+				right -= 1
+			end
+		end
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(guarded_array_value_count(state)).to_equal(2)
+		guarded_array_values_run(control_test_output(emit_qbe(state)), "12\n16\n18\n0\n0\n")
+	end
+
+	test("rejects a changed inequality or a forged loaded-value fact") do
+		mut state := array_loop_mir_check(guarded_array_values_source(""))
+		expect(guarded_array_value_count(state)).to_equal(2)
+		mut changed := 0
+		mut index := 0
+		while index < state.scalar_mir.instructions.size()
+			instruction := state.scalar_mir.instructions[index]
+			if instruction.kind == mir_op_scalar_binary() && instruction.payload == binary_not_equal()
+				state.scalar_mir.instructions[index] = mir_instruction_with_payload(instruction, binary_equal())
+				changed += 1
+			end
+			index += 1
+		end
+		expect(changed).to_equal(2)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR Array read-guard plan differs")
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(guarded_array_value_count(state)).to_equal(0)
+		old := state.scalar_mir.array_read_guards[0][0]
+		state.scalar_mir.array_read_guards[0][0] = MirArrayReadGuard.new(instruction: old.instruction, source: old.source, loaded_value: state.scalar_mir.instructions[old.source].result)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR Array read-guard plan differs")
+	end
+
+	test("retains mutation call resize and allocation barriers outside guarded loops") do
+		["other[0] = 7", "values[0] = 7", "touch(values)", "values.pop()", "values.push(9)", "mut allocated := [old]\nputs(allocated.size())"].each do |barrier|
+			source := "def run(mut values: Array<Integer>, mut other: Array<Integer>, index: Integer): Integer\nold := values[index]\n" + barrier + "\nreturn old + values[index]\nend\ndef touch(mut values: Array<Integer>)\nvalues[0] = 7\nend\ndef main()\nend\n"
+			state := array_loop_mir_check(source)
+			expect(guarded_array_value_count(state)).to_equal(0)
+		end
+		state := array_loop_mir_check("def twice(values: Array<Integer>, index: Integer): Integer\nreturn values[index] + values[index]\nend\ndef main()\nputs(twice([2, 3], -1))\nend\n")
+		expect(guarded_array_value_count(state)).to_equal(1)
+		guarded_array_values_run(control_test_output(emit_qbe(state)), "6\n")
+	end
+
+	test("does not reuse a value after a disjunction or an ambiguous true edge") do
+		mut mode := 0
+		while mode < 2
+			mut state := array_loop_mir_check(guarded_array_values_source(""))
+			function := state.scalar_mir.functions[0]
+			flow := mir_build_flow(state.scalar_mir, function, mir_flow_blocks(state.scalar_mir, function))
+			mut index := function.block_start
+			mut changed := 0
+			while index < function.block_start + function.block_count
+				block := state.scalar_mir.blocks[index]
+				if block.terminator == mir_terminator_branch()
+					position := mir_flow_position(flow, block.condition)
+					if position >= 0
+						instruction := state.scalar_mir.instructions[position]
+						if instruction.kind == mir_op_scalar_binary() && instruction.payload == mir_scalar_boolean_and()
+							if mode == 0
+								state.scalar_mir.instructions[position] = mir_instruction_with_payload(instruction, mir_scalar_boolean_or())
+							else
+								state.scalar_mir.blocks[index] = mir_block(block.id, block.source_id, block.line, block.parameter_start, block.parameter_count, block.instruction_start, block.instruction_count, block.terminator, block.condition, block.first_target, block.first_target, block.first_argument_start, block.first_argument_count, block.first_argument_start, block.first_argument_count, block.return_value)
+							end
+							changed += 1
+						end
+					end
+				end
+				index += 1
+			end
+			expect(changed).to_equal(1)
+			current := mir_build_flow(state.scalar_mir, function, mir_flow_blocks(state.scalar_mir, function))
+			aliases := mir_flow_aliases(state.scalar_mir, function, current, state.scalar_mir.blocks[function.block_start + current.entry])
+			state.scalar_mir.array_read_guards[0].each do |guard|
+				if guard.loaded_value >= 0
+					expect(mir_array_reused_value(state.scalar_mir, function, current, aliases, guard)).to_equal(-1)
+				end
+			end
+			mode += 1
+		end
+	end
+
+	test("keeps Float rounding and Boolean values exact across guarded overwrites") do
+		state := array_loop_mir_check("def update(left: Array<Float>, mut right: Array<Float>, limit: Integer): Boolean\nmut index := 0\nmut equal := true\nwhile index < limit\nold := left[index]\nright[index] = old + 1.0\nequal = old == left[index]\nindex += 1\nend\nreturn equal\nend\ndef flags(left: Array<Boolean>, mut right: Array<Boolean>, limit: Integer): Boolean\nmut index := 0\nmut equal := true\nwhile index < limit\nold := left[index]\nright[index] = !old\nequal = old == left[index]\nindex += 1\nend\nreturn equal\nend\ndef main()\nputs(update([1.0, -0.0], [0.0, 0.0], 2))\nmut values := [1.0]\nputs(update(values, values, 1))\nputs(flags([true, false], [false, false], 2))\nmut shared := [true]\nputs(flags(shared, shared, 1))\nend\n")
+		expect(guarded_array_value_count(state)).to_equal(1)
+		guarded_array_values_run(control_test_output(emit_qbe(state)), "true\nfalse\ntrue\nfalse\n")
+	end
+
+	test("preserves bounds failures and Array roots through forced collection") do
+		state := array_loop_mir_check(guarded_array_values_source("mut values := [2, 4]\ntext := update(values, [0, 0], [0, 0], 2).to_s()\nputs(text + values[0].to_s())"))
+		output := control_test_output(emit_qbe(state))
+		allocation := "function l $trbn_string_alloc(l %size) {\n@start\n"
+		expect(output.split(allocation).size()).to_equal(2)
+		forced := output.split(allocation).join(allocation + "\tcall $trbn_gc_collect(w 0)\n")
+		guarded_array_values_run(forced, "122\n")
+		short := array_loop_mir_check(guarded_array_values_source("puts(update([2, 4], [0], [0, 0], 2))"))
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, control_test_output(emit_qbe(short)), 2)
+			when Result::Ok(_actual)
+				expect(false).to_be_true()
+			when Result::Err(error)
+				expect(error).to_equal("panic: index is out of bounds\n")
+			end
+		end
+	end
+
+	test("forwards the stored primitive value through a checked negative-index capture") do
+		source := "def update(mut values: Array<Integer>, index: Integer): Integer\nvalues[index] -= 1\nreturn values[index]\nend\ndef floats(mut values: Array<Float>, index: Integer): Float\nvalues[index] = -0.0\nreturn values[index]\nend\ndef flags(mut values: Array<Boolean>, index: Integer): Boolean\nvalues[index] = true\nreturn values[index]\nend\ndef main()\nputs(update([2, 4], -1))\nputs(update([2, 4], 0))\nputs(floats([1.0], -1))\nputs(1.0 / floats([1.0], -1) < 0.0)\nputs(flags([false], -1))\nend\n"
+		mut state := array_loop_mir_check(source)
+		expect(guarded_array_value_count(state)).to_equal(1)
+		before := control_test_output(emit_qbe(state))
+		intrinsic_mir_erase(state)
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+		guarded_array_values_run(before, "3\n1\n0.0\ntrue\ntrue\n")
+	end
+
+	test("invalidates stored values on aliases and retains a later exact write") do
+		state := array_loop_mir_check("def update(mut values: Array<Integer>, mut other: Array<Integer>, index: Integer): Integer\nvalues[index] = 3\nother[index] = 7\nreturn values[index]\nend\ndef restore(mut values: Array<Integer>, mut other: Array<Integer>, index: Integer): Integer\nvalues[index] = 3\nother[index] = 7\nvalues[index] = 5\nreturn values[index]\nend\ndef main()\nmut values := [1]\nputs(update(values, values, -1))\nputs(update([1], [2], -1))\nputs(restore(values, values, -1))\nend\n")
+		expect(guarded_array_value_count(state)).to_equal(0)
+		mut restored := 0
+		state.scalar_mir.array_read_guards[1].each do |guard|
+			if guard.loaded_value >= 0
+				restored += 1
+			end
+		end
+		expect(restored).to_equal(1)
+		guarded_array_values_run(control_test_output(emit_qbe(state)), "7\n3\n5\n")
+	end
+
+	test("rejects a stored-value witness after the store payload changes") do
+		mut state := array_loop_mir_check("def update(mut values: Array<Integer>, index: Integer, replacement: Integer): Integer\nvalues[index] = 3\nreturn values[index] + replacement\nend\ndef main()\nend\n")
+		expect(guarded_array_value_count(state)).to_equal(1)
+		function := state.scalar_mir.functions[0]
+		replacement := state.scalar_mir.arguments[function.parameter_start + 2]
+		mut index := 0
+		mut changed := false
+		while index < state.scalar_mir.instructions.size()
+			instruction := state.scalar_mir.instructions[index]
+			if instruction.kind == mir_op_array_store()
+				state.scalar_mir.instructions[index] = compiler_test_instruction_with_cell(instruction, 4, replacement)
+				changed = true
+			end
+			index += 1
+		end
+		expect(changed).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR Array read-guard plan differs")
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	end
+end

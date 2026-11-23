@@ -1,0 +1,6 @@
+import a/x
+import a/z
+def main()
+	puts(X)
+	puts(Z)
+end

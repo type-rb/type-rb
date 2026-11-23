@@ -1,0 +1,140 @@
+import { array_method_concat, array_method_count, array_method_empty, array_method_first, array_method_include, array_method_index, array_method_join, array_method_last, array_method_reverse, array_method_shift, array_method_slice, array_method_sort, array_method_sort_descending, array_method_uniq, array_method_unshift } from frontend/types/method_kinds
+import { union_parts } from frontend/types/union_types
+import { ReplStore, repl_boolean, repl_get, repl_integer, repl_string, repl_value, repl_variant } from repl/model
+import { repl_array_sort } from repl/array_sorting
+
+def repl_array_method(mut store: ReplStore, kind: Integer, receiver: Integer, argument: Integer): Integer
+	if kind >= array_method_sort()
+		return repl_array_sort(store, receiver, kind == array_method_sort_descending())
+	end
+	if kind == array_method_join()
+		mut texts: Array<String> := []
+		store.children[receiver].each { |value| texts.push(store.texts[value]) }
+		return repl_string(store, texts.join(store.texts[argument]))
+	end
+	if kind >= array_method_include()
+		return repl_array_query(store, kind, receiver, argument)
+	end
+	values := store.children[receiver]
+	if kind >= array_method_unshift()
+		if kind == array_method_unshift()
+			mut inserted: Array<Integer> := [argument]
+			values.each { |value| inserted.push(value) }
+			store.children[receiver] = inserted
+			return 0
+		end
+		if values.size() == 0
+			store.error[0] = "panic: Array is empty"
+			return 0
+		end
+		mut selected := values.size() - 1
+		if kind == array_method_shift()
+			selected = 0
+		end
+		mut retained: Array<Integer> := []
+		values.each.with_index do |value, index|
+			if index != selected
+				retained.push(value)
+			end
+		end
+		store.children[receiver] = retained
+		return values[selected]
+	end
+	if kind == array_method_empty()
+		return repl_boolean(store, values.size() == 0)
+	end
+	if kind == array_method_first() || kind == array_method_last()
+		if values.size() == 0
+			store.error[0] = "panic: Array is empty"
+			return 0
+		end
+		if kind == array_method_first()
+			return values[0]
+		end
+		return values[values.size() - 1]
+	end
+	mut first := 0
+	mut finish := values.size()
+	if kind == array_method_slice()
+		bounds := store.children[argument]
+		first = store.integers[bounds[0]]
+		finish = store.integers[bounds[1]]
+		exclusive := store.integers[bounds[2]] == 1
+		if first < 0 || finish < 0 || first > finish || finish > values.size() || (!exclusive && finish == values.size())
+			store.error[0] = "panic: Array slice range is out of bounds"
+			return 0
+		end
+		if !exclusive
+			finish += 1
+		end
+	end
+	mut children: Array<Integer> := []
+	mut index := first
+	while index < finish
+		mut selected := index
+		if kind == array_method_reverse()
+			selected = finish - 1 - index
+		end
+		children.push(values[selected])
+		index += 1
+	end
+	return repl_value(store, store.types[receiver], 0, 0.0, "", children)
+end
+
+# The checker restricts equality queries to portable scalar/payloadless values.
+def repl_array_query_equal(store: ReplStore, first_value: Integer, second_value: Integer): Boolean
+	mut first := first_value
+	mut second := second_value
+	if union_parts(store.types[first]).size() > 0
+		first = store.children[first][0]
+	end
+	if union_parts(store.types[second]).size() > 0
+		second = store.children[second][0]
+	end
+	if repl_get(store, first).type_name == "String"
+		return store.texts[first] == store.texts[second]
+	elsif store.types[first] == "Float"
+		return store.floats[first] == store.floats[second]
+	end
+	return repl_variant(store, first) == repl_variant(store, second)
+end
+
+def repl_array_query(mut store: ReplStore, kind: Integer, receiver: Integer, argument: Integer): Integer
+	values := store.children[receiver]
+	mut count := 0
+	mut children: Array<Integer> := []
+	values.each.with_index do |value, index|
+		if kind == array_method_concat()
+			children.push(value)
+		elsif kind == array_method_uniq()
+			mut present := false
+			children.each do |previous|
+				if repl_array_query_equal(store, previous, value)
+					present = true
+					break
+				end
+			end
+			if !present
+				children.push(value)
+			end
+		elsif repl_array_query_equal(store, value, argument)
+			if kind == array_method_include()
+				return repl_boolean(store, true)
+			elsif kind == array_method_index()
+				found := repl_integer(store, index)
+				return repl_value(store, "Integer?", 0, 0.0, "", [found])
+			end
+			count += 1
+		end
+	end
+	if kind == array_method_include()
+		return repl_boolean(store, false)
+	elsif kind == array_method_count()
+		return repl_integer(store, count)
+	elsif kind == array_method_index()
+		return repl_value(store, "Integer?", 0, 0.0, "", store.children[0])
+	elsif kind == array_method_concat()
+		store.children[argument].each { |value| children.push(value) }
+	end
+	return repl_value(store, store.types[receiver], 0, 0.0, "", children)
+end

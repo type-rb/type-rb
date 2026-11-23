@@ -1,0 +1,93 @@
+def slice_test_0_source(mut calls: Array<Integer>): Array<Integer>
+	calls.push(1)
+	return [1, 2, 3]
+end
+def slice_test_0_width(mut calls: Array<Integer>): Integer
+	calls.push(2)
+	return 2
+end
+
+def slice_case_0()
+	mut calls: Array<Integer> := []
+	slice_test_0_source(calls).each_slice(slice_test_0_width(calls)) { |batch| puts(batch.size()) }
+	calls.each { |value| puts(value) }
+
+end
+
+def slice_test_1_width(mut values: Array<Integer>): Integer
+	values.push(3)
+	return 2
+end
+
+def slice_case_1()
+	mut values := [1, 2]
+	values.each_slice(slice_test_1_width(values)) { |batch| puts(batch[0]); puts(batch.size()) }
+
+end
+
+def slice_test_2_width(mut calls: Array<Integer>): Integer
+	calls.push(1)
+	return 2
+end
+
+def slice_case_2()
+	mut calls: Array<Integer> := []
+	empty: Array<Integer> := []
+	empty.each_slice(slice_test_2_width(calls)) { |_batch| puts(99) }
+	(2...2).each_slice(slice_test_2_width(calls)) { |_batch| puts(99) }
+	puts(calls.size())
+
+end
+
+def slice_test_3_width(mut calls: Array<Integer>): Integer
+	calls.push(1)
+	return 2
+end
+def slice_test_3_visit(values: Array<Integer>?, mut calls: Array<Integer>)
+	values&.each_slice(slice_test_3_width(calls)).with_index { |batch, index| puts(index); puts(batch.size()) }
+end
+def slice_test_3_range_visit(values: Range<Integer>?, mut calls: Array<Integer>)
+	values&.each_slice(slice_test_3_width(calls)) { |batch| puts(batch.size()) }
+end
+
+def slice_case_3()
+	mut calls: Array<Integer> := []
+	slice_test_3_visit(nil, calls)
+	slice_test_3_visit([1, 2, 3], calls)
+	puts(calls.size())
+	slice_test_3_range_visit(nil, calls)
+	slice_test_3_range_visit(1..3, calls)
+	puts(calls.size())
+
+end
+
+def slice_case_4()
+	size := 0
+	values: Array<Integer>? := nil
+	values&.each_slice(size) { |_batch| puts(99) }
+	puts(1)
+
+end
+
+def slice_test_5_early(flag: Boolean): Integer
+	[1].each_slice(if flag
+			return 7
+		else
+			return 9
+		end) { |batch| puts(batch.size()) }
+	return 0
+end
+
+def slice_case_5()
+	puts(slice_test_5_early(true))
+	puts(slice_test_5_early(false))
+end
+
+def main()
+	slice_case_0()
+	slice_case_1()
+	slice_case_2()
+	slice_case_3()
+	slice_case_4()
+	slice_case_5()
+end

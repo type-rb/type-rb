@@ -1,0 +1,207 @@
+name: Experimental bootstrap seed ceremony
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Exact experimental bootstrap seed tag
+        required: true
+        default: bootstrap-seed-2026-08-30
+        type: string
+      root_asset_id:
+        description: Asset id of the registered root QBE in the draft release
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+
+jobs:
+  build-target:
+    name: Build ${{ matrix.asset }}
+    # GitHub returns draft releases only to callers with push access. Limit the
+    # required contents write permission to the jobs that read the registered
+    # root asset; these jobs never create, edit, or upload release content.
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            profile: darwin-arm64-v0
+            target: darwin-arm64
+            asset: type-rb-native-bootstrap-darwin-arm64
+          - runner: ubuntu-24.04-arm
+            profile: linux-arm64-v0
+            target: linux-arm64
+            asset: type-rb-native-bootstrap-linux-arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Check out the registered Native revision
+        uses: actions/checkout@v5
+
+      - name: Validate the draft root asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          ROOT_ASSET_ID: ${{ inputs.root_asset_id }}
+        run: |
+          test "$RELEASE_TAG" = bootstrap-seed-2026-08-30
+          printf '%s\n' "$ROOT_ASSET_ID" | grep -E '^[0-9]+$'
+          gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" > "$RUNNER_TEMP/releases.json"
+          jq -e \
+            --arg tag "$RELEASE_TAG" \
+            --arg sha "$GITHUB_SHA" \
+            --argjson id "$ROOT_ASSET_ID" \
+            '
+              [
+                .[]
+                | select(
+                    .draft == true and
+                    .prerelease == true and
+                    .immutable == false and
+                    .tag_name == $tag and
+                    .target_commitish == $sha
+                  )
+                | .assets[]
+                | select(
+                    .id == $id and
+                    .name == "type-rb-native-bootstrap-root-qbe-v1.ssa" and
+                    .size == 658639 and
+                    .digest == "sha256:62db3c31527a670c3050051a9fa27bf142b6c5deaab81ef8234104bd467aa95a"
+                  )
+              ]
+              | length == 1
+            ' "$RUNNER_TEMP/releases.json"
+          gh api \
+            -H "Accept: application/octet-stream" \
+            "repos/$GITHUB_REPOSITORY/releases/assets/$ROOT_ASSET_ID" \
+            > "$RUNNER_TEMP/type-rb-native-bootstrap-root-qbe-v1.ssa"
+          test "$(wc -c < "$RUNNER_TEMP/type-rb-native-bootstrap-root-qbe-v1.ssa" | tr -d ' ')" = 658639
+          if command -v sha256sum >/dev/null 2>&1; then
+            actual=$(sha256sum "$RUNNER_TEMP/type-rb-native-bootstrap-root-qbe-v1.ssa" | awk '{print $1}')
+          else
+            actual=$(shasum -a 256 "$RUNNER_TEMP/type-rb-native-bootstrap-root-qbe-v1.ssa" | awk '{print $1}')
+          fi
+          test "$actual" = 62db3c31527a670c3050051a9fa27bf142b6c5deaab81ef8234104bd467aa95a
+
+      - name: Build pinned QBE 1.3
+        id: qbe
+        run: |
+          curl -L https://c9x.me/compile/release/qbe-1.3.tar.xz -o "$RUNNER_TEMP/qbe-1.3.tar.xz"
+          if command -v sha256sum >/dev/null 2>&1; then
+            echo "d587905d620dc5e1d2bfa7c2cc642b9b837aa89a3188c6e37b53d756cf66e320  $RUNNER_TEMP/qbe-1.3.tar.xz" | sha256sum -c -
+          else
+            echo "d587905d620dc5e1d2bfa7c2cc642b9b837aa89a3188c6e37b53d756cf66e320  $RUNNER_TEMP/qbe-1.3.tar.xz" | shasum -a 256 -c -
+          fi
+          tar -C "$RUNNER_TEMP" -xf "$RUNNER_TEMP/qbe-1.3.tar.xz"
+          make -C "$RUNNER_TEMP/qbe-1.3"
+          echo "path=$RUNNER_TEMP/qbe-1.3/qbe" >> "$GITHUB_OUTPUT"
+
+      - name: Ensure Linux linker and process tracing are available
+        if: matrix.profile == 'linux-arm64-v0'
+        run: |
+          if ! command -v strace >/dev/null 2>&1 || ! command -v ld.lld >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y lld strace
+          fi
+
+      - name: Build and verify the platform seed
+        run: |
+          mkdir -p "$RUNNER_TEMP/package"
+          /bin/sh tools/bootstrap-seed.sh \
+            --mode initial \
+            --input "$RUNNER_TEMP/type-rb-native-bootstrap-root-qbe-v1.ssa" \
+            --qbe "${{ steps.qbe.outputs.path }}" \
+            --cc /usr/bin/cc \
+            --profile "${{ matrix.profile }}" \
+            --runner-image "${{ matrix.runner }}" \
+            --workspace "$RUNNER_TEMP/bootstrap-workspace" \
+            --output "$RUNNER_TEMP/package/${{ matrix.asset }}" \
+            --evidence "$RUNNER_TEMP/bootstrap-evidence" \
+            --metadata "$RUNNER_TEMP/package/${{ matrix.target }}.json" \
+            --asset-name "${{ matrix.asset }}"
+          wc -c "$RUNNER_TEMP/qbe-1.3.tar.xz" > "$RUNNER_TEMP/bootstrap-evidence/qbe-source-size.txt"
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum "$RUNNER_TEMP/qbe-1.3.tar.xz" > "$RUNNER_TEMP/bootstrap-evidence/qbe-source-sha256.txt"
+          else
+            shasum -a 256 "$RUNNER_TEMP/qbe-1.3.tar.xz" > "$RUNNER_TEMP/bootstrap-evidence/qbe-source-sha256.txt"
+          fi
+
+      - name: Attest the platform compiler
+        uses: actions/attest@v4
+        with:
+          subject-path: ${{ runner.temp }}/package/${{ matrix.asset }}
+
+      - name: Upload the target package inputs
+        uses: actions/upload-artifact@v6
+        with:
+          name: bootstrap-seed-target-${{ matrix.target }}
+          path: ${{ runner.temp }}/package
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload the initial target evidence
+        uses: actions/upload-artifact@v6
+        with:
+          name: bootstrap-seed-initial-evidence-${{ matrix.target }}
+          path: ${{ runner.temp }}/bootstrap-evidence
+          if-no-files-found: error
+          retention-days: 30
+
+  assemble-manifest:
+    name: Assemble strict release assets
+    needs: build-target
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Check out the registered Native revision
+        uses: actions/checkout@v5
+
+      - name: Download target artifacts
+        uses: actions/download-artifact@v7
+        with:
+          pattern: bootstrap-seed-target-*
+          path: ${{ runner.temp }}/target-inputs
+          merge-multiple: true
+
+      - name: Build the manifest and checksum index
+        run: |
+          /bin/sh tools/bootstrap-seed-manifest.sh create \
+            "${{ inputs.release_tag }}" \
+            "${{ github.sha }}" \
+            "$RUNNER_TEMP/target-inputs/type-rb-native-bootstrap-darwin-arm64" \
+            "$RUNNER_TEMP/target-inputs/type-rb-native-bootstrap-linux-arm64" \
+            "$RUNNER_TEMP/target-inputs/darwin-arm64.json" \
+            "$RUNNER_TEMP/target-inputs/linux-arm64.json" \
+            "$RUNNER_TEMP/release-assets"
+
+      - name: Attest the release manifest
+        uses: actions/attest@v4
+        with:
+          subject-path: ${{ runner.temp }}/release-assets/type-rb-native-bootstrap-manifest-v1.json
+
+      - name: Attest the checksum index
+        uses: actions/attest@v4
+        with:
+          subject-path: ${{ runner.temp }}/release-assets/SHA256SUMS
+
+      - name: Upload the reviewed release asset set
+        uses: actions/upload-artifact@v6
+        with:
+          name: bootstrap-seed-release-assets
+          path: ${{ runner.temp }}/release-assets
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload manifest inputs
+        uses: actions/upload-artifact@v6
+        with:
+          name: bootstrap-seed-manifest-inputs
+          path: ${{ runner.temp }}/target-inputs/*.json
+          if-no-files-found: error
+          retention-days: 30

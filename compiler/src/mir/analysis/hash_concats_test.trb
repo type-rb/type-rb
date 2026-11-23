@@ -1,0 +1,172 @@
+import { check, emit_qbe } from compiler
+import { mir_hash_concat_plans, mir_hash_concats_equal } from mir/analysis/hash_concats
+import { MirHashConcatProbe, mir_function_index } from mir/model/module
+import { optimize_verified_mir } from mir/passes/optimize
+import { verify_mir } from mir/verify/module
+import { CompilerState, has_diagnostic } from state/state
+import { occurrence_count } from testing/compiler
+import { array_mir_test_read } from testing/mir/arrays
+import { control_test_output } from testing/mir/control
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { compiler_phase_failure, logical_checked_source } from testing/pipeline
+import { logical_run_qbe } from testing/qbe_runner
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+def hash_concat_checked(source: String): CompilerState
+	mut state := logical_checked_source(source)
+	expect(check(state)).to_be_true()
+	expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	return state
+end
+
+def hash_concat_source(body: String): String
+	return "def probe(mut table: Hash<String, Integer>, left: String, right: String): String\n" + body + "\nreturn key\nend\ndef main()\nmut table := {\"ab\" => 2}\nputs(probe(table, \"a\", \"b\"))\nend\n"
+end
+
+def hash_concat_emitted(mut state: CompilerState): String
+	text := control_test_output(emit_qbe(state))
+	expect(compiler_phase_failure(state, "emit", !has_diagnostic(state))).to_equal("")
+	return text
+end
+
+def hash_concat_run(source: String, expected: String)
+	qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+	if qbe != nil
+		case logical_run_qbe(qbe, source)
+		when Result::Ok(actual)
+			expect(actual).to_equal(expected)
+		when Result::Err(error)
+			puts(error)
+			expect(false).to_be_true()
+		end
+	end
+end
+
+describe("MIR Hash concat probes") do
+	test("reuses a retained immutable key and composes with membership and update proofs") do
+		state := hash_concat_checked(hash_concat_source("key := left + right\nif table.key?(key)\ntable[key] = table[key] + 1\nelse\ntable[key] = 1\nend"))
+		plans := state.scalar_mir.hash_concat_probes[0]
+		expect(plans.size()).to_equal(1)
+		expect(state.scalar_mir.hash_membership_reuse[0].size()).to_equal(1)
+		expect(state.scalar_mir.hash_lookup_reuse[0].size()).to_equal(1)
+		plan := plans[0]
+		concat := state.scalar_mir.instructions[plan.concat]
+		membership := state.scalar_mir.instructions[plan.membership]
+		roots := state.scalar_mir.root_plans[mir_function_index(state.scalar_mir, plan.function_id)]
+		mut point := 0
+		while roots.instructions[point] != plan.concat
+			point += 1
+		end
+		expect(roots.roots[point].include?(concat.first)).to_be_true()
+		expect(roots.roots[point].include?(concat.second)).to_be_true()
+		expect(roots.roots[point].include?(membership.first)).to_be_true()
+		qbe := hash_concat_emitted(state)
+		expect(occurrence_count(qbe, "call $trbn_hash_concat_key(")).to_equal(1)
+		expect(occurrence_count(qbe, "%hash_concat_slot =l alloc8 8")).to_equal(1)
+		expect(qbe.include?(" =l copy %hash_concat_bucket_")).to_be_true()
+		expect(qbe.include?(" =l copy %hash_membership_")).to_be_true()
+		hash_concat_run(qbe, "ab\n")
+	end
+
+	test("rejects intervening observations effects failures new receivers and concat chains") do
+		bodies := [
+			"key := left + right\nputs(key)\nif table.key?(key)\nreturn key\nend",
+			"key := left + right\ntable.delete(left)\nif table.key?(key)\nreturn key\nend",
+			"key := left + right\nother := {left => 1}\nif other.key?(key)\nreturn key\nend",
+			"key := left + right\nnumber := left.to_i()\nif table.key?(key)\nputs(number)\nend",
+			"key := left + right\nif left == right\nif table.key?(key)\nreturn key\nend\nend",
+			"key := left + right + left\nif table.key?(key)\nreturn key\nend",
+			"key := left + right\nif table.key?(left)\nreturn key\nend",
+		]
+		bodies.each do |body|
+			state := hash_concat_checked(hash_concat_source(body))
+			expect(state.scalar_mir.hash_concat_probes[0].empty?()).to_be_true()
+		end
+	end
+
+	test("keeps the original concat before an intervening failing conversion") do
+		state := hash_concat_checked(hash_concat_source("key := left + right\nnumber := left.to_i()\nif table.key?(key)\nputs(number)\nend"))
+		qbe := hash_concat_emitted(state)
+		expect(qbe.include?("$trbn_hash_concat_key")).to_be_false()
+		body := qbe.split("function l $trbnf0(")[1].split("\n}")[0]
+		expect(body.split("call $trbn_string_to_integer")[0].include?("call $trbn_string_concat")).to_be_true()
+	end
+
+	test("rejects missing duplicated forged and unoptimized plans") do
+		mut mode := 0
+		while mode < 6
+			mut state := hash_concat_checked(hash_concat_source("key := left + right\nif table.key?(key)\nreturn key\nend"))
+			original := state.scalar_mir.hash_concat_probes[0][0]
+			if mode == 0
+				state.scalar_mir.hash_concat_probes[0] = []
+			elsif mode == 1
+				state.scalar_mir.hash_concat_probes[0].push(original)
+			elsif mode == 2
+				state.scalar_mir.hash_concat_probes[0][0] = MirHashConcatProbe.new(function_id: original.function_id + 1, concat: original.concat, membership: original.membership)
+			elsif mode == 3
+				state.scalar_mir.hash_concat_probes[0][0] = MirHashConcatProbe.new(function_id: original.function_id, concat: original.concat + 1, membership: original.membership)
+			elsif mode == 4
+				state.scalar_mir.hash_concat_probes[0][0] = MirHashConcatProbe.new(function_id: original.function_id, concat: original.concat, membership: original.membership + 1)
+			else
+				expect(verify_mir(state.scalar_mir, false)).to_equal("MIR input cannot supply Hash concat plans")
+				state.scalar_mir.hash_concat_probes[0] = []
+			end
+			expect(verify_mir(state.scalar_mir, true)).to_equal("MIR Hash concat plan differs")
+			mode += 1
+		end
+	end
+
+	test("rederives after source erasure block reordering and optimization") do
+		mut state := hash_concat_checked(hash_concat_source("key := left + right\nif table.key?(key)\ntable[key] = table[key] + 1\nend"))
+		before := state.scalar_mir.hash_concat_probes[0]
+		intrinsic_mir_erase(state)
+		state.scalar_mir.functions.each do |function|
+			mut left := function.block_start
+			mut right := left + function.block_count - 1
+			while left < right
+				saved := state.scalar_mir.blocks[left]
+				state.scalar_mir.blocks[left] = state.scalar_mir.blocks[right]
+				state.scalar_mir.blocks[right] = saved
+				left += 1
+				right -= 1
+			end
+		end
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(mir_hash_concats_equal(before, state.scalar_mir.hash_concat_probes[0])).to_be_true()
+		hash_concat_run(hash_concat_emitted(state), "ab\n")
+	end
+
+	test("rejects shared instruction ownership and selects the unchanged workload") do
+		mut state := hash_concat_checked(hash_concat_source("key := left + right\nif table.key?(key)\nreturn key\nend"))
+		state.scalar_mir.functions.push(state.scalar_mir.functions[0])
+		expect(mir_hash_concat_plans(state.scalar_mir).empty?()).to_be_true()
+		root := Process.environment("TYPE_RB_NATIVE_ROOT")
+		if root != nil
+			workload := hash_concat_checked(array_mir_test_read(root + "/benchmarks/features/hash-string-keys/src/main.trb"))
+			expect(workload.scalar_mir.hash_concat_probes[0].size()).to_equal(1)
+		end
+	end
+
+	test("preserves empty fragments hits and newly materialized missing keys") do
+		source := "def probe(table: Hash<String, Integer>, left: String, right: String): String\nkey := left + right\nif table.key?(key)\nreturn key\nend\nreturn key\nend\ndef main()\nmut table := {\"\" => 1, \"alpha\" => 2}\nputs(probe(table, \"\", \"\") == \"\")\nputs(probe(table, \"al\", \"pha\"))\nputs(probe(table, \"alpha\", \"\").size())\nputs(probe(table, \"missing\", \"!\"))\nend\n"
+		state := hash_concat_checked(source)
+		expect(state.scalar_mir.hash_concat_probes[0].size()).to_equal(1)
+		hash_concat_run(hash_concat_emitted(state), "true\nalpha\n5\nmissing!\n")
+	end
+
+	test("retains returned keys through collisions tombstones table replacement and forced collection") do
+		source := "def joined(left: String, right: String): String\nreturn left + right\nend\ndef probe(table: Hash<String, Integer>, left: String, right: String): String\nkey := left + right\nif table.key?(key)\nreturn key\nend\nreturn key\nend\ndef main()\nmut table: Hash<String, Integer> := {}\nmut index := 0\nwhile index < 320\ntable[joined(\"e\", index.to_s())] = index\nindex += 1\nend\nindex = 0\nwhile index < 320\ntable.delete(joined(\"e\", index.to_s()))\nindex += 2\nend\nmut kept: Array<String> := []\nmut expected: Array<String> := []\nmut valid := 0\nindex = 0\nwhile index < 640\nnumber := (index % 320).to_s()\nkey := probe(table, \"e\", number)\nother := joined(\"e\", number)\nif key == other && key.size() == other.size()\nvalid += 1\nend\nkept.push(key)\nexpected.push(other)\ntable[key] = index\nindex += 1\nend\ntable = {}\nindex = 0\nwhile index < 640\nallocated := joined(index.to_s(), \"!\")\nif kept[index] == expected[index] && allocated.size() > 0\nvalid += 1\nend\nindex += 1\nend\nputs(valid)\nend\n"
+		state := hash_concat_checked(source)
+		expect(state.scalar_mir.hash_concat_probes[0].size()).to_equal(1)
+		qbe := hash_concat_emitted(state)
+		hash_concat_run(qbe, "1280\n")
+		marker := "\t%result =l call $trbn_gc_alloc(l $trbn_desc_string, l %size, l 0)"
+		parts := qbe.split(marker)
+		expect(parts.size()).to_equal(2)
+		forced := parts[0] + "\tcall $trbn_gc_collect(w 0)\n" + marker + parts[1]
+		hash_concat_run(forced, "1280\n")
+	end
+end

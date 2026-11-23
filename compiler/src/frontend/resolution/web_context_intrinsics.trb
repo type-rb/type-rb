@@ -1,0 +1,149 @@
+import { standard_source_web_context } from state/standard_source_kinds
+import { official_source_kind } from project/official_catalog
+import { find_object_type } from frontend/types/object_types
+import { CompilerState } from state/state
+import { load_integer, load_string, sparse_integer_at } from support/storage
+
+# All primitives are private loader declarations, not authored cast operations.
+def web_context_primitive_definition(state: CompilerState, definition: Integer): Integer
+	if definition < 0 || definition >= state.type_resolution.generic_functions.size()
+		return 0
+	end
+	row := state.type_resolution.generic_functions[definition]
+	if sparse_integer_at(state.standard_modules, row.source_id) != standard_source_web_context() || row.receiver_type != "" || row.body_start != row.body_finish
+		return 0
+	end
+	mut kind := 0
+	mut variables := ["T"]
+	mut names := ["value"]
+	mut types := ["Any"]
+	mut result := "Boolean"
+	if row.name == "pack"
+		kind = 1
+		types = ["T"]
+		result = "Any"
+	elsif row.name == "accepts"
+		kind = 2
+	elsif row.name == "unpack"
+		kind = 3
+		result = "T"
+	elsif row.name == "same"
+		kind = 4
+		variables = ["K"]
+		names = ["left", "right"]
+		types = ["K", "K"]
+	elsif row.name == "copy_state" || row.name == "copy_request"
+		kind = 5
+		if row.name == "copy_request"
+			kind = 6
+		end
+		variables = ["C", "V"]
+		names = ["source", "replacement"]
+		types = ["C", "V"]
+		result = "C"
+	end
+	if kind == 0 || row.type_parameters.size() != variables.size() || row.parameters.size() != names.size() || row.result_type != result
+		return 0
+	end
+	mut index := 0
+	while index < variables.size()
+		if row.type_parameters[index] != variables[index]
+			return 0
+		end
+		index += 1
+	end
+	index = 0
+	while index < names.size()
+		parameter := row.parameters[index]
+		if parameter.name != names[index] || parameter.type_name != types[index] || parameter.mutable != 0 || parameter.named_only != 0 || parameter.default_start >= 0 || parameter.default_finish >= 0
+			return 0
+		end
+		index += 1
+	end
+	return kind
+end
+
+def web_context_primitive_target(state: CompilerState, function: Integer): String
+	state.type_resolution.generic_function_instances.each do |instance|
+		if instance.function == function && instance.arguments.size() > 0
+			return instance.arguments[0]
+		end
+	end
+	return ""
+end
+
+def web_context_primitive(state: CompilerState, function: Integer): Integer
+	if function < 0 || function >= state.declarations.function_count[0]
+		return 0
+	end
+	owner := load_integer(state.declarations.function_modules, function)
+	if sparse_integer_at(state.standard_modules, owner) != standard_source_web_context()
+		return 0
+	end
+	state.type_resolution.generic_function_instances.each do |instance|
+		if instance.function == function
+			kind := web_context_primitive_definition(state, instance.definition)
+			if kind == 0 || state.type_resolution.generic_functions[instance.definition].source_id != owner || instance.arguments.size() != state.type_resolution.generic_functions[instance.definition].type_parameters.size()
+				return 0
+			end
+			if state.type_resolution.generic_template_mode[0]
+				return kind
+			end
+			if sparse_integer_at(state.parsed.function_expression_bodies, function) != 0
+				return 0
+			end
+			start := load_integer(state.declarations.function_parameter_starts, function)
+			mut types := ["Any"]
+			mut result := "Boolean"
+			if kind == 1
+				types = [instance.arguments[0]]
+				result = "Any"
+			elsif kind == 3
+				result = instance.arguments[0]
+			elsif kind >= 4
+				types = [instance.arguments[0], instance.arguments[0]]
+				object := find_object_type(state, instance.arguments[0])
+				if object < 0
+					return 0
+				end
+				layout := state.nominal.object_instances[object]
+				declaration := state.nominal.objects[layout.definition]
+				if sparse_integer_at(state.standard_modules, declaration.source_id) != official_source_kind("trb/web") || declaration.interface_type
+					return 0
+				end
+				if kind == 4
+					if declaration.name != "ContextKey" || declaration.parameters.size() != 1 || layout.arguments.size() != 1
+						return 0
+					end
+				else
+					if declaration.name != "Context" || declaration.parameters.size() != 0 || layout.fields.size() != 3 || instance.arguments.size() != 2
+						return 0
+					end
+					mut field := 2
+					mut name := "@_trb_context_state"
+					if kind == 6
+						field = 0
+						name = "@request"
+					end
+					if layout.fields[field].name != name || layout.fields[field].type_name != instance.arguments[1] || !layout.fields[field].readonly
+						return 0
+					end
+					types[1] = instance.arguments[1]
+					result = instance.arguments[0]
+				end
+			end
+			if load_integer(state.declarations.function_parameter_counts, function) != types.size() || load_string(state.declarations.function_result_types, function) != result || load_integer(state.declarations.function_body_starts, function) != load_integer(state.declarations.function_body_ends, function)
+				return 0
+			end
+			mut index := 0
+			while index < types.size()
+				if load_string(state.declarations.parameter_names, start + index) != state.type_resolution.generic_functions[instance.definition].parameters[index].name || load_string(state.declarations.parameter_types, start + index) != types[index] || load_integer(state.declarations.parameter_mutable, start + index) != 0 || load_integer(state.declarations.parameter_named_only, start + index) != 0 || sparse_integer_at(state.parsed.parameter_defaults, start + index) != 0
+					return 0
+				end
+				index += 1
+			end
+			return kind
+		end
+	end
+	return 0
+end

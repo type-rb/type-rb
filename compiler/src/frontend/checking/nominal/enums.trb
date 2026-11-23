@@ -1,0 +1,191 @@
+import { raw_enum_type } from frontend/types/raw_enum_types
+import { enum_payloadless } from frontend/types/enum_types
+import { checked_category_value } from frontend/types/value_categories
+import { checked_value, scalar_mir_literal } from frontend/checking/body/values
+import { mir_control_active, mir_control_branch, mir_control_enter, mir_control_prepare } from mir/build/control
+import { mir_value_complete, mir_value_exit, mir_value_join } from mir/build/value_control
+import { mir_op_enum_test } from mir/model/instructions
+import { integer_string } from support/literals
+import { binding_use_pattern } from state/binding_kinds
+import { mir_op_enum_field } from mir/model/instructions
+import { alias_matches_type } from frontend/resolution/alias_patterns
+import { parse_namespace_reference } from frontend/resolution/namespace_references
+import { advance, expect, expect_identifier, skip_newlines, token_is } from frontend/syntax/syntax_tokens
+import { argument_binding_slot } from frontend/resolution/argument_binding
+import { CheckedValue, checked_mir_value } from frontend/checking/body/values
+import { mir_enum_operation } from mir/lowering/enums
+import { EnumPattern } from frontend/types/enum_model
+import { enum_argument_bindings, find_enum_type, find_enum_variant } from frontend/types/enum_types
+import { generic_instance_for_type } from frontend/resolution/type_resolution
+import { enum_type } from frontend/types/enum_types
+import { find_result_pattern, find_visible_alias, find_visible_enum } from frontend/resolution/declaration_lookup
+import { nullable_replace } from frontend/checking/nominal/nullable_flow
+import { parse_argument_label } from frontend/syntax/syntax_forms
+import { CompilerState, diagnostic, has_diagnostic } from state/state
+import { ControlSyntax } from state/source_state
+import { CheckedLocals, local_bind, local_require_use } from state/local_state
+import { load_integer, load_string, sparse_integer_at, sparse_string_at, store_integer } from support/storage
+
+# Check the complete closed family before choosing the exhaustive final edge.
+def check_enum_patterns(mut state: CompilerState, control: ControlSyntax, owner: Integer): Boolean
+	mut seen: Array<Integer> := []
+	mut otherwise := false
+	mut branch_index := 0
+	while branch_index < control.branches.size() && !has_diagnostic(state)
+		branch := control.branches[branch_index]
+		branch_index += 1
+		if branch.condition < 0
+			otherwise = true
+			next
+		end
+		mut position := [branch.condition]
+		line := load_integer(state.source_tokens.token_lines, position[0])
+		application := sparse_string_at(state.callables.checked[0].generic_application_types, branch.condition)
+		mut pattern_owner := -1
+		if application != ""
+			pattern_owner = find_enum_type(state, application)
+			position[0] = sparse_integer_at(state.callables.checked[0].generic_application_finishes, branch.condition)
+		else
+			pattern_name := parse_namespace_reference(state, position)
+			pattern_owner = find_visible_enum(state, state.module_graph.active_module[0], pattern_name)
+			instance := generic_instance_for_type(state, enum_type(owner))
+			if instance >= 0 && find_result_pattern(state, state.module_graph.active_module[0], pattern_name) == state.type_resolution.generic_instances[instance].definition
+				pattern_owner = owner
+			end
+			alias_index := find_visible_alias(state, state.module_graph.active_module[0], pattern_name)
+			if alias_index >= 0 && alias_matches_type(state, alias_index, enum_type(owner))
+				pattern_owner = owner
+			end
+		end
+		if pattern_owner != owner || !expect(state, position, "::")
+			diagnostic(state, "TRBN4004", line, "case pattern must belong to the selector enum")
+			return false
+		end
+		variant := find_enum_variant(state, owner, expect_identifier(state, position))
+		if variant < 0
+			diagnostic(state, "TRBN4004", line, "unknown enum pattern variant")
+			return false
+		end
+		mut previous := 0
+		while previous < seen.size()
+			if seen[previous] == variant
+				diagnostic(state, "TRBN4004", line, "enum variant is handled more than once")
+				return false
+			end
+			previous += 1
+		end
+		seen.push(variant)
+		row := state.nominal.enum_variants[variant]
+		mut bindings := enum_argument_bindings(state, variant)
+		if row.field_count > 0
+			if !expect(state, position, "(")
+				return false
+			end
+			skip_newlines(state, position)
+			while !token_is(state, position[0], ")") && !has_diagnostic(state)
+				label := parse_argument_label(state, position)
+				slot := argument_binding_slot(bindings, label)
+				if slot < 0
+					diagnostic(state, "TRBN4004", line, bindings.error[0])
+					return false
+				end
+				binding := position[0]
+				name := expect_identifier(state, position)
+				previous = 0
+				while previous < bindings.values.size()
+					if bindings.values[previous] >= 0 && load_string(state.source_tokens.token_texts, bindings.values[previous]) == name
+						diagnostic(state, "TRBN4004", line, "enum pattern binding is duplicated")
+						return false
+					end
+					previous += 1
+				end
+				bindings.values[slot] = binding
+				skip_newlines(state, position)
+				if !token_is(state, position[0], ",")
+					break
+				end
+				advance(position)
+				skip_newlines(state, position)
+			end
+			if !expect(state, position, ")")
+				return false
+			end
+		end
+		if position[0] != branch.condition_finish
+			diagnostic(state, "TRBN4004", line, "enum pattern requires exactly one qualified variant and its bindings")
+			return false
+		end
+		previous = 0
+		while previous < row.field_count
+			if !bindings.provided[previous]
+				diagnostic(state, "TRBN4004", line, "enum pattern must bind every payload field")
+				return false
+			end
+			previous += 1
+		end
+		pattern := EnumPattern.new(origin: branch.condition, variant: variant, bindings: bindings.values)
+		encoded := sparse_integer_at(state.callables.checked[0].enum_pattern_origins, branch.condition)
+		if encoded > 0
+			state.callables.checked[0].enum_patterns[encoded - 1] = pattern
+		else
+			state.callables.checked[0].enum_patterns.push(pattern)
+			store_integer(state.callables.checked[0].enum_pattern_origins, branch.condition, state.callables.checked[0].enum_patterns.size())
+		end
+	end
+	if !otherwise && seen.size() != state.nominal.enums[owner].variant_count
+		diagnostic(state, "TRBN4004", load_integer(state.source_tokens.token_lines, control.origin), "enum case is not exhaustive")
+	end
+	return !has_diagnostic(state)
+end
+
+def check_enum_bindings(mut state: CompilerState, mut locals: CheckedLocals, selector: CheckedValue, origin: Integer)
+	pattern := state.callables.checked[0].enum_patterns[sparse_integer_at(state.callables.checked[0].enum_pattern_origins, origin) - 1]
+	row := state.nominal.enum_variants[pattern.variant]
+	mut slot := 0
+	while slot < pattern.bindings.size()
+		binding := pattern.bindings[slot]
+		type_name := state.nominal.enum_fields[row.field_start + slot].type_name
+		value := mir_enum_operation(state, locals, mir_op_enum_field(), selector, -1, row.field_start + slot, type_name, binding)
+		index := local_bind(locals, load_string(state.source_tokens.token_texts, binding), type_name, 0)
+		local_require_use(locals, index, load_string(state.source_tokens.token_texts, binding), binding, binding_use_pattern())
+		store_integer(locals.mir_values, index, checked_mir_value(value) + 1)
+		nullable_replace(locals, index, type_name)
+		slot += 1
+	end
+end
+
+# Plain payloadless enums print their declaration ordinal in compiled reference
+# output. Decide that semantic projection here, using existing verified enum
+# tests and scalar joins; the backend never infers declaration order.
+def checked_enum_puts(mut state: CompilerState, mut locals: CheckedLocals, value: CheckedValue, origin: Integer): CheckedValue
+	owner := find_enum_type(state, value.type_name)
+	if owner < 0
+		return value
+	end
+	if !enum_payloadless(state, owner) || raw_enum_type(state, owner) != ""
+		return value
+	end
+	mir_control_prepare(state, locals)
+	if !mir_control_active(locals)
+		return checked_value("Integer", checked_category_value(), origin, 0)
+	end
+	line := load_integer(state.source_tokens.token_lines, origin)
+	mut join := mir_value_join(locals, line)
+	definition := state.nominal.enums[owner]
+	mut variant := definition.variant_start
+	finish := variant + definition.variant_count
+	while variant < finish
+		mut alternate := -1
+		if variant + 1 < finish
+			condition := mir_enum_operation(state, locals, mir_op_enum_test(), value, -1, variant, "Boolean", origin)
+			alternate = mir_control_branch(state, locals, condition, line)
+		end
+		literal := scalar_mir_literal(state, locals, "Integer", origin, integer_string(variant - definition.variant_start))
+		mir_value_exit(state, locals, join, literal)
+		if alternate >= 0
+			mir_control_enter(state, locals, alternate, line)
+		end
+		variant += 1
+	end
+	return mir_value_complete(state, locals, join, "Integer", origin)
+end

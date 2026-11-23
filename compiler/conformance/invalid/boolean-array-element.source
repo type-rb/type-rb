@@ -1,0 +1,4 @@
+def main()
+mut values: Array<Boolean> := [true, 1]
+puts(values.size())
+end

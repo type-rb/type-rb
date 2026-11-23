@@ -1,0 +1,121 @@
+import { check, emit_qbe } from compiler
+import { compiler_test_instruction_with_cell } from testing/compiler
+import { control_test_output } from testing/mir/control
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { logical_checked_source } from testing/pipeline
+import { logical_run_qbe } from testing/qbe_runner
+import { verify_mir } from mir/verify/module
+import { load_string } from support/storage
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+describe("MIR global bindings") do
+	test("retains module storage through closure shadowing erased source and collection") do
+		mut state := logical_checked_source("mut value := \"first\" + \" value\"\nmut count := 3\ndef replace(): String\nold := value\nvalue = \"last\" + \" value\"\ncount += 2\nreturn old\nend\ndef main()\nsaved := fn(): String; return value; end\nputs(replace())\nvalue := \"local\"\nputs(saved())\nputs(value)\nputs(count)\nend\n")
+		valid := check(state)
+		if !valid
+			puts(load_string(state.diagnostics.messages, 0))
+		end
+		expect(valid).to_be_true()
+		if valid
+			before := control_test_output(emit_qbe(state))
+			intrinsic_mir_erase(state)
+			while !state.global_bindings.globals.empty?()
+				state.global_bindings.globals.pop()
+				state.global_bindings.global_types.pop()
+				state.global_bindings.global_functions.pop()
+				state.global_bindings.global_order.pop()
+			end
+			expect(control_test_output(emit_qbe(state))).to_equal(before)
+			first := state.scalar_mir.globals[0]
+			state.scalar_mir.globals[0] = state.scalar_mir.globals[1]
+			state.scalar_mir.globals[1] = first
+			expect(verify_mir(state.scalar_mir, true)).to_equal("")
+			mut forced := ""
+			mut hooks := 0
+			control_test_output(emit_qbe(state)).split("\n").each do |line|
+				if line.include?("call $trbnf")
+					forced += "\tcall $trbn_gc_collect(w 0)\n"
+					hooks += 1
+				end
+				forced += line + "\n"
+			end
+			expect(hooks > 0).to_be_true()
+			qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+			if qbe != nil
+				case logical_run_qbe(qbe, forced)
+				when Result::Ok(stdout)
+					expect(stdout).to_equal("first value\nlast value\nlocal\n5\n")
+				when Result::Err(error)
+					puts(error)
+					expect(false).to_be_true()
+				end
+			end
+		end
+	end
+
+	test("rejects forged write capabilities operands and operation shapes") do
+		mut mutation := 0
+		while mutation < 6
+			mut state := logical_checked_source("mut value := 3\nFIXED := 4\ndef main()\nvalue = 5\nputs(value)\nend\n")
+			expect(check(state)).to_be_true()
+			mut index := 0
+			while state.scalar_mir.instructions[index].kind != 59
+				index += 1
+			end
+			instruction := state.scalar_mir.instructions[index]
+			mut cell := 4
+			mut value := 1
+			if mutation == 1
+				cell = 2
+				value = 999999
+			elsif mutation == 2
+				cell = 1
+				value = instruction.first
+			elsif mutation == 3
+				cell = 3
+			elsif mutation == 4
+				cell = 5
+			else
+				if mutation == 5
+					value = 999999
+				end
+			end
+			state.scalar_mir.instructions[index] = compiler_test_instruction_with_cell(instruction, cell, value)
+			expect(verify_mir(state.scalar_mir, true).empty?()).to_be_false()
+			mutation += 1
+		end
+	end
+
+	test("rejects stale nullable proofs across writes calls branches and loops") do
+		bodies := ["if value != nil\nclear()\nputs(value + 1)\nend\n", "if value != nil\nvalue = nil\nputs(value + 1)\nend\n", "if value != nil\nif true\nclear()\nend\nputs(value + 1)\nend\n", "while value != nil\nclear()\nputs(value + 1)\nend\n"]
+		bodies.each do |body|
+			mut state := logical_checked_source("mut value: Integer? := 1\ndef clear()\nvalue = nil\nend\ndef main()\n" + body + "end\n")
+			expect(check(state)).to_be_false()
+		end
+	end
+
+	test("permits fresh guards and local shadowing without losing readonly rules") do
+		mut state := logical_checked_source("mut value: Integer? := 1\nfixed: Integer? := 4\ndef clear()\nvalue = nil\nend\ndef local(): Integer\nmut value: Integer? := 2\nif value != nil\nclear()\nreturn value + 1\nend\nreturn 0\nend\ndef main()\nputs(local())\nif value != nil\nputs(value + 1)\nelse\nputs(\"absent\")\nend\nif fixed != nil\nclear()\nputs(fixed + 1)\nend\nend\n")
+		valid := check(state)
+		if !valid
+			puts(load_string(state.diagnostics.messages, 0))
+		end
+		expect(valid).to_be_true()
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if valid
+			if qbe != nil
+				case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+				when Result::Ok(stdout)
+					expect(stdout).to_equal("3\nabsent\n5\n")
+				when Result::Err(error)
+					puts(error)
+					expect(false).to_be_true()
+				end
+			end
+		end
+		mut readonly := logical_checked_source("values := [3]\ndef main()\nmut copy := values\ncopy.push(4)\nend\n")
+		expect(check(readonly)).to_be_false()
+	end
+end

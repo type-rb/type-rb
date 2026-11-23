@@ -1,0 +1,106 @@
+def bytes_probe_0()
+	value: Bytes := "ABCDE".to_bytes()
+	puts(value.size())
+	puts(value.at(0))
+	puts(value.at(1))
+	puts(value.valid_utf8?())
+	puts(value.concat("!".to_bytes()).to_s())
+	puts(value.to_s())
+end
+
+def bytes_case_0()
+	bytes_probe_0()
+
+end
+class Body
+	readonly @_bytes: Bytes
+	def initialize(bytes: Bytes)
+		@_bytes = bytes
+		return
+	end
+	def bytes(): Bytes
+		return @_bytes
+	end
+	def self.empty(): Body
+		return Body.new("".to_bytes())
+	end
+	def empty?(): Boolean
+		return @_bytes.size() == 0
+	end
+	def size(): Integer
+		return @_bytes.size()
+	end
+	def to_s(): String
+		return @_bytes.to_s()
+	end
+end
+
+def bytes_case_4()
+	puts(Body.empty().empty?())
+	puts(Body.new("ABCDE".to_bytes()).size())
+	puts(Body.new("text".to_bytes()).to_s())
+
+end
+record Packet<T>
+	value: T
+end
+def keep<T>(value: T): T
+	return value
+end
+
+def bytes_case_5()
+	holder := Packet<Bytes>.new(value: keep<Bytes>("record".to_bytes()))
+	puts(holder.value.to_s())
+
+end
+
+def bytes_case_6()
+	values: Array<Bytes> := ["first".to_bytes(), "second".to_bytes()]
+	values.each do |value|
+		puts(value.to_s())
+	end
+	lookup: Hash<String, Bytes> := { "key": values[1] }
+	puts(lookup["key"]&.to_s())
+
+end
+
+def bytes_case_7()
+	present: Bytes? := "kept".to_bytes()
+	absent: Bytes? := nil
+	puts(present&.size())
+	puts(absent&.size())
+	read := fn(): Bytes
+		if present != nil
+			return present
+		end
+		return "fallback".to_bytes()
+	end
+	puts(read().to_s())
+
+end
+def make(label: String): Bytes
+	puts(label)
+	return label.to_bytes()
+end
+
+def bytes_case_9()
+	puts(make("left").concat(make("right")).to_s())
+
+end
+
+def bytes_boxed()
+	value := ("kept" + " bytes").to_bytes()
+	boxed: Any := value
+	puts(boxed)
+	puts(value)
+end
+
+def main()
+	bytes_case_0()
+	bytes_case_4()
+	bytes_case_5()
+	bytes_case_6()
+	bytes_case_7()
+	bytes_case_9()
+	bytes_boxed()
+end

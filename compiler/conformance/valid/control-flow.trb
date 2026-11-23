@@ -1,0 +1,18 @@
+def classify(limit: Integer): String
+	mut total := 0
+	mut index := 0
+	while index < limit
+		total += index
+		index += 1
+	end
+	mut message := "control-bad"
+	if total == 10
+		message = "control-ok"
+	end
+	return message
+end
+
+def main()
+	puts(classify(5))
+	return
+end

@@ -1,0 +1,102 @@
+import { web_route_directory_applies, web_route_join } from project/web_route_paths
+import { CompilerState } from state/state
+import { append_import } from frontend/syntax/parser
+import { import_kind_named } from state/import_kinds
+import { integer_string } from support/literals
+import { package_json_quote } from project/package_json
+import { load_integer, load_string, store_integer } from support/storage
+
+# Route targets enter through loader-owned bindings, never interpolated source
+# paths or backend symbol guesses. Ordinary checking resolves every call.
+def web_dispatch_source(state: CompilerState, server: Boolean): String
+	mut source := "\nimport { Route as DispatchRoute, run as dispatch_run } from trb/internal/web_dispatch\n"
+	if state.module_graph.web_routes.size() > 0 || state.module_graph.web_middlewares.size() > 0
+		source += "import { Context, Next } from trb/web\n"
+	end
+	if state.module_graph.web_middlewares.size() > 0
+		source += "import { Middleware } from trb/web/middleware\n"
+	end
+	mut index := 0
+	while index < state.module_graph.web_routes.size()
+		id := integer_string(index)
+		source += "class _RouteHandler" + id + " implements Next\ndef call(context: Context): Response\nreturn route_handler_" + id + "(context)\nend\nend\n"
+		index += 1
+	end
+	index = 0
+	while index < state.module_graph.web_middlewares.size()
+		id := integer_string(index)
+		source += "class _RouteMiddleware" + id + " implements Middleware\ndef call(context: Context, next_handler: Next): Response\nreturn route_middleware_" + id + "(context, next_handler)\nend\nend\n"
+		index += 1
+	end
+	if server
+		source += "def dispatch_network(request: Request, limit: Integer, status: Integer): Response\nmut routes: Array<DispatchRoute> := []\n"
+	else
+		source += "def dispatch(request: Request): Response\nmut routes: Array<DispatchRoute> := []\n"
+	end
+	index = 0
+	while index < state.module_graph.web_routes.size()
+		route := state.module_graph.web_routes[index]
+		mut segments: Array<String> := []
+		route.segments.each do |part|
+			segments.push(web_dispatch_quote(part))
+		end
+		mut middleware: Array<String> := []
+		mut item := 0
+		while item < state.module_graph.web_middlewares.size()
+			row := state.module_graph.web_middlewares[item]
+			if row.directory != "" && web_route_directory_applies(row.directory, route.directory)
+				middleware.push("_RouteMiddleware" + integer_string(item) + ".new()")
+			end
+			item += 1
+		end
+		source += "routes.push(DispatchRoute.new(path: " + web_dispatch_quote(route.path) + ", segments: [" + web_route_join(segments, ", ") + "], method: " + web_dispatch_quote(route.method) + ", handler: _RouteHandler" + integer_string(index) + ".new(), middlewares: [" + web_route_join(middleware, ", ") + "]))\n"
+		index += 1
+	end
+	mut roots: Array<String> := []
+	index = 0
+	while index < state.module_graph.web_middlewares.size()
+		if state.module_graph.web_middlewares[index].directory == ""
+			roots.push("_RouteMiddleware" + integer_string(index) + ".new()")
+		end
+		index += 1
+	end
+	mut extra := ""
+	if server
+		extra = ", limit, status"
+	end
+	source += "return dispatch_run(request, routes, [" + web_route_join(roots, ", ") + "]" + extra + ")\nend\n"
+	return source
+end
+
+def append_web_route_imports(mut state: CompilerState, owner: Integer)
+	mut index := 0
+	while index < state.module_graph.web_routes.size()
+		route := state.module_graph.web_routes[index]
+		append_import(state, load_string(state.module_graph.module_names, route.source_id), load_string(state.declarations.function_names, route.function_id), "route_handler_" + integer_string(index), import_kind_named(), 1)
+		store_integer(state.module_graph.module_import_counts, owner, load_integer(state.module_graph.module_import_counts, owner) + 1)
+		index += 1
+	end
+	index = 0
+	while index < state.module_graph.web_middlewares.size()
+		route := state.module_graph.web_middlewares[index]
+		append_import(state, load_string(state.module_graph.module_names, route.source_id), "call", "route_middleware_" + integer_string(index), import_kind_named(), 1)
+		store_integer(state.module_graph.module_import_counts, owner, load_integer(state.module_graph.module_import_counts, owner) + 1)
+		index += 1
+	end
+end
+
+# Escape interpolation as well as JSON controls: filesystem names are data.
+def web_dispatch_quote(value: String): String
+	quoted := package_json_quote(value)
+	mut result := ""
+	mut index := 0
+	while index < quoted.size()
+		if quoted[index] == "#"
+			result += "\\u0023"
+		else
+			result += quoted[index]
+		end
+		index += 1
+	end
+	return result
+end

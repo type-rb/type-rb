@@ -1,0 +1,66 @@
+import { web_endpoint_directive } from frontend/checking/program/web_endpoints
+import { resolve } from frontend/checking/program/resolution
+import { generic_program_fork } from frontend/checking/program/generic_fork
+import { find_visible_function } from frontend/resolution/declaration_lookup
+import { CompilerProjectSources, check, emit_qbe, load_project_sources_with_entry } from compiler
+import { has_diagnostic } from state/state
+import { ProjectWebEndpoint } from state/web_routes
+import { load_integer, load_string, store_string } from support/storage
+import { web_endpoint_test_state } from testing/web_endpoints
+import { expect_compiler_phase } from testing/pipeline
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { control_test_output } from testing/mir/control
+import { verify_mir } from mir/verify/module
+import { describe, expect, test } from trb/std/test
+
+describe("Checked Web endpoint declarations") do
+	test("retains checked metadata without executable declaration calls") do
+		mut state := web_endpoint_test_state("handles(get)\nresponse<String>(status: 200)")
+		expect_compiler_phase(state, "resolve", resolve(state))
+		expect_compiler_phase(state, "check", check(state))
+		expect(state.module_graph.web_endpoints.size()).to_equal(1)
+		endpoint := state.module_graph.web_endpoints[0]
+		expect(endpoint.responses[0].type_name).to_equal("String")
+		expect(endpoint.responses[0].status).to_equal(200)
+		fork := generic_program_fork(state)
+		expect(fork.module_graph.web_endpoints).to_equal(state.module_graph.web_endpoints)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		before := control_test_output(emit_qbe(state))
+		state.module_graph.web_endpoints[0] = ProjectWebEndpoint.new(object_id: 999, route_index: 999, input_type: "unavailable", input_name: "unavailable", responses: [])
+		intrinsic_mir_erase(state)
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+	end
+
+	test("rejects missing and duplicate declarations at ordinary resolution") do
+		["response<String>(status: 200)", "handles(get)", "handles(get)\nhandles(get)\nresponse<String>(status: 200)", "handles(get)\nresponse<String>(status: 200)\nresponse<Integer>(status: 200)"].each do |body|
+			mut state := web_endpoint_test_state(body)
+			expect(resolve(state)).to_be_false()
+			expect(has_diagnostic(state)).to_be_true()
+		end
+	end
+
+	test("rejects arbitrary class-body calls instead of dropping them") do
+		bundle := CompilerProjectSources.new(paths: ["/project/src/main.trb"], sources: ["def action()\nputs(\"side effect\")\nend\nclass Ordinary\naction()\nend\ndef main()\nend\n"], error: "")
+		mut state := load_project_sources_with_entry("/project/trbconfig.jsonc", "/project/src", bundle, true)
+		expect(resolve(state)).to_be_false()
+		expect(load_string(state.diagnostics.messages, 0).include?("unsupported class-body declaration")).to_be_true()
+	end
+
+	test("does not grant top-level contract metadata to a namespaced class") do
+		mut state := web_endpoint_test_state("handles(get)\nresponse<String>(status: 200)", "", "items", "", "Contracts")
+		expect(resolve(state)).to_be_false()
+		expect(state.module_graph.web_endpoints.size()).to_equal(0)
+		expect(load_string(state.diagnostics.messages, 0).include?("unsupported class-body declaration")).to_be_true()
+	end
+
+	test("does not grant declaration ownership to a forged handles signature") do
+		mut state := web_endpoint_test_state("handles(get)\nresponse<String>(status: 200)")
+		expect_compiler_phase(state, "resolve", resolve(state))
+		source := state.nominal.objects[state.module_graph.web_endpoints[0].object_id].source_id
+		expect(web_endpoint_directive(state, source, "handles")).to_equal(1)
+		function := find_visible_function(state, source, "handles")
+		parameter := load_integer(state.declarations.function_parameter_starts, function)
+		store_string(state.declarations.parameter_types, parameter, "Integer")
+		expect(web_endpoint_directive(state, source, "handles")).to_equal(0)
+	end
+end

@@ -1,0 +1,121 @@
+import { emit_qbe } from compiler
+import { MirInstruction } from mir/model/module
+import { verify_mir } from mir/verify/module
+import { mir_live_before } from mir/analysis/liveness
+import { mir_rewrite_instruction } from mir/passes/rewrite
+import { integer_string } from support/literals
+import { array_loop_mir_check } from testing/mir/array_loops
+import { control_test_output } from testing/mir/control
+import { managed_mir_test_fixture } from testing/mir/managed
+import { logical_run_qbe } from testing/qbe_runner
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+def array_capacity_source(): String
+	return "def main()\nvalues := [1, 2, 3]\nmapped := values.map { |value| value * 2 }\nselected := values.select { |value| value > 1 }\nrange := (1..3).map { |value| value * 3 }\nputs(mapped[2])\nputs(selected.size())\nputs(range.size())\nend\n"
+end
+
+def array_capacity_index(instructions: Array<MirInstruction>): Integer
+	mut index := 0
+	while index < instructions.size()
+		if instructions[index].kind == 19 && instructions[index].first >= 0
+			return index
+		end
+		index += 1
+	end
+	return -1
+end
+
+describe("Array transform capacity") do
+	test("uses Array length hints for map and select while preserving Range transforms") do
+		state := array_loop_mir_check(array_capacity_source())
+		mut count := 0
+		mut capped := 0
+		state.scalar_mir.instructions.each do |instruction|
+			if instruction.kind == 19 && instruction.first >= 0
+				count += 1
+				if instruction.payload > 0
+					capped += 1
+				end
+			end
+		end
+		expect(count).to_equal(2)
+		expect(capped).to_equal(1)
+		qbe := control_test_output(emit_qbe(state))
+		expect(qbe.include?("call $trbn_array_new_reserved(l ")).to_be_true()
+	end
+
+	test("rejects a capacity limit without an owner or below minimum capacity") do
+		mut mutation := 0
+		while mutation < 3
+			mut state := array_loop_mir_check(array_capacity_source())
+			index := array_capacity_index(state.scalar_mir.instructions)
+			instruction := state.scalar_mir.instructions[index]
+			mut owner := instruction.first
+			mut limit := -1
+			if mutation == 1
+				limit = 3
+			elsif mutation == 2
+				owner = -1
+				limit = 256
+			end
+			state.scalar_mir.instructions[index] = MirInstruction.new(kind: instruction.kind, result: instruction.result, first: owner, second: instruction.second, payload: limit, failure: instruction.failure, source_id: instruction.source_id, line: instruction.line)
+			expect(verify_mir(state.scalar_mir, true).empty?()).to_be_false()
+			mutation += 1
+		end
+	end
+
+	test("rejects unavailable non-Array and malformed capacity owners") do
+		mut mutation := 0
+		while mutation < 3
+			mut state := array_loop_mir_check(array_capacity_source())
+			index := array_capacity_index(state.scalar_mir.instructions)
+			expect(index >= 0).to_be_true()
+			instruction := state.scalar_mir.instructions[index]
+			mut invalid := -2
+			if mutation == 1
+				invalid = instruction.result
+			elsif mutation == 2
+				mut cursor := 0
+				while state.scalar_mir.instructions[cursor].kind != 6
+					cursor += 1
+				end
+				invalid = state.scalar_mir.instructions[cursor].result
+			end
+			state.scalar_mir.instructions[index] = MirInstruction.new(kind: instruction.kind, result: instruction.result, first: invalid, second: instruction.second, payload: instruction.payload, failure: instruction.failure, source_id: instruction.source_id, line: instruction.line)
+			expect(verify_mir(state.scalar_mir, true).empty?()).to_be_false()
+			mutation += 1
+		end
+	end
+
+	test("retains the borrowed owner in liveness and SSA rewriting") do
+		mut state := array_loop_mir_check(array_capacity_source())
+		instruction := state.scalar_mir.instructions[array_capacity_index(state.scalar_mir.instructions)]
+		expect(mir_live_before(state.scalar_mir, [instruction.first], instruction, [])).to_equal([instruction.first])
+		mut mapping: Hash<String, Integer> := {}
+		mapping[integer_string(instruction.first)] = 12345
+		rewritten := mir_rewrite_instruction(state.scalar_mir, instruction, mapping, {})
+		expect(rewritten.first).to_equal(12345)
+	end
+
+	test("keeps empty transforms and binary64 elements correct") do
+		state := array_loop_mir_check("def main()\nempty: Array<Integer> := []\nmapped := empty.map { |value| value + 1 }\nputs(mapped.size())\nselected := empty.select { |value| value > 0 }\nputs(selected.size())\nvalues := [0.5, 1.5]\nfloats := values.map { |value| value + 0.25 }\nputs(floats[0])\nputs(floats[1])\nselected_floats := values.select { |value| value > 1.0 }\nputs(selected_floats[0])\nend\n")
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+			when Result::Ok(actual)
+				expect(actual).to_equal("0\n0\n0.75\n1.75\n1.5\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("preserves live receiver mutation and managed captures through forced collection") do
+		managed_mir_test_fixture("array-transforms-live", 4)
+		managed_mir_test_fixture("array-transforms-managed", 4)
+		managed_mir_test_fixture("array-selection-capacity", 4)
+	end
+end

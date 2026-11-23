@@ -1,0 +1,72 @@
+record Entry
+	text: String
+	items: Array<String>
+end
+
+def slice_case_0()
+	mut values := [Entry.new(text: "a" + "b", items: ["a"]), Entry.new(text: "c", items: ["b"])]
+	mut held: Array<Array<Entry>> := []
+	values.each_slice(1) { |batch| held.push(batch) }
+	values[0].items.push("z")
+	puts(held[0][0].text)
+	puts(held[0][0].items[-1])
+	puts(held[1][0].text)
+
+end
+
+def slice_test_1_visit(values: Array<Integer>)
+	values.each_slice(2) do |batch|
+		batch.push(9)
+		puts(batch.size())
+	end
+	puts(values.size())
+end
+
+def slice_case_1()
+	slice_test_1_visit([1, 2, 3])
+
+end
+
+def slice_case_2()
+	values: Array<Integer?> := [1, nil, 3]
+	values.each_slice(2) { |batch| puts(batch.size()); puts(batch[-1] == nil) }
+
+end
+
+def slice_test_3_count<T>(values: Array<T>): Integer
+	mut size := 0
+	values.each_slice(2) { |batch| size += batch.size() }
+	return size
+end
+
+def slice_case_3()
+	puts(slice_test_3_count<Integer>([1, 2, 3]))
+	puts(slice_test_3_count<String>(["a", "b"]))
+
+end
+
+def slice_case_4()
+	mut total := 0
+	mut calls: Array<() -> Integer> := []
+	[1, 2, 3].each_slice(2) do |batch|
+		callback := fn(): Integer
+			return batch[0]
+		end
+		calls.push(callback)
+		total += batch.size()
+	end
+	calls.each { |call| puts(call()) }
+	later := fn(): Integer
+		return total
+	end
+	puts(later())
+
+end
+
+def main()
+	slice_case_0()
+	slice_case_1()
+	slice_case_2()
+	slice_case_3()
+	slice_case_4()
+end

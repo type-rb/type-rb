@@ -1,0 +1,131 @@
+import { resolve_with_projected_types } from frontend/checking/program/resolution
+import { lex_module } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { check } from compiler
+import { ProjectedType } from state/source_state
+import { CompilerState, add_module, compiler_new, has_diagnostic } from state/state
+import { load_string } from support/storage
+import { describe, expect, test } from trb/std/test
+
+def projected_fixture(source: String, other: String): CompilerState
+	mut state := compiler_new(16384)
+	entry := add_module(state, "entry", "entry.trb")
+	lex_module(state, source, entry)
+	parse_module(state, 0, entry)
+	if other != ""
+		owner := add_module(state, "other", "other.trb")
+		start := state.source_tokens.token_count[0]
+		lex_module(state, other, owner)
+		parse_module(state, start, owner)
+	end
+	state.module_graph.active_module[0] = entry
+	state.module_graph.entry_module[0] = entry
+	state.nominal.projected_type_lines[0] = 4
+	state.nominal.projected_type_lines[1] = 9
+	return state
+end
+
+def projected_source(): String
+	return "record Item\nvalue: Float\nend\nheld: __retained := (fn(): __retained\nvalues: Array<__retained> := []\nreturn values[0]\nend)()\n\ndef main()\nlocal := Item.new(value: 1.5)\nputs(local.value)\nend\n"
+end
+
+describe("Retained type projection ownership") do
+	test("rebinds a generated nominal witness by owner without exposing an import") do
+		mut state := projected_fixture(projected_source(), "record Item\nvalue: Integer\nend\n")
+		bindings := [ProjectedType.new(name: "__retained", module_name: "other", declaration: "Item", arguments: [])]
+		resolved := resolve_with_projected_types(state, bindings)
+		if has_diagnostic(state)
+			expect(load_string(state.diagnostics.messages, 0)).to_equal("")
+		end
+		expect(resolved).to_be_true()
+		checked := check(state)
+		if has_diagnostic(state)
+			expect(load_string(state.diagnostics.messages, 0)).to_equal("")
+		end
+		expect(checked).to_be_true()
+		expect(state.global_bindings.global_types[0]).to_equal("Record#1")
+		expect(state.module_graph.import_count[0]).to_equal(0)
+	end
+
+	test("does not rewrite another module at overlapping source lines") do
+		mut state := projected_fixture(projected_source(), "record Item\nvalue: Integer\nend\ndef invalid(): Integer\nvalue := fn(): __retained\nreturn Item.new(value: 1)\nend\nreturn value().value\nend\n")
+		bindings := [ProjectedType.new(name: "__retained", module_name: "other", declaration: "Item", arguments: [])]
+		expect(resolve_with_projected_types(state, bindings)).to_be_false()
+		expect(load_string(state.diagnostics.messages, 0)).to_equal("invalid fn return type __retained")
+	end
+
+	test("preserves value bindings that share a generated type spelling") do
+		source := "record Item\nvalue: Float\nend\n__retained: __retained := (fn(): __retained\nvalues: Array<__retained> := []\nreturn values[0]\nend)()\n\ndef main()\nputs(__retained.value)\nend\n"
+		mut state := projected_fixture(source, "record Item\nvalue: Integer\nend\n")
+		bindings := [ProjectedType.new(name: "__retained", module_name: "other", declaration: "Item", arguments: [])]
+		expect(resolve_with_projected_types(state, bindings)).to_be_true()
+		expect(check(state)).to_be_true()
+		expect(state.global_bindings.globals[0].name).to_equal("__retained")
+	end
+
+	test("does not reinterpret an authored annotation outside the witness span") do
+		mut state := projected_fixture(projected_source(), "record Item\nvalue: Integer\nend\n")
+		state.nominal.projected_type_lines[0] = 5
+		bindings := [ProjectedType.new(name: "__retained", module_name: "other", declaration: "Item", arguments: [])]
+		expect(resolve_with_projected_types(state, bindings)).to_be_false()
+		expect(load_string(state.diagnostics.messages, 0).include?("unknown constant type __retained")).to_be_true()
+	end
+
+	test("rejects a missing declaration owner instead of choosing a local homonym") do
+		mut state := projected_fixture(projected_source(), "")
+		bindings := [ProjectedType.new(name: "__retained", module_name: "missing", declaration: "Item", arguments: [])]
+		expect(resolve_with_projected_types(state, bindings)).to_be_false()
+		expect(load_string(state.diagnostics.messages, 0)).to_equal("retained type declaration is no longer available")
+	end
+
+	test("retains a top-level declaration independently of the current lexical namespace") do
+		mut state := projected_fixture(projected_source(), "record Item\nvalue: Integer\nend\nmodule Shadow\nrecord Item\nvalue: String\nend\ndef self.marker()\nreturn\nend\nend\n")
+		bindings := [ProjectedType.new(name: "__retained", module_name: "other", declaration: "Item", arguments: [])]
+		resolved := resolve_with_projected_types(state, bindings)
+		if has_diagnostic(state)
+			expect(load_string(state.diagnostics.messages, 0)).to_equal("")
+		end
+		expect(resolved).to_be_true()
+		checked := check(state)
+		if has_diagnostic(state)
+			expect(load_string(state.diagnostics.messages, 0)).to_equal("")
+		end
+		expect(checked).to_be_true()
+		expect(state.global_bindings.global_types[0]).to_equal("Record#1")
+	end
+
+	test("resolves projected nullable and union types structurally before nominal lookup") do
+		source := "record Item\nvalue: Float\nend\noptional: __retained? := nil\nchoice: __retained | String := \"text\"\n\ndef main()\nreturn\nend\n"
+		mut state := projected_fixture(source, "record Item\nvalue: Integer\nend\n")
+		state.nominal.projected_type_lines[1] = 6
+		bindings := [ProjectedType.new(name: "__retained", module_name: "other", declaration: "Item", arguments: [])]
+		expect(resolve_with_projected_types(state, bindings)).to_be_true()
+		checked := check(state)
+		if has_diagnostic(state)
+			expect(load_string(state.diagnostics.messages, 0)).to_equal("")
+		end
+		expect(checked).to_be_true()
+		expect(state.global_bindings.global_types[0]).to_equal("Record#1?")
+	end
+
+	test("rebinds nullable local annotations including a fused question mark") do
+		source := "record Item\nvalue: Float\nend\ndef main()\noptional: __retained? := nil\nputs(optional == nil)\nend\n"
+		mut state := projected_fixture(source, "record Item\nvalue: Integer\nend\n")
+		state.nominal.projected_type_lines[1] = 6
+		bindings := [ProjectedType.new(name: "__retained", module_name: "other", declaration: "Item", arguments: [])]
+		expect(resolve_with_projected_types(state, bindings)).to_be_true()
+		checked := check(state)
+		if has_diagnostic(state)
+			expect(load_string(state.diagnostics.messages, 0)).to_equal("")
+		end
+		expect(checked).to_be_true()
+	end
+
+	test("rejects cyclic descriptor arguments") do
+		mut state := projected_fixture(projected_source(), "record Box<T>\nvalue: T\nend\n")
+		bindings := [ProjectedType.new(name: "__retained", module_name: "other", declaration: "Box", arguments: ["__retained"])]
+		expect(resolve_with_projected_types(state, bindings)).to_be_false()
+		expect(has_diagnostic(state)).to_be_true()
+		expect(load_string(state.diagnostics.messages, 0)).to_equal("cyclic retained type descriptor")
+	end
+end

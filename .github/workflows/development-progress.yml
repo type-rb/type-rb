@@ -1,0 +1,49 @@
+name: Weekly development progress
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: weekly-development-progress-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  report:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - name: Restore the verified daily measurement state
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/daily-performance/state.py restore --state "$RUNNER_TEMP/daily-state.json"
+      - name: Read completed PR feedback runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run list --workflow pull-request.yml --limit 300 \
+            --json event,status,conclusion,createdAt,startedAt,updatedAt \
+            > "$RUNNER_TEMP/pr-runs.json"
+      - name: Build the weekly diagnostic report
+        run: |
+          python3 tools/development-progress/report.py \
+            --registry tools/native-language-cases.json \
+            --daily-state "$RUNNER_TEMP/daily-state.json" \
+            --ci-runs "$RUNNER_TEMP/pr-runs.json" \
+            --output "$RUNNER_TEMP/development-progress.md" \
+            --json-output "$RUNNER_TEMP/development-progress.json" \
+            --head-revision "$GITHUB_SHA"
+          cat "$RUNNER_TEMP/development-progress.md" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v6
+        with:
+          name: development-progress
+          path: |
+            ${{ runner.temp }}/development-progress.md
+            ${{ runner.temp }}/development-progress.json
+          if-no-files-found: error
+          retention-days: 90

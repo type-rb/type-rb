@@ -1,0 +1,16 @@
+interface Named
+	name(): String
+end
+class Base implements Named
+	def name(): String
+		return "base"
+	end
+end
+class Child < Base
+end
+def display(value: Named): String
+	return value.name()
+end
+def main()
+	puts(display(Child.new()))
+end

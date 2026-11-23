@@ -1,0 +1,25 @@
+# JSON node categories are shared by parsing, canonicalization and manifest validation.
+
+def json_object(): Integer
+	return 1
+end
+
+def json_array(): Integer
+	return 2
+end
+
+def json_string(): Integer
+	return 3
+end
+
+def json_number(): Integer
+	return 4
+end
+
+def json_boolean(): Integer
+	return 5
+end
+
+def json_null(): Integer
+	return 6
+end

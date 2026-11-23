@@ -1,0 +1,101 @@
+import { compiler_test_instruction_with_cell } from testing/compiler
+import { verify_mir } from mir/verify/module
+import { store_string } from support/storage
+import { check } from compiler
+import { logical_checked_source } from testing/pipeline
+import { object_execution_run, object_execution_state } from testing/objects
+import { describe, expect, test } from trb/std/test
+
+describe("Object field initialization and storage") do
+	test("initializes scalar fields and supports instance and external mutation") do
+		mut state := object_execution_state("class Counter\n@count: Integer\ndef initialize(value: Integer)\n@count = value\nend\ndef bump()\n@count += 1\nend\ndef value(): Integer\nreturn @count\nend\nend\ndef main()\nmut item := Counter.new(4)\nitem.bump()\nitem.count += 2\nputs(item.value())\nend\n")
+		object_execution_run(state, "7\n")
+	end
+
+	test("evaluates defaults before the initializer and only once per construction") do
+		mut state := object_execution_state("def seed(): String\nputs(1)\nreturn \"held\"\nend\nclass Label\nreadonly @name: String := seed()\n@number: Float := 2\nend\ndef main()\nitem := Label.new()\nputs(item.name)\nputs(item.number)\nend\n")
+		object_execution_run(state, "1\nheld\n2.0\n")
+	end
+
+	test("proves both branches initialize readonly storage") do
+		mut state := object_execution_state("class Flag\nreadonly @value: String\ndef initialize(selected: Boolean)\nif selected\n@value = \"yes\"\nelse\n@value = \"no\"\nend\nend\nend\ndef main()\nputs(Flag.new(true).value)\nputs(Flag.new(false).value)\nend\n")
+		object_execution_run(state, "yes\nno\n")
+	end
+
+	test("traces partial and recursive managed storage during allocation") do
+		mut state := object_execution_state("class Link\n@value: String\n@next: Link?\ndef initialize(value: String, following: Link?)\n@value = value + \"!\"\n@next = following\nend\nend\ndef main()\nfirst := Link.new(\"first\", Link.new(\"second\", nil))\nputs(first.value)\nitem := first.next\nif item != nil\nputs(item.value)\nend\nend\n")
+		object_execution_run(state, "first!\nsecond!\n")
+	end
+
+	test("specializes generic field layouts and constructor defaults") do
+		mut state := object_execution_state("class Box<T>\n@value: T\ndef initialize(value: T)\n@value = value\nend\ndef value(): T\nreturn @value\nend\nend\nclass Count\n@value: Integer\ndef initialize(first: Integer = 2, second: Integer = first + 3)\n@value = second\nend\nend\ndef main()\nputs(Box<String>.new(\"held\").value())\nputs(Box<Integer>.new(42).value())\nputs(Count.new().value)\nend\n")
+		object_execution_run(state, "held\n42\n5\n")
+	end
+
+	test("rejects missing branch initialization reads escapes and readonly writes") do
+		["if flag\n@value = \"yes\"\nend", "puts(@value)\n@value = \"yes\"", "expose(self)\n@value = \"yes\"", "while flag\n@value = \"yes\"\nend"].each do |body|
+			mut state := logical_checked_source("class Label\n@value: String\ndef initialize(flag: Boolean)\n" + body + "\nend\nend\ndef expose(value: Label)\nend\ndef main()\nLabel.new(false)\nend\n")
+			expect(check(state)).to_be_false()
+		end
+		["item.value = \"no\"", "item.value += \"no\""].each do |body|
+			mut state := logical_checked_source("class Label\nreadonly @value: String := \"yes\"\nend\ndef main()\nmut item := Label.new()\n" + body + "\nend\n")
+			expect(check(state)).to_be_false()
+		end
+	end
+	test("rejects a forged store that leaves one branch uninitialized") do
+		mut state := object_execution_state("class Pair\n@first: String := \"first\"\n@second: String\ndef initialize(flag: Boolean)\nif flag\n@second = \"yes\"\nelse\n@second = \"no\"\nend\nend\nend\ndef main()\nputs(Pair.new(false).second)\nend\n")
+		mut changed := false
+		mut index := 0
+		while index < state.scalar_mir.instructions.size()
+			instruction := state.scalar_mir.instructions[index]
+			if !changed && instruction.kind == 65 && instruction.payload == 1
+				state.scalar_mir.instructions[index] = compiler_test_instruction_with_cell(instruction, 4, 0)
+				changed = true
+			end
+			index += 1
+		end
+		expect(changed).to_be_true()
+		expect(verify_mir(state.scalar_mir, true).include?("uninitialized field")).to_be_true()
+	end
+
+	test("rejects corrupted field owners types and allocation protocol") do
+		mut field := 1
+		while field < 6
+			mut state := object_execution_state("class Label\n@value: String := \"held\"\nend\ndef main()\nputs(Label.new().value)\nend\n")
+			mut index := 0
+			while state.scalar_mir.instructions[index].kind != 64
+				index += 1
+			end
+			state.scalar_mir.instructions[index] = compiler_test_instruction_with_cell(state.scalar_mir.instructions[index], field, 99999)
+			expect(verify_mir(state.scalar_mir, true).empty?()).to_be_false()
+			field += 1
+		end
+	end
+
+	test("retains managed field semantics after removing source tokens") do
+		mut state := object_execution_state("class Label\n@value: String\ndef initialize()\n@value = \"a\" + \"b\"\nend\nend\ndef main()\nputs(Label.new().value)\nend\n")
+		mut origin := 0
+		while origin < state.source_tokens.token_count[0]
+			store_string(state.source_tokens.token_texts, origin, "erased")
+			origin += 1
+		end
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		object_execution_run(state, "ab\n")
+	end
+
+	test("keeps immutable object binding capabilities when introducing aliases") do
+		mut state := logical_checked_source("class Value\n@number: Integer := 2\nend\ndef main()\nvalue := Value.new()\nmut copied := value\ncopied.number = 3\nend\n")
+		expect(check(state)).to_be_false()
+	end
+
+	test("evaluates ordered field defaults using initialized earlier fields") do
+		mut state := object_execution_state("class Value\n@first: Integer := 2\n@second: Integer := @first + 3\nend\ndef main()\nputs(Value.new().second)\nend\n")
+		object_execution_run(state, "5\n")
+	end
+
+	test("preserves class storage in inferred and explicitly typed hashes") do
+		mut state := object_execution_state("class Label\n@text: String\ndef initialize(text: String)\n@text = text + \"!\"\nend\nend\ndef main()\nlabels := { first: Label.new(\"held\") }\nputs(labels[:first].text)\nmut selected: Hash<String, Label?> := {}\nselected[\"item\"] = Label.new(\"saved\")\nvalue := selected[\"item\"]\nif value != nil\nputs(value.text)\nend\nend\n")
+		object_execution_run(state, "held!\nsaved!\n")
+	end
+
+end

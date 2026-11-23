@@ -1,0 +1,9 @@
+record Message
+	value: String
+end
+
+def main()
+	message := Message.new(value: "dynamic")
+	puts(message.value)
+	return
+end

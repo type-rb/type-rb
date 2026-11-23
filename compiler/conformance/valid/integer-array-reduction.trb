@@ -1,0 +1,15 @@
+def sum(values: Array<Integer>): Integer
+	mut index := 0
+	mut total := 0
+	while index < values.size()
+		total += values[index]
+		index += 1
+	end
+	return total
+end
+
+def main()
+	puts(sum([10, 20, 12]).to_s())
+	puts(sum([]).to_s())
+	return
+end

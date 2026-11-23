@@ -1,0 +1,27 @@
+def append(mut values: Array<Integer>)
+	values.push(3)
+	return
+end
+
+def main()
+	mut values := [1, 2]
+	first := [10]
+	second := [20]
+	third := [30]
+	mut before := 0
+	mut after_append := 0
+	mut after_rebind := 0
+	mut iteration := 0
+	while iteration < 1
+		before = values[0] + values[1] + first[0] + second[0] + third[0]
+		append(values)
+		after_append = values[-1]
+		values = [4, 5]
+		after_rebind = values[0] + values[1]
+		iteration += 1
+	end
+	puts(before.to_s())
+	puts(after_append.to_s())
+	puts(after_rebind.to_s())
+	return
+end

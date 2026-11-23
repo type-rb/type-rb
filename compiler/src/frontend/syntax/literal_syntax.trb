@@ -1,0 +1,68 @@
+import { token_kind_interpolation } from state/token_kinds
+import { store_fused_literal } from state/source_state
+import { scan_string } from frontend/syntax/lexer
+import { CompilerState, diagnostic, has_diagnostic } from state/state
+import { load_integer, load_string, sparse_integer_at, store_integer, store_string } from support/storage
+
+# Expansion occurs only at the forward syntax cursor. Earlier declaration and
+# control origins remain stable; future tokens have no published syntax yet.
+def expand_quoted_token(mut state: CompilerState, origin: Integer, interpolation: Boolean): Boolean
+	if load_integer(state.source_tokens.token_kinds, origin) != token_kind_interpolation()
+		return true
+	end
+	raw := load_string(state.source_tokens.token_texts, origin)
+	line := load_integer(state.source_tokens.token_lines, origin)
+	previous := state.source_tokens.token_count[0]
+	mut cursor := [0]
+	outer_column := state.source_tokens.lexer_column[0]
+	column := load_integer(state.source_tokens.token_columns, origin)
+	source_length := raw.size()
+	state.source_tokens.lexer_column[0] = 1
+	scan_string(state, raw, source_length, cursor, line, interpolation)
+	state.source_tokens.lexer_column[0] = outer_column
+	if has_diagnostic(state)
+		return false
+	end
+	if cursor[0] != source_length
+		diagnostic(state, "TRBN4001", line, "invalid quoted Symbol literal")
+		return false
+	end
+	mut fused: Array<Integer> := []
+	mut kinds: Array<Integer> := []
+	mut texts: Array<String> := []
+	mut lines: Array<Integer> := []
+	mut columns: Array<Integer> := []
+	mut index := previous
+	while index < state.source_tokens.token_count[0]
+		fused.push(sparse_integer_at(state.source_tokens.token_fused_literals, index))
+		kinds.push(load_integer(state.source_tokens.token_kinds, index))
+		texts.push(load_string(state.source_tokens.token_texts, index))
+		lines.push(load_integer(state.source_tokens.token_lines, index))
+		mut expanded_column := load_integer(state.source_tokens.token_columns, index)
+		if load_integer(state.source_tokens.token_lines, index) == line
+			expanded_column += column - 1
+		end
+		columns.push(expanded_column)
+		index += 1
+	end
+	index = origin + 1
+	while index < previous
+		fused.push(sparse_integer_at(state.source_tokens.token_fused_literals, index))
+		kinds.push(load_integer(state.source_tokens.token_kinds, index))
+		texts.push(load_string(state.source_tokens.token_texts, index))
+		lines.push(load_integer(state.source_tokens.token_lines, index))
+		columns.push(load_integer(state.source_tokens.token_columns, index))
+		index += 1
+	end
+	index = 0
+	while index < kinds.size()
+		store_fused_literal(state.source_tokens, origin + index, fused[index])
+		store_integer(state.source_tokens.token_kinds, origin + index, kinds[index])
+		store_string(state.source_tokens.token_texts, origin + index, texts[index])
+		store_integer(state.source_tokens.token_lines, origin + index, lines[index])
+		store_integer(state.source_tokens.token_columns, origin + index, columns[index])
+		index += 1
+	end
+	state.source_tokens.token_count[0] = origin + kinds.size()
+	return true
+end

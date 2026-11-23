@@ -1,0 +1,66 @@
+import { checking_discovery, checking_single_pass } from state/checking_phases
+import { CallBlockSyntax, CheckedFileBody, CheckedLambda, LambdaSyntax } from frontend/types/callable_types
+import { CheckedPresentation } from state/source_state
+import { CheckedBody, checked_body_new } from state/checked_body
+import { IntegerStorage, integer_storage } from support/storage
+
+# An optional query for the visible bindings at one authored token. Ordinary
+# checking and generic template forks leave this collection empty.
+record CheckedScopeQuery
+	path: String
+	line: Integer
+	column: Integer
+	bindings: Array<CheckedPresentation>
+	count: Array<Integer>
+end
+
+# Parsed lambda syntax is shared with template checks. Checked bodies, phase
+# progress and function-to-lambda bindings are specific to each program fork.
+record CompilerCallableAnalysis
+	scope_queries: Array<CheckedScopeQuery>
+	# Reachability is discovered from checked call identities, including defaults.
+	concurrent_functions: Array<Integer>
+	concurrent_checked: Array<Integer>
+	concurrent_audit: Array<Integer>
+	call_blocks: Array<CallBlockSyntax>
+	call_block_origins: IntegerStorage
+	lambdas: Array<LambdaSyntax>
+	lambda_origins: IntegerStorage
+	lambda_phase: Array<Integer>
+	collection_inference_only: Array<Boolean>
+	file_bodies: Array<CheckedFileBody>
+	function_file_bodies: IntegerStorage
+	checked_lambdas: Array<CheckedLambda>
+	function_lambdas: IntegerStorage
+	checked: Array<CheckedBody>
+	checked_bodies: Array<CheckedBody>
+	checked_body_indices: IntegerStorage
+end
+
+def compiler_callable_analysis_new(capacity: Integer): CompilerCallableAnalysis
+	return CompilerCallableAnalysis.new(
+		scope_queries: [],
+		concurrent_functions: [], concurrent_checked: [], concurrent_audit: [0],
+		call_blocks: [], call_block_origins: integer_storage(capacity),
+		lambdas: [], lambda_origins: integer_storage(capacity),
+		lambda_phase: [checking_single_pass()], checked_lambdas: [], function_lambdas: integer_storage(capacity),
+		file_bodies: [], function_file_bodies: integer_storage(capacity),
+		collection_inference_only: [false],
+		checked: [checked_body_new(-1, 0, capacity)],
+		checked_bodies: [], checked_body_indices: integer_storage(capacity),
+	)
+end
+
+def compiler_callable_analysis_fork(source: CompilerCallableAnalysis, capacity: Integer): CompilerCallableAnalysis
+	return CompilerCallableAnalysis.new(
+		scope_queries: [],
+		concurrent_functions: [], concurrent_checked: [], concurrent_audit: [0],
+		call_blocks: source.call_blocks, call_block_origins: source.call_block_origins,
+		lambdas: source.lambdas, lambda_origins: source.lambda_origins,
+		lambda_phase: [checking_discovery()], checked_lambdas: [], function_lambdas: integer_storage(capacity),
+		file_bodies: [], function_file_bodies: integer_storage(capacity),
+		collection_inference_only: [false],
+		checked: [checked_body_new(-1, 0, capacity)], checked_bodies: [],
+		checked_body_indices: integer_storage(capacity),
+	)
+end

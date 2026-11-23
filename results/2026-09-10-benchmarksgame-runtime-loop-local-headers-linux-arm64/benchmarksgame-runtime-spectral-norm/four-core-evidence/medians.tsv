@@ -1,0 +1,8 @@
+case	lane	candidate	retained	passed	walltime_median_seconds	cputime_median_seconds	memory_median_bytes	status
+spectral-norm	four-core	typerb-native	11	11	2.2566	2.25469	1486848	pass
+spectral-norm	four-core	typerb-go	11	11	5.63765	5.64664	8196096	pass
+spectral-norm	four-core	c	11	11	1.78812	1.7856	958464	pass
+spectral-norm	four-core	cpp	11	11	1.83938	1.83673	1216512	pass
+spectral-norm	four-core	go	11	11	3.21972	3.22165	4984832	pass
+spectral-norm	four-core	rust	11	11	0.459642	1.80124	2494464	pass
+spectral-norm	four-core	java	11	11	1.89986	1.8807	52576256	pass

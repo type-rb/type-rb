@@ -1,0 +1,59 @@
+# Checked Hash actions and the hash-method instruction payload share these
+# identities. They differ from MIR instruction opcodes and composite type kinds.
+# Literal/index actions are separate from receiver methods; none is a lookup miss.
+
+def hash_action_none(): Integer
+	return 0
+end
+
+def hash_action_literal(): Integer
+	return 1
+end
+
+def hash_action_index_read(): Integer
+	return 2
+end
+
+def hash_action_index_write(): Integer
+	return 3
+end
+
+def hash_action_size(): Integer
+	return 4
+end
+
+def hash_action_has_key(): Integer
+	return 5
+end
+
+def hash_action_delete(): Integer
+	return 6
+end
+
+def hash_action_copy(): Integer
+	return 7
+end
+
+def hash_action_merge(): Integer
+	return 8
+end
+
+def hash_action_update(): Integer
+	return 9
+end
+
+def hash_action_keys(): Integer
+	return 10
+end
+
+def hash_action_values(): Integer
+	return 11
+end
+
+def hash_action_empty(): Integer
+	return 12
+end
+
+def hash_action_fetch(): Integer
+	return 13
+end

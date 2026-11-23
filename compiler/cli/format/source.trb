@@ -1,0 +1,67 @@
+import { format_lex } from format/tokens
+import { format_print } from format/printer
+import { cli_diagnostic } from diagnostics
+import { compiler_source_is_utf8, lex } from frontend/syntax/lexer
+import { format_parse } from format/syntax
+import { compiler_new, has_diagnostic } from state/state
+import { token_kind_end_of_input, token_kind_end_of_module, token_kind_newline } from state/token_kinds
+import { load_integer, load_string } from support/storage
+
+record FormatResult
+	text: String
+	error: String
+end
+
+# Parsing protects unsupported and incomplete forms. Printing uses original
+# spelling instead of decoded constants, so formatting never evaluates input.
+def format_source(source: String, path: String, indentation: String): FormatResult
+	if !compiler_source_is_utf8(source)
+		return FormatResult.new(text: source, error: path + ": source is not valid UTF-8")
+	end
+	mut state := compiler_new(source.size() * 3 + 16)
+	lex(state, source)
+	if !has_diagnostic(state)
+		format_parse(state)
+	end
+	if has_diagnostic(state)
+		return FormatResult.new(text: source, error: cli_diagnostic(state, path, 0))
+	end
+	tokens := format_lex(source)
+	if tokens.error != ""
+		return FormatResult.new(text: source, error: path + ": " + tokens.error)
+	end
+	printed := format_print(tokens.tokens, indentation)
+	mut verified := compiler_new(printed.size() * 3 + 16)
+	lex(verified, printed)
+	if !has_diagnostic(verified)
+		format_parse(verified)
+	end
+	if has_diagnostic(verified)
+		return FormatResult.new(text: source, error: path + ": formatting would change source syntax")
+	end
+	# The ordinary parser normalizes symbol/interpolation contexts. Comparing
+	# its token spellings also guards against joining identifiers or operators.
+	mut left := 0
+	mut right := 0
+	while left < state.source_tokens.token_count[0] || right < verified.source_tokens.token_count[0]
+		while left < state.source_tokens.token_count[0] && format_separator(load_integer(state.source_tokens.token_kinds, left))
+			left += 1
+		end
+		while right < verified.source_tokens.token_count[0] && format_separator(load_integer(verified.source_tokens.token_kinds, right))
+			right += 1
+		end
+		if left == state.source_tokens.token_count[0] && right == verified.source_tokens.token_count[0]
+			break
+		end
+		if left >= state.source_tokens.token_count[0] || right >= verified.source_tokens.token_count[0] || load_integer(state.source_tokens.token_kinds, left) != load_integer(verified.source_tokens.token_kinds, right) || load_string(state.source_tokens.token_texts, left) != load_string(verified.source_tokens.token_texts, right)
+			return FormatResult.new(text: source, error: path + ": formatting would change source tokens")
+		end
+		left += 1
+		right += 1
+	end
+	return FormatResult.new(text: printed, error: "")
+end
+
+def format_separator(kind: Integer): Boolean
+	return kind == token_kind_newline() || kind == token_kind_end_of_input() || kind == token_kind_end_of_module()
+end

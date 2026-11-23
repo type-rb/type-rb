@@ -1,0 +1,14 @@
+class Box
+	@value: Integer := 8
+end
+def read(item: Box?): Integer
+	if item == nil
+		return 0
+	end
+	return item.value
+end
+
+def main()
+	puts(read(nil))
+	puts(read(Box.new()))
+end

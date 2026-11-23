@@ -1,0 +1,637 @@
+import { concurrent_arguments, concurrent_dynamic_call, concurrent_mutation, concurrent_value } from frontend/checking/body/concurrency
+import { checked_resource_parameter } from frontend/checking/body/resources
+import { test_assertion_argument_context } from frontend/providers/test_declarations
+import { builder_method, builder_mutates, builder_parameters } from mir/model/string_builder_contract
+import { mir_builder_call } from frontend/checking/builtins/string_builder
+import { checked_enum_puts } from frontend/checking/nominal/enums
+import { mir_array_mutate_unshift, mir_convert_boolean_to_string, mir_convert_float_to_string, mir_convert_integer_to_string, mir_convert_string_to_float, mir_convert_string_to_integer } from mir/model/operation_modes
+import { checked_category_function, checked_category_initializer, checked_category_math, checked_category_value } from frontend/types/value_categories
+import { mir_state_enabled_slot } from state/local_slots
+import { array_method_concat, array_method_include, array_method_join, array_method_none, array_method_shift, array_method_sort, array_method_unshift, bytes_method_none, float_method_none, integer_method_none, range_method_to_array, result_method_float, result_method_integer, result_method_key, result_method_slice, string_method_none, string_method_replace_all } from frontend/types/method_kinds
+import { mir_op_array_mutate, mir_op_array_push, mir_op_array_size, mir_op_scalar_conversion, mir_op_string_replace, mir_op_string_size } from mir/model/instructions
+import { bytes_method_argument_type, bytes_method_arity, bytes_method_kind, mir_bytes_method } from mir/lowering/bytes
+import { checked_array_numeric_candidate, checked_array_numeric_record, checked_array_numeric_region, checked_array_refine } from frontend/checking/collections/inference
+import { pending_collection_declaration } from frontend/checking/collections/context_analysis
+import { object_instance_type } from frontend/types/object_types
+import { mir_checked_object_new } from mir/lowering/objects
+import { builtin_result_method } from frontend/checking/builtins/results
+import { mir_builtin_number_parse } from frontend/checking/builtins/number_parsing
+import { mir_builtin_lookup } from frontend/checking/builtins/lookup
+import { literal_scalar_type } from frontend/checking/nominal/literal_cases
+import { mir_literal_scalar } from mir/lowering/nullable
+import { find_newtype_type } from frontend/types/newtype_types
+import { checked_raw_enum_value } from frontend/checking/nominal/raw_enums
+import { raw_enum_type } from frontend/types/raw_enum_types
+import { enum_method_declaration_name, enum_method_function } from frontend/resolution/enum_methods
+import { mir_range_array } from frontend/checking/builtins/range_methods
+import { checked_reference_name, namespace_member_access } from frontend/resolution/namespace_references
+import { array_query_comparable } from frontend/checking/builtins/array_queries
+import { array_method_arity, array_method_kind, mir_array_method } from frontend/checking/builtins/array_methods
+import { mir_string_method, string_method_argument_type, string_method_arity, string_method_kind } from frontend/checking/builtins/string_methods
+import { float_method_kind, mir_float_method } from frontend/checking/builtins/float_methods
+import { integer_method_arity, integer_method_kind, mir_integer_method } from frontend/checking/builtins/integer_methods
+import { callable_parts } from frontend/types/callable_types
+import { lambda_use_binding } from frontend/checking/body/lambdas
+import { mir_checked_callable_call } from mir/lowering/callables
+import { mir_binding_read } from mir/build/bindings
+import { advance, expect, skip_newlines, token_is } from frontend/syntax/syntax_tokens
+import { find_enum_type } from frontend/types/enum_types
+import { argument_binding_slot, function_argument_bindings, record_argument_bindings } from frontend/resolution/argument_binding
+import { mir_checked_record_new } from mir/lowering/records
+import { mir_checked_array_operation } from mir/lowering/arrays
+import { check_expected, type_diagnostic } from frontend/checking/body/types
+import { CheckedValue, checked_mir_value, checked_value, scalar_mir_disable } from frontend/checking/body/values
+import { hash_key_type } from frontend/types/hash_types
+import { mir_checked_call, mir_checked_constructor_call, mir_checked_standard_call, mir_complete_arguments } from mir/lowering/calls
+import { mir_checked_puts, mir_checked_string_operation, mir_puts_type } from mir/lowering/strings
+import { parse_argument_label } from frontend/syntax/syntax_forms
+import { find_visible_function, find_visible_record } from frontend/resolution/declaration_lookup
+import { array_element_type, find_record_type, record_type, type_display } from frontend/resolution/type_resolution
+import { CompilerState, diagnostic, has_diagnostic } from state/state
+import { CheckedLocals, local_find } from state/local_state
+import { load_integer, load_string, sparse_integer_at, sparse_string_at } from support/storage
+import { check_expression, check_expression_argument } from frontend/checking/body/expressions
+import { checked_hash_call } from frontend/checking/body/collections
+import { check_newtype_member } from frontend/checking/body/members
+import { abstract_generic_type_valid } from frontend/types/generic_bindings
+import { nullable_element } from frontend/types/nullable_types
+import { union_parts } from frontend/types/union_types
+
+# Templates have checked type parameters but no executable representation.
+# Every concrete instantiation still passes the ordinary MIR output gate.
+def checked_puts_type(state: CompilerState, type_name: String): Boolean
+	if mir_puts_type(type_name)
+		return true
+	end
+	if !state.type_resolution.generic_template_mode[0]
+		return false
+	end
+	if abstract_generic_type_valid(state, type_name)
+		return true
+	end
+	element := nullable_element(type_name)
+	if element != ""
+		return checked_puts_type(state, element)
+	end
+	parts := union_parts(type_name)
+	if parts.size() == 0
+		return false
+	end
+	parts.each do |part|
+		if !checked_puts_type(state, part)
+			return false
+		end
+	end
+	return true
+end
+
+def check_call(mut state: CompilerState, mut position: Array<Integer>, mut locals: CheckedLocals, callee_category: Integer, callee_name: String, target: Integer, mut receiver: Integer, bound: Boolean): CheckedValue
+	origin := position[0]
+	line := load_integer(state.source_tokens.token_lines, origin)
+	advance(position)
+	skip_newlines(state, position)
+	mut function := target
+	if function < 0
+		function = find_visible_function(state, state.module_graph.active_module[0], callee_name)
+	end
+	encoded := sparse_integer_at(state.callables.checked[0].generic_calls, origin)
+	if encoded > 0
+		function = encoded - 1
+	end
+	mut parameter_start := 0
+	mut result_type := "Void"
+	if (callee_name == "puts" && encoded == 0) || callee_category == checked_category_math()
+		function = -1
+	elsif function >= 0
+		parameter_start = load_integer(state.declarations.function_parameter_starts, function)
+		result_type = load_string(state.declarations.function_result_types, function)
+	else
+		return type_diagnostic(state, line, "value is not callable")
+	end
+	mut concurrent_borrowed := false
+	mut bindings := function_argument_bindings(state, function)
+	if function >= 0 && sparse_string_at(state.nominal.function_receivers, function) != ""
+		if !bound
+			self_slot := local_find(locals, "self")
+			if self_slot < 0 || load_string(locals.types, self_slot) != sparse_string_at(state.nominal.function_receivers, function)
+				return type_diagnostic(state, line, "instance method requires its nominal receiver")
+			end
+			lambda_use_binding(locals, self_slot)
+			receiver = checked_mir_value(mir_binding_read(state, locals, self_slot, origin))
+		end
+		bindings.values[0] = receiver
+		bindings.provided[0] = true
+		bindings.position[0] = 1
+	end
+	if callee_category == checked_category_math()
+		result_type = "Float"
+	end
+	saved_mir := locals.mir_state[mir_state_enabled_slot()]
+	mut diverged := false
+	mut finished := false
+	while !finished
+		if token_is(state, position[0], ")")
+			finished = true
+		else
+			argument_line := load_integer(state.source_tokens.token_lines, position[0])
+			label := parse_argument_label(state, position)
+			slot := argument_binding_slot(bindings, label)
+			if slot < 0
+				if bindings.error[0] == "too many positional arguments"
+					return type_diagnostic(state, line, "call argument count does not match " + callee_name)
+				end
+				return type_diagnostic(state, argument_line, bindings.error[0])
+			end
+			mut expected := ""
+			if callee_category == checked_category_math()
+				expected = "Float"
+			elsif function >= 0
+				expected = load_string(state.declarations.parameter_types, parameter_start + slot)
+			end
+			borrowed := checked_resource_parameter(state, function, slot)
+			context := test_assertion_argument_context(state, function, slot)
+			mut argument := check_expression_argument(state, position, locals, 1, expected, borrowed, context)
+			if callee_name == "puts" && encoded == 0
+				argument = mir_literal_scalar(state, locals, argument, origin)
+				argument = checked_enum_puts(state, locals, argument, origin)
+			end
+			if argument.type_name == "Never"
+				diverged = true
+				scalar_mir_disable(locals)
+			end
+			if argument.concurrent_borrowed
+				concurrent_borrowed = true
+			end
+			bindings.values[slot] = checked_mir_value(argument)
+			if (callee_name == "puts" && encoded == 0) && !checked_puts_type(state, argument.type_name)
+				diagnostic(state, "TRBN4004", line, "puts does not yet support " + type_display(state, argument.type_name))
+			end
+			skip_newlines(state, position)
+			if token_is(state, position[0], ",")
+				advance(position)
+				skip_newlines(state, position)
+			else
+				finished = true
+			end
+		end
+	end
+	expect(state, position, ")")
+	if !mir_complete_arguments(state, locals, bindings, origin)
+		diagnostic(state, "TRBN4004", line, "call argument count does not match " + callee_name)
+	end
+	if diverged
+		locals.mir_state[mir_state_enabled_slot()] = saved_mir
+		return checked_value("Never", checked_category_value(), 9007199254740991, 0)
+	end
+	if (callee_name == "puts" && encoded == 0)
+		return mir_checked_puts(state, locals, bindings.values, origin)
+	end
+	if callee_category == checked_category_math()
+		return mir_checked_standard_call(state, locals, bindings.values, result_type, origin)
+	end
+	if callee_category == checked_category_initializer()
+		value := mir_checked_object_new(state, locals, receiver, object_instance_type(state, receiver), origin)
+		bindings.values[0] = checked_mir_value(value)
+		mir_checked_constructor_call(state, locals, function, bindings.values, result_type, origin)
+		return concurrent_value(state, value, concurrent_borrowed)
+	end
+	return concurrent_value(state, mir_checked_call(state, locals, function, bindings.values, result_type, origin), concurrent_borrowed)
+end
+
+def check_record_new(mut state: CompilerState, mut position: Array<Integer>, mut locals: CheckedLocals, record_origin: Integer): CheckedValue
+	record_name := checked_reference_name(state, record_origin)
+	mut record_index := find_record_type(state, sparse_string_at(state.callables.checked[0].generic_application_types, record_origin))
+	if record_index < 0
+		record_index = find_visible_record(state, state.module_graph.active_module[0], record_name)
+	end
+	origin := position[0]
+	line := load_integer(state.source_tokens.token_lines, origin)
+	advance(position)
+	skip_newlines(state, position)
+	start := load_integer(state.declarations.record_field_starts, record_index)
+	mut bindings := record_argument_bindings(state, record_index)
+	saved_mir := locals.mir_state[mir_state_enabled_slot()]
+	mut diverged := false
+	mut concurrent_borrowed := false
+	mut finished := false
+	while !finished
+		if token_is(state, position[0], ")")
+			finished = true
+		else
+			argument_line := load_integer(state.source_tokens.token_lines, position[0])
+			label := parse_argument_label(state, position)
+			slot := argument_binding_slot(bindings, label)
+			if slot < 0
+				return type_diagnostic(state, argument_line, bindings.error[0])
+			end
+			value := check_expression(state, position, locals, 1, load_string(state.declarations.field_types, start + slot))
+			if value.type_name == "Never"
+				diverged = true
+				scalar_mir_disable(locals)
+			end
+			if value.concurrent_borrowed
+				concurrent_borrowed = true
+			end
+			bindings.values[slot] = checked_mir_value(value)
+			skip_newlines(state, position)
+			if token_is(state, position[0], ",")
+				advance(position)
+				skip_newlines(state, position)
+			else
+				finished = true
+			end
+		end
+	end
+	expect(state, position, ")")
+	if !mir_complete_arguments(state, locals, bindings, origin)
+		diagnostic(state, "TRBN4004", line, "record field count does not match " + record_name)
+	end
+	if diverged
+		locals.mir_state[mir_state_enabled_slot()] = saved_mir
+		return checked_value("Never", checked_category_value(), 9007199254740991, 0)
+	end
+	return concurrent_value(state, mir_checked_record_new(state, locals, record_index, record_type(record_index), bindings.values, origin), concurrent_borrowed)
+end
+
+def check_method_call(
+		mut state: CompilerState,
+		mut position: Array<Integer>,
+		mut locals: CheckedLocals,
+		receiver: CheckedValue,
+		method: String,
+	): CheckedValue
+	if find_newtype_type(state, receiver.type_name) >= 0
+		return check_newtype_member(state, position, locals, receiver, method)
+	end
+	if method == "raw_value" && raw_enum_type(state, find_enum_type(state, receiver.type_name)) != ""
+		origin := position[0]
+		advance(position)
+		skip_newlines(state, position)
+		expect(state, position, ")")
+		return checked_raw_enum_value(state, locals, receiver, origin)
+	end
+	function := enum_method_function(state, receiver.type_name, method)
+	if function >= 0
+		if !namespace_member_access(state, load_integer(state.declarations.function_modules, function), enum_method_declaration_name(state, receiver.type_name, method), position[0])
+			return checked_value("Invalid", checked_category_value(), position[0], 0)
+		end
+		return check_call(state, position, locals, checked_category_function(), "", function, checked_mir_value(receiver), true)
+	end
+	if builtin_result_method(receiver.type_name, method) > 0
+		return check_builtin_lookup(state, position, locals, receiver, method)
+	end
+	if hash_key_type(receiver.type_name) != "" || receiver.type_name == "Hash"
+		return checked_hash_call(state, position, locals, receiver, method)
+	end
+	mut unshift_numeric_region := false
+	inference_region := pending_collection_declaration(state, locals, receiver) >= 0
+	if receiver.type_name == "Array<Integer>" && method == "unshift"
+		unshift_numeric_region = checked_array_numeric_region(state, locals, receiver)
+	end
+	if (receiver.type_name == "Array" || unshift_numeric_region || inference_region) && method == "unshift"
+		origin := position[0]
+		line := load_integer(state.source_tokens.token_lines, origin)
+		concurrent_mutation(state, locals, receiver, origin)
+		if receiver.mutable == 0
+			return type_diagnostic(state, line, "unshift receiver is immutable")
+		end
+		if !receiver.binding
+			return type_diagnostic(state, line, "unshift requires a mutable binding")
+		end
+		advance(position)
+		skip_newlines(state, position)
+		mut argument_type := array_element_type(receiver.type_name)
+		if unshift_numeric_region || inference_region
+			argument_type = ""
+		end
+		value := check_expression(state, position, locals, 1, argument_type)
+		skip_newlines(state, position)
+		expect(state, position, ")")
+		if value.type_name == "Never"
+			return value
+		end
+		if has_diagnostic(state)
+			return checked_value("Invalid", checked_category_value(), origin, 0)
+		end
+		if receiver.type_name == "Array" || inference_region
+			error := checked_array_refine(state, locals, receiver, value.type_name)
+			if error != ""
+				return type_diagnostic(state, line, error)
+			end
+		elsif value.type_name == "Float"
+			error := checked_array_refine(state, locals, receiver, "Float")
+			if error != ""
+				return type_diagnostic(state, line, error)
+			end
+		else
+			check_expected(state, value.type_name, "Integer", line)
+		end
+		mut candidate_eligible := unshift_numeric_region
+		if receiver.type_name == "Array"
+			candidate_eligible = true
+		end
+		conversion := checked_array_numeric_candidate(state, locals, value, origin, candidate_eligible)
+		result := mir_checked_array_operation(state, locals, mir_op_array_mutate(), checked_mir_value(receiver), checked_mir_value(value), mir_array_mutate_unshift(), "Void", origin)
+		checked_array_numeric_record(locals, receiver, conversion)
+		return result
+	end
+	if (receiver.type_name == "StringBuilder" && builder_method(method) >= 0) || bytes_method_kind(receiver.type_name, method) > bytes_method_none() || (receiver.type_name == "Range<Integer>" && method == "to_a") || (receiver.type_name == "Integer" && integer_method_kind(method) > integer_method_none()) || (receiver.type_name == "Float" && float_method_kind(method) > float_method_none()) || (receiver.type_name == "String" && string_method_kind(method) > string_method_none()) || (array_element_type(receiver.type_name) != "" && array_method_kind(method) > array_method_none()) || (receiver.type_name == "Array" && method == "empty?")
+		return check_primitive_method(state, position, locals, receiver, method)
+	end
+	line := load_integer(state.source_tokens.token_lines, position[0])
+	advance(position)
+	skip_newlines(state, position)
+	if method == "size"
+		expect(state, position, ")")
+		if receiver.type_name == "String"
+			return mir_checked_string_operation(state, locals, mir_op_string_size(), checked_mir_value(receiver), -1, 0, "Integer", position[0] - 1)
+		end
+		if array_element_type(receiver.type_name) != "" || receiver.type_name == "Array"
+			return mir_checked_array_operation(state, locals, mir_op_array_size(), checked_mir_value(receiver), -1, 0, "Integer", position[0] - 1)
+		end
+		return type_diagnostic(state, line, "size is unavailable on " + type_display(state, receiver.type_name))
+	end
+	if method == "push"
+		element_type := array_element_type(receiver.type_name)
+		numeric_region := checked_array_numeric_region(state, locals, receiver)
+		if element_type == "" && receiver.type_name != "Array"
+			return type_diagnostic(state, line, "push is unavailable on " + type_display(state, receiver.type_name))
+		end
+		concurrent_mutation(state, locals, receiver, position[0])
+		if receiver.mutable == 0
+			diagnostic(state, "TRBN4004", line, "push receiver is immutable")
+		elsif !receiver.binding
+			diagnostic(state, "TRBN4004", line, "push requires a mutable binding")
+		end
+		mut argument_type := element_type
+		if numeric_region || inference_region
+			argument_type = ""
+		end
+		value := check_expression(state, position, locals, 1, argument_type)
+		skip_newlines(state, position)
+		expect(state, position, ")")
+		if value.type_name == "Never"
+			return value
+		end
+		if (receiver.type_name == "Array" || inference_region) && !has_diagnostic(state)
+			error := checked_array_refine(state, locals, receiver, value.type_name)
+			if error != ""
+				return type_diagnostic(state, line, error)
+			end
+		elsif numeric_region && !has_diagnostic(state)
+			if value.type_name == "Float"
+				error := checked_array_refine(state, locals, receiver, "Float")
+				if error != ""
+					return type_diagnostic(state, line, error)
+				end
+			else
+				check_expected(state, value.type_name, element_type, line)
+			end
+		end
+		mut candidate_eligible := numeric_region
+		if receiver.type_name == "Array"
+			candidate_eligible = true
+		end
+		conversion := checked_array_numeric_candidate(state, locals, value, position[0] - 1, candidate_eligible)
+		result := mir_checked_array_operation(state, locals, mir_op_array_push(), checked_mir_value(receiver), checked_mir_value(value), 0, "Void", position[0] - 1)
+		checked_array_numeric_record(locals, receiver, conversion)
+		return result
+	end
+	if method == "to_f" && receiver.type_name == "String"
+		expect(state, position, ")")
+		return mir_checked_string_operation(state, locals, mir_op_scalar_conversion(), checked_mir_value(receiver), -1, mir_convert_string_to_float(), "Float", position[0] - 1)
+	end
+	if method == "to_i"
+		expect(state, position, ")")
+		if receiver.type_name == "String"
+			return mir_checked_string_operation(state, locals, mir_op_scalar_conversion(), checked_mir_value(receiver), -1, mir_convert_string_to_integer(), "Integer", position[0] - 1)
+		end
+	end
+	if method == "to_s"
+		expect(state, position, ")")
+		if receiver.type_name == "Integer"
+			return mir_checked_string_operation(state, locals, mir_op_scalar_conversion(), checked_mir_value(receiver), -1, mir_convert_integer_to_string(), "String", position[0] - 1)
+		end
+		if receiver.type_name == "Float"
+			return mir_checked_string_operation(state, locals, mir_op_scalar_conversion(), checked_mir_value(receiver), -1, mir_convert_float_to_string(), "String", position[0] - 1)
+		end
+		if receiver.type_name == "Boolean"
+			return mir_checked_string_operation(state, locals, mir_op_scalar_conversion(), checked_mir_value(receiver), -1, mir_convert_boolean_to_string(), "String", position[0] - 1)
+		end
+	end
+	return type_diagnostic(state, line, "unsupported method " + method)
+end
+
+# Bottom-valued receivers have no field/index/call operation to emit. Their
+# suffixes still receive syntax and nested-expression checks.
+def check_callable_call(mut state: CompilerState, mut position: Array<Integer>, mut locals: CheckedLocals, callee: CheckedValue): CheckedValue
+	concurrent_dynamic_call(state, locals, position[0])
+	origin := position[0]
+	line := load_integer(state.source_tokens.token_lines, origin)
+	parts := callable_parts(callee.type_name)
+	advance(position)
+	skip_newlines(state, position)
+	mut arguments: Array<Integer> := []
+	mut diverged := false
+	saved := locals.mir_state[mir_state_enabled_slot()]
+	while !token_is(state, position[0], ")") && !has_diagnostic(state)
+		if arguments.size() + 1 >= parts.size()
+			return type_diagnostic(state, line, "callable argument count differs")
+		end
+		if parse_argument_label(state, position) != ""
+			return type_diagnostic(state, line, "function values require positional arguments")
+		end
+		value := check_expression(state, position, locals, 1, parts[arguments.size() + 1])
+		if value.type_name == "Never"
+			diverged = true
+			scalar_mir_disable(locals)
+		end
+		arguments.push(checked_mir_value(value))
+		if !token_is(state, position[0], ",")
+			break
+		end
+		advance(position)
+		skip_newlines(state, position)
+	end
+	expect(state, position, ")")
+	if arguments.size() + 1 != parts.size()
+		return type_diagnostic(state, line, "callable argument count differs")
+	end
+	if diverged
+		locals.mir_state[mir_state_enabled_slot()] = saved
+		return checked_value("Never", checked_category_value(), 9007199254740991, 0)
+	end
+	return mir_checked_callable_call(state, locals, callee, arguments, parts[0], origin)
+end
+
+# Each fn is checked in its own projection and transfer scope. The statement
+# checker selects captures through actual bound references, including nested fn.
+# Analysis selects captures; the lowering phase constructs their MIR environment.
+def check_primitive_method(mut state: CompilerState, mut position: Array<Integer>, mut locals: CheckedLocals, receiver: CheckedValue, method: String): CheckedValue
+	origin := position[0]
+	line := load_integer(state.source_tokens.token_lines, origin)
+	mut kind := integer_method_kind(method)
+	mut arity := integer_method_arity(kind)
+	mut argument_type := "Integer"
+	if receiver.type_name == "StringBuilder"
+		kind = builder_method(method)
+		parameters := builder_parameters(kind)
+		arity = parameters.size() - 1
+		if arity > 0
+			argument_type = parameters[1]
+		end
+		if builder_mutates(kind)
+			concurrent_mutation(state, locals, receiver, origin)
+			if receiver.mutable == 0
+				diagnostic(state, "TRBN4004", line, method + " receiver is immutable")
+			elsif !receiver.binding
+				diagnostic(state, "TRBN4004", line, method + " requires a mutable binding")
+			end
+		end
+	elsif bytes_method_kind(receiver.type_name, method) > bytes_method_none()
+		kind = bytes_method_kind(receiver.type_name, method)
+		arity = bytes_method_arity(kind)
+		argument_type = bytes_method_argument_type(kind)
+	elsif receiver.type_name == "Range<Integer>"
+		kind = range_method_to_array()
+		arity = 0
+	elsif receiver.type_name == "Float"
+		kind = float_method_kind(method)
+		arity = 0
+	elsif receiver.type_name == "String"
+		kind = string_method_kind(method)
+		arity = string_method_arity(kind)
+		argument_type = string_method_argument_type(kind)
+	elsif array_element_type(receiver.type_name) != "" || receiver.type_name == "Array"
+		kind = array_method_kind(method)
+		arity = array_method_arity(kind)
+		argument_type = "Range<Integer>"
+		if kind >= array_method_unshift()
+			argument_type = array_element_type(receiver.type_name)
+		end
+		if kind >= array_method_sort()
+			if argument_type != "Integer" && argument_type != "Float" && argument_type != "String" && literal_scalar_type(argument_type) == ""
+				return type_diagnostic(state, line, method + " requires portable ordering for its Array element type")
+			end
+		elsif kind == array_method_join()
+			if receiver.type_name != "Array<String>"
+				return type_diagnostic(state, line, "join requires Array<String>")
+			end
+			argument_type = "String"
+		elsif kind == array_method_concat()
+			argument_type = receiver.type_name
+		elsif kind >= array_method_include() && !array_query_comparable(state, argument_type)
+			return type_diagnostic(state, line, method + " requires portable equality for its Array element type")
+		end
+		if kind >= array_method_unshift() && kind <= array_method_shift()
+			concurrent_mutation(state, locals, receiver, origin)
+			if receiver.mutable == 0
+				diagnostic(state, "TRBN4004", line, method + " receiver is immutable")
+			elsif !receiver.binding
+				diagnostic(state, "TRBN4004", line, method + " requires a mutable binding")
+			end
+		end
+	end
+	advance(position)
+	skip_newlines(state, position)
+	mut arguments: Array<CheckedValue> := []
+	saved := locals.mir_state[mir_state_enabled_slot()]
+	mut diverged := false
+	while !token_is(state, position[0], ")") && !has_diagnostic(state)
+		if arguments.size() >= arity
+			return type_diagnostic(state, line, receiver.type_name + " method argument count differs")
+		end
+		value := check_expression(state, position, locals, 1, argument_type)
+		arguments.push(value)
+		if value.type_name == "Never"
+			diverged = true
+			scalar_mir_disable(locals)
+		end
+		skip_newlines(state, position)
+		if !token_is(state, position[0], ",")
+			break
+		end
+		advance(position)
+		skip_newlines(state, position)
+	end
+	if !expect(state, position, ")") || arguments.size() != arity
+		return type_diagnostic(state, line, receiver.type_name + " method argument count differs")
+	end
+	if diverged
+		locals.mir_state[mir_state_enabled_slot()] = saved
+		return checked_value("Never", checked_category_value(), origin, 0)
+	end
+	if has_diagnostic(state)
+		return checked_value("Invalid", checked_category_value(), origin, 0)
+	end
+	if receiver.type_name == "StringBuilder"
+		mut values := [checked_mir_value(receiver)]
+		arguments.each do |argument|
+			values.push(checked_mir_value(argument))
+		end
+		return concurrent_arguments(state, mir_builder_call(state, locals, method, values, origin), receiver, arguments)
+	end
+	if bytes_method_kind(receiver.type_name, method) > bytes_method_none()
+		if arity == 0
+			return concurrent_arguments(state, mir_bytes_method(state, locals, kind, receiver, receiver, origin), receiver, arguments)
+		end
+		return concurrent_arguments(state, mir_bytes_method(state, locals, kind, receiver, arguments[0], origin), receiver, arguments)
+	end
+	if receiver.type_name == "Range<Integer>"
+		return concurrent_arguments(state, mir_range_array(state, locals, receiver, origin), receiver, arguments)
+	elsif receiver.type_name == "Float"
+		return concurrent_arguments(state, mir_float_method(state, locals, kind, receiver, origin), receiver, arguments)
+	elsif receiver.type_name == "String"
+		if kind == string_method_replace_all()
+			return concurrent_arguments(state, mir_checked_string_operation(state, locals, mir_op_string_replace(), checked_mir_value(receiver), checked_mir_value(arguments[0]), checked_mir_value(arguments[1]), "String", origin), receiver, arguments)
+		end
+		if arity == 0
+			return concurrent_arguments(state, mir_string_method(state, locals, kind, receiver, receiver, origin), receiver, arguments)
+		end
+		return concurrent_arguments(state, mir_string_method(state, locals, kind, receiver, arguments[0], origin), receiver, arguments)
+	end
+	if array_element_type(receiver.type_name) != "" || receiver.type_name == "Array"
+		if arity == 0
+			return concurrent_arguments(state, mir_array_method(state, locals, kind, receiver, receiver, origin), receiver, arguments)
+		end
+		return concurrent_arguments(state, mir_array_method(state, locals, kind, receiver, arguments[0], origin), receiver, arguments)
+	end
+	return concurrent_arguments(state, mir_integer_method(state, locals, kind, receiver, arguments, origin), receiver, arguments)
+end
+
+def check_builtin_lookup(mut state: CompilerState, mut position: Array<Integer>, mut locals: CheckedLocals, receiver: CheckedValue, method: String): CheckedValue
+	origin := position[0]
+	kind := builtin_result_method(receiver.type_name, method)
+	mut expected := "Integer"
+	if kind == result_method_slice()
+		expected = "Range<Integer>"
+	elsif kind == result_method_key()
+		expected = hash_key_type(receiver.type_name)
+	end
+	advance(position)
+	skip_newlines(state, position)
+	if kind == result_method_integer() || kind == result_method_float()
+		expect(state, position, ")")
+		if has_diagnostic(state)
+			return checked_value("Invalid", checked_category_value(), origin, 0)
+		end
+		return mir_builtin_number_parse(state, locals, receiver, kind == result_method_float(), origin)
+	end
+	argument := check_expression(state, position, locals, 1, expected)
+	skip_newlines(state, position)
+	if token_is(state, position[0], ",")
+		advance(position)
+		skip_newlines(state, position)
+	end
+	expect(state, position, ")")
+	if has_diagnostic(state)
+		return checked_value("Invalid", checked_category_value(), origin, 0)
+	end
+	if argument.type_name == "Never"
+		return argument
+	end
+	return mir_builtin_lookup(state, locals, kind, receiver, argument, origin)
+end
+
+# Object calls share ordinary argument binding and function MIR. Abstract
+# contracts and instance allocation never masquerade as empty source bodies.

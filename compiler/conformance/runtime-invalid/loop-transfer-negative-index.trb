@@ -1,0 +1,10 @@
+def main()
+	mut values := [1]
+	mut index := 0
+	while index < values.size()
+		value := values[index]
+		index -= value
+		next
+		index += 1
+	end
+end

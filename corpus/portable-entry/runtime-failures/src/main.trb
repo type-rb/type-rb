@@ -1,0 +1,35 @@
+import trb/std/process
+import trb/std/math
+
+def main()
+	mode := Process.argv()[0]
+	if mode == "invalid-format"
+		puts("12x".to_i().to_s())
+		return
+	end
+	if mode == "sign-only"
+		puts("+".to_i().to_s())
+		return
+	end
+	if mode == "integer-range"
+		puts("9007199254740992".to_i().to_s())
+		return
+	end
+	if mode == "nan"
+		puts(Math.sqrt(-1).to_i().to_s())
+		return
+	end
+	if mode == "infinity"
+		zero := 0.0
+		infinite := 1.0 / zero
+		puts(infinite.to_i().to_s())
+		return
+	end
+	if mode == "float-range"
+		outside := 9007199254740992.0
+		puts(outside.to_i().to_s())
+		return
+	end
+	puts("unknown failure case")
+	return
+end

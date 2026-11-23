@@ -1,0 +1,230 @@
+import trb/std/result
+
+module SQLite
+	enum QueryMode
+		ReadOnly
+		WriteReturning
+		ReadOrCreate
+	end
+
+	enum Parameter
+		Null
+		Integer(value: Integer)
+		Float(value: Float)
+		Text(value: String)
+		Blob(value: Bytes)
+	end
+
+	record WriteStatement
+		sql: String
+		parameters: Array<Parameter>
+	end
+
+	record Error
+		code: Integer
+		message: String
+	end
+end
+
+# The loader-owned bridge receives compatible vectors with one slot per value.
+# It owns the foreign frames and the connection for the complete operation.
+def write(
+		source: String,
+		statements: Array<String>,
+		offsets: Array<Integer>,
+		kinds: Array<Integer>,
+		words: Array<Integer>,
+		reals: Array<Float>,
+		buffers: Array<Bytes>,
+		transactional: Boolean,
+		busy_milliseconds: Integer,
+		mut changes: Array<Integer>,
+	): Integer
+end
+
+def error_message(status: Integer): String
+end
+
+def worker_control(operation: Integer, value: Integer): Integer
+end
+
+def worker_log(message: String): Integer
+end
+
+def transaction(operation: Integer, source: String, scope: Integer): Integer
+end
+
+def query(
+		source: String,
+		statement: String,
+		kinds: Array<Integer>,
+		words: Array<Integer>,
+		reals: Array<Float>,
+		buffers: Array<Bytes>,
+		mode: Integer,
+		busy_milliseconds: Integer,
+		mut row_kinds: Array<Integer>,
+		mut row_words: Array<Integer>,
+		mut row_reals: Array<Float>,
+		mut row_buffers: Array<Bytes>,
+		scope: Integer,
+	): Integer
+end
+
+def _append_parameters(
+		parameters: Array<SQLite::Parameter>,
+		mut kinds: Array<Integer>,
+		mut words: Array<Integer>,
+		mut reals: Array<Float>,
+		mut buffers: Array<Bytes>,
+	)
+	empty := "".to_bytes()
+	parameters.each do |parameter|
+		mut kind := 5
+		mut word := 0
+		mut real := 0.0
+		mut buffer := empty
+		case parameter
+		when SQLite::Parameter::Null
+		when SQLite::Parameter::Integer(value)
+			kind = 1
+			word = value
+		when SQLite::Parameter::Float(value)
+			kind = 2
+			real = value
+		when SQLite::Parameter::Text(value)
+			kind = 3
+			buffer = value.to_bytes()
+		when SQLite::Parameter::Blob(value)
+			kind = 4
+			buffer = value
+		end
+		kinds.push(kind)
+		words.push(word)
+		reals.push(real)
+		buffers.push(buffer)
+	end
+end
+
+def execute_writes(
+		source: String,
+		requests: Array<SQLite::WriteStatement>,
+		transactional: Boolean,
+		busy_milliseconds: Integer,
+	): Result<Integer, SQLite::Error>
+	mut statements: Array<String> := []
+	mut offsets := [0]
+	mut kinds: Array<Integer> := []
+	mut words: Array<Integer> := []
+	mut reals: Array<Float> := []
+	mut buffers: Array<Bytes> := []
+	requests.each do |request|
+		statements.push(request.sql)
+		_append_parameters(request.parameters, kinds, words, reals, buffers)
+		offsets.push(kinds.size())
+	end
+	mut changes := [0]
+	status := write(source, statements, offsets, kinds, words, reals, buffers,
+		transactional, busy_milliseconds, changes)
+	if status != 0
+		return Result<Integer, SQLite::Error>::Err(SQLite::Error.new(code: status, message: error_message(status)))
+	end
+	return Result<Integer, SQLite::Error>::Ok(changes[0])
+end
+
+# A write query commits only after validating and copying its single row.
+# A missing row is represented by nil. The foreign statement is already closed.
+def query_one(
+		source: String,
+		statement: String,
+		parameters: Array<SQLite::Parameter>,
+		shape: Array<Integer>,
+		mode: SQLite::QueryMode,
+		busy_milliseconds: Integer,
+		scope: Integer = 0,
+	): Result<Array<SQLite::Parameter>?, SQLite::Error>
+	rows := try _query_rows(source, statement, parameters, shape, mode, busy_milliseconds, scope, false)
+	if rows.empty?()
+		return Result<Array<SQLite::Parameter>?, SQLite::Error>::Ok(nil)
+	end
+	return Result<Array<SQLite::Parameter>?, SQLite::Error>::Ok(rows[0])
+end
+
+def query_rows(source: String, statement: String, parameters: Array<SQLite::Parameter>, width: Integer, scope: Integer): Result<Array<Array<SQLite::Parameter>>, SQLite::Error>
+	mut shape: Array<Integer> := []
+	if width < 1 || width > 32767
+		return Result<Array<Array<SQLite::Parameter>>, SQLite::Error>::Err(SQLite::Error.new(code: 21, message: "invalid SQLite row width"))
+	end
+	while shape.size() < width
+		shape.push(0)
+	end
+	return _query_rows(source, statement, parameters, shape, SQLite::QueryMode::ReadOrCreate, 0, scope, true)
+end
+
+def _query_rows(source: String, statement: String, parameters: Array<SQLite::Parameter>, shape: Array<Integer>, mode: SQLite::QueryMode, busy_milliseconds: Integer, scope: Integer, many: Boolean): Result<Array<Array<SQLite::Parameter>>, SQLite::Error>
+	width := shape.size()
+	if width <= 0 || width > 32767
+		return Result<Array<Array<SQLite::Parameter>>, SQLite::Error>::Err(SQLite::Error.new(code: 21, message: "invalid SQLite row width"))
+	end
+	mut kinds: Array<Integer> := []
+	mut words: Array<Integer> := []
+	mut reals: Array<Float> := []
+	mut buffers: Array<Bytes> := []
+	_append_parameters(parameters, kinds, words, reals, buffers)
+	mut row_kinds: Array<Integer> := []
+	mut row_words: Array<Integer> := []
+	mut row_reals: Array<Float> := []
+	mut row_buffers: Array<Bytes> := []
+	empty := "".to_bytes()
+	mut index := 0
+	while index < width
+		row_kinds.push(shape[index])
+		row_words.push(0)
+		row_reals.push(0.0)
+		row_buffers.push(empty)
+		index += 1
+	end
+	mut open_mode := 0
+	case mode
+	when SQLite::QueryMode::ReadOnly
+	when SQLite::QueryMode::WriteReturning
+		open_mode = 1
+	when SQLite::QueryMode::ReadOrCreate
+		open_mode = 2
+	end
+	if many
+		open_mode = 3
+	end
+	status := query(source, statement, kinds, words, reals, buffers, open_mode, busy_milliseconds, row_kinds, row_words, row_reals, row_buffers, scope)
+	mut rows: Array<Array<SQLite::Parameter>> := []
+	if status == 101
+		return Result<Array<Array<SQLite::Parameter>>, SQLite::Error>::Ok(rows)
+	elsif status != 0
+		return Result<Array<Array<SQLite::Parameter>>, SQLite::Error>::Err(SQLite::Error.new(code: status, message: error_message(status)))
+	end
+	index = 0
+	if many
+		index = width
+	end
+	while index < row_kinds.size()
+		mut row: Array<SQLite::Parameter> := []
+		finish := index + width
+		while index < finish
+			kind := row_kinds[index]
+			if kind == 1
+				row.push(SQLite::Parameter::Integer(row_words[index]))
+			elsif kind == 2
+				row.push(SQLite::Parameter::Float(row_reals[index]))
+			elsif kind == 3
+				row.push(SQLite::Parameter::Text(row_buffers[index].to_s()))
+			elsif kind == 4
+				row.push(SQLite::Parameter::Blob(row_buffers[index]))
+			else
+				row.push(SQLite::Parameter::Null)
+			end
+			index += 1
+		end
+		rows.push(row)
+	end
+	return Result<Array<Array<SQLite::Parameter>>, SQLite::Error>::Ok(rows)
+end

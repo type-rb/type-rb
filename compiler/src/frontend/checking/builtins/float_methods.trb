@@ -1,0 +1,96 @@
+import { mir_convert_float_to_integer } from mir/model/operation_modes
+import { float_method_abs, float_method_ceil, float_method_finite, float_method_floor, float_method_infinite, float_method_nan, float_method_none, float_method_round, float_method_to_i } from frontend/types/method_kinds
+import { mir_op_scalar_conversion } from mir/model/instructions
+import { CheckedValue, checked_mir_value, scalar_mir_binary, scalar_mir_convert_float, scalar_mir_literal, scalar_mir_unary } from frontend/checking/body/values
+import { mir_control_branch, mir_control_enter, mir_control_prepare } from mir/build/control
+import { mir_checked_string_operation } from mir/lowering/strings
+import { mir_value_complete, mir_value_exit, mir_value_join, mir_value_select } from mir/build/value_control
+import { CompilerState } from state/state
+import { CheckedLocals } from state/local_state
+import { load_integer } from support/storage
+
+# All Float receiver operations have zero authored arguments.
+def float_method_kind(name: String): Integer
+	if name == "abs"
+		return float_method_abs()
+	elsif name == "floor"
+		return float_method_floor()
+	elsif name == "ceil"
+		return float_method_ceil()
+	elsif name == "round"
+		return float_method_round()
+	elsif name == "finite?"
+		return float_method_finite()
+	elsif name == "infinite?"
+		return float_method_infinite()
+	elsif name == "nan?"
+		return float_method_nan()
+	elsif name == "to_i"
+		return float_method_to_i()
+	end
+	return float_method_none()
+end
+
+# Adjust only the taken edge: an eager Integer addition could trap at a limit.
+def mir_float_adjust(mut state: CompilerState, mut locals: CheckedLocals, value: CheckedValue, condition: CheckedValue, subtract: Boolean, origin: Integer): CheckedValue
+	line := load_integer(state.source_tokens.token_lines, origin)
+	mut join := mir_value_join(locals, line)
+	alternate := mir_control_branch(state, locals, condition, line)
+	step := scalar_mir_literal(state, locals, "Integer", origin, "1")
+	mut operator := "+"
+	if subtract
+		operator = "-"
+	end
+	adjusted := scalar_mir_binary(state, locals, operator, value, step, "Integer", origin)
+	mir_value_exit(state, locals, join, adjusted)
+	mir_control_enter(state, locals, alternate, line)
+	mir_value_exit(state, locals, join, value)
+	return mir_value_complete(state, locals, join, "Integer", origin)
+end
+
+# Portable semantics are expressed entirely in existing typed operations and CFG.
+def mir_float_method(mut state: CompilerState, mut locals: CheckedLocals, kind: Integer, receiver: CheckedValue, origin: Integer): CheckedValue
+	mir_control_prepare(state, locals)
+	if kind == float_method_nan()
+		return scalar_mir_binary(state, locals, "!=", receiver, receiver, "Boolean", origin)
+	end
+	if kind == float_method_finite() || kind == float_method_infinite()
+		difference := scalar_mir_binary(state, locals, "-", receiver, receiver, "Float", origin)
+		finite := scalar_mir_binary(state, locals, "==", difference, difference, "Boolean", origin)
+		if kind == float_method_finite()
+			return finite
+		end
+		number := scalar_mir_binary(state, locals, "==", receiver, receiver, "Boolean", origin)
+		nonfinite := scalar_mir_unary(state, locals, "!", finite, "Boolean", origin)
+		no := scalar_mir_literal(state, locals, "Boolean", origin, "false")
+		return mir_value_select(state, locals, number, nonfinite, no, origin)
+	end
+	if kind == float_method_abs()
+		zero := scalar_mir_literal(state, locals, "Float", origin, "0.0")
+		negative := scalar_mir_binary(state, locals, "<", receiver, zero, "Boolean", origin)
+		absolute := scalar_mir_unary(state, locals, "-", receiver, "Float", origin)
+		# Addition normalizes negative zero while preserving non-finite values.
+		positive := scalar_mir_binary(state, locals, "+", receiver, zero, "Float", origin)
+		return mir_value_select(state, locals, negative, absolute, positive, origin)
+	end
+	integer := mir_checked_string_operation(state, locals, mir_op_scalar_conversion(), checked_mir_value(receiver), -1, mir_convert_float_to_integer(), "Integer", origin)
+	if kind == float_method_to_i()
+		return integer
+	end
+	widened := scalar_mir_convert_float(state, locals, integer, origin)
+	if kind == float_method_floor()
+		lower := scalar_mir_binary(state, locals, "<", receiver, widened, "Boolean", origin)
+		return mir_float_adjust(state, locals, integer, lower, true, origin)
+	elsif kind == float_method_ceil()
+		upper := scalar_mir_binary(state, locals, ">", receiver, widened, "Boolean", origin)
+		return mir_float_adjust(state, locals, integer, upper, false, origin)
+	end
+	# Adding 0.5 to the input would change some already-integral large values.
+	fraction := scalar_mir_binary(state, locals, "-", receiver, widened, "Float", origin)
+	half := scalar_mir_literal(state, locals, "Float", origin, "0.5")
+	negative_half := scalar_mir_unary(state, locals, "-", half, "Float", origin)
+	upper := scalar_mir_binary(state, locals, ">=", fraction, half, "Boolean", origin)
+	lower := scalar_mir_binary(state, locals, "<=", fraction, negative_half, "Boolean", origin)
+	rounded := mir_float_adjust(state, locals, integer, upper, false, origin)
+	return mir_float_adjust(state, locals, rounded, lower, true, origin)
+end

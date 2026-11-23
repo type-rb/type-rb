@@ -1,0 +1,66 @@
+# Shared mutable state uses fixed slots. Keep these access names separate from
+# stored values; single-element cells use their sole index directly.
+
+def mir_state_enabled_slot(): Integer
+	return 0
+end
+
+def mir_state_function_slot(): Integer
+	return 1
+end
+
+def mir_state_next_value_slot(): Integer
+	return 2
+end
+
+def mir_state_failure_block_slot(): Integer
+	return 3
+end
+
+def mir_state_return_value_slot(): Integer
+	return 4
+end
+
+def mir_control_enabled_slot(): Integer
+	return 0
+end
+
+def mir_control_block_slot(): Integer
+	return 1
+end
+
+def mir_control_next_block_slot(): Integer
+	return 2
+end
+
+def mir_control_instruction_start_slot(): Integer
+	return 3
+end
+
+def mir_control_parameter_start_slot(): Integer
+	return 4
+end
+
+def mir_control_parameter_count_slot(): Integer
+	return 5
+end
+
+def mir_control_terminated_slot(): Integer
+	return 6
+end
+
+def mir_control_source_line_slot(): Integer
+	return 7
+end
+
+def mir_control_loop_depth_slot(): Integer
+	return 8
+end
+
+def nullable_state_head_slot(): Integer
+	return 0
+end
+
+def nullable_state_version_slot(): Integer
+	return 1
+end

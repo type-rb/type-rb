@@ -1,0 +1,315 @@
+import { loop_transfer_none } from state/control_kinds
+import { token_kind_identifier } from state/token_kinds
+import { CompilerState, compiler_new, terminal_token, has_diagnostic } from state/state
+import { ReplStore, ReplEnvironment, repl_type, repl_set_type } from repl/model
+import { repl_assign_binding, repl_binding_value, repl_coerce } from repl/values
+import { nullable_element } from frontend/types/nullable_types
+import { hash_key_type } from frontend/types/hash_types
+import { repl_default } from repl/defaults
+import { repl_witness_type_name } from repl/project
+import { lex } from frontend/syntax/lexer
+import { declaration_start, syntax_loop_transfer_kind } from frontend/syntax/syntax_forms
+import { parse_module } from frontend/syntax/parser
+import { parse_declaration_statement, parse_simple_statement, parse_transfer_syntax } from frontend/syntax/body_syntax
+import { enum_uppercase } from frontend/types/enum_types
+import { skip_newlines, token_is } from frontend/syntax/syntax_tokens
+import { load_string, load_integer, store_integer, sparse_integer_at, sparse_string_at, integer_storage } from support/storage
+import { array_element_type } from frontend/resolution/type_resolution
+
+# These typed declarations describe persistent cells. Their default expressions
+# are checked, but are never evaluated to recreate a retained value.
+def repl_binding_witnesses(state: CompilerState, store: ReplStore, environment: ReplEnvironment, globals: Boolean = false): String
+	mut source := ""
+	mut index := 0
+	while index < environment.count[0]
+		id := repl_binding_value(store, environment, index)
+		type_name := repl_type(store, id)
+		if !globals || (type_name != "Hash" && type_name != "Array")
+			if environment.mutable[index] == 1
+				source += "mut "
+			end
+			source += environment.names[index]
+			if type_name != "Hash" && type_name != "Array"
+				source += ": " + repl_witness_type_name(state, type_name)
+			end
+			source += " := " + repl_default(state, type_name) + "\n"
+		end
+		index += 1
+	end
+	return source
+end
+
+# Pending collection cells acquire the checked declaration type, including its
+# optional wrapper. Payload identity remains shared with newly created aliases.
+def repl_pending_collection_type(state: CompilerState, name: String): String
+	if state.submissions.size() == 0
+		return ""
+	end
+	mut origin := 0
+	while origin < state.submissions[0].start
+		if token_is(state, origin, "mut") && load_string(state.source_tokens.token_texts, origin + 1) == name
+			resolved := sparse_string_at(state.callables.checked[0].local_types, origin)
+			if resolved != ""
+				return resolved
+			end
+		end
+		origin += 1
+	end
+	return ""
+end
+
+def repl_refines_nullable_collection(state: CompilerState, store: ReplStore, environment: ReplEnvironment): Boolean
+	mut binding := 0
+	while binding < environment.count[0]
+		type_name := repl_type(store, repl_binding_value(store, environment, binding))
+		if (type_name == "Array" || type_name == "Hash") && nullable_element(repl_pending_collection_type(state, environment.names[binding])) != ""
+			return true
+		end
+		binding += 1
+	end
+	return false
+end
+
+def repl_refine_pending_collections(state: CompilerState, mut store: ReplStore, mut environment: ReplEnvironment)
+	if state.submissions.size() == 0
+		return
+	end
+	mut binding := 0
+	while binding < environment.count[0]
+		id := repl_binding_value(store, environment, binding)
+		if repl_type(store, id) == "Array" || repl_type(store, id) == "Hash"
+			resolved := repl_pending_collection_type(state, environment.names[binding])
+			mut payload := resolved
+			if nullable_element(payload) != ""
+				payload = nullable_element(payload)
+			end
+			if array_element_type(payload) != "" || hash_key_type(payload) != ""
+				repl_set_type(store, id, payload)
+				repl_assign_binding(store, environment, binding, repl_coerce(store, id, resolved))
+			end
+		end
+		binding += 1
+	end
+end
+
+def repl_loaded_bindings(inputs: Array<String>): String
+	mut source := ""
+	inputs.each do |input|
+		mut probe := compiler_new(input.size() * 3 + 16)
+		lex(probe, input)
+		mut first := [0]
+		skip_newlines(probe, first)
+		if declaration_start(probe, first[0]) && !enum_uppercase(load_string(probe.source_tokens.token_texts, first[0]))
+			mut name := first[0]
+			if token_is(probe, name, "mut")
+				name += 1
+			end
+			# Inference for a fresh empty collection belongs to its authored
+			# body. Do not invent an untyped file-global initializer for it.
+			mut literal_end := [name + 3]
+			skip_newlines(probe, literal_end)
+			untyped_empty := token_is(probe, name + 1, ":=") && ((token_is(probe, name + 2, "{") && token_is(probe, literal_end[0], "}")) || (token_is(probe, name + 2, "[") && token_is(probe, literal_end[0], "]")))
+			if !untyped_empty
+				source += input + "\n"
+			end
+		end
+	end
+	return source
+end
+
+def repl_projected_globals(state: CompilerState, after_line: Integer): String
+	mut source := ""
+	mut identity := 0
+	while identity < state.global_bindings.globals.size()
+		row := state.global_bindings.globals[identity]
+		if row.source_id == state.module_graph.entry_module[0] && row.line > after_line
+			if row.mutable
+				source += "mut "
+			end
+			type_name := state.global_bindings.global_types[identity]
+			source += row.name + ": " + repl_witness_type_name(state, type_name) + " := " + repl_default(state, type_name) + "\n"
+		end
+		identity += 1
+	end
+	return source
+end
+
+# Projected session values already exist before authored initializers. Preserve
+# imported initialization order while placing these witnesses first in the entry
+# module's verified catalog. The ordinary MIR verifier remains authoritative.
+def repl_order_projected_globals(mut state: CompilerState, first_line: Integer, last_line: Integer)
+	mut projected: Array<Integer> := []
+	mut ordinary: Array<Integer> := []
+	state.global_bindings.global_order.each do |identity|
+		row := state.global_bindings.globals[identity]
+		if row.source_id == state.module_graph.entry_module[0] && row.line >= first_line && row.line < last_line
+			projected.push(identity)
+		else
+			ordinary.push(identity)
+		end
+	end
+	while !state.global_bindings.global_order.empty?()
+		state.global_bindings.global_order.pop()
+	end
+	mut inserted := false
+	ordinary.each do |identity|
+		if !inserted && state.global_bindings.globals[identity].source_id == state.module_graph.entry_module[0]
+			projected.each do |binding|
+				state.global_bindings.global_order.push(binding)
+			end
+			inserted = true
+		end
+		state.global_bindings.global_order.push(identity)
+	end
+	if !inserted
+		projected.each do |binding|
+			state.global_bindings.global_order.push(binding)
+		end
+	end
+end
+
+def repl_lines(text: String): Integer
+	mut lines := 0
+	mut index := 0
+	while index < text.size()
+		if text[index] == "\n"
+			lines += 1
+		end
+		index += 1
+	end
+	return lines
+end
+
+def repl_is_declaration(input: String): Boolean
+	mut probe := compiler_new(input.size() * 3 + 16)
+	lex(probe, input)
+	mut first := [0]
+	skip_newlines(probe, first)
+	if load_integer(probe.source_tokens.token_kinds, first[0]) == token_kind_identifier() && enum_uppercase(load_string(probe.source_tokens.token_texts, first[0])) && (token_is(probe, first[0] + 1, ":=") || token_is(probe, first[0] + 1, ":"))
+		return true
+	end
+	mut declarations := token_is(probe, first[0], "def")
+	if token_is(probe, first[0], "class") || token_is(probe, first[0], "interface") || token_is(probe, first[0], "record") || token_is(probe, first[0], "enum") || token_is(probe, first[0], "module")
+		declarations = true
+	end
+	if token_is(probe, first[0], "import") || token_is(probe, first[0], "alias") || token_is(probe, first[0], "newtype")
+		declarations = true
+	end
+	return declarations
+end
+
+# The generated header groups declarations and witnesses, while lexical value
+# scope follows the user's submissions. Attach that order before resolution so
+# old function bodies cannot capture bindings introduced by later submissions.
+def repl_project_binding_order(mut state: CompilerState, imports: String, inputs: Array<String>, first_line: Integer, last_line: Integer, body_line: Integer, body_finish: Integer, active_order: Integer)
+	if inputs.empty?() || first_line < 0
+		return
+	end
+	mut entry_finish := 0
+	mut maximum_line := 0
+	while !terminal_token(state, entry_finish)
+		maximum_line = load_integer(state.source_tokens.token_lines, entry_finish)
+		entry_finish += 1
+	end
+	mut declaration_orders := integer_storage(maximum_line + 1)
+	mut bindings: Hash<String, Integer> := {}
+	mut line := repl_lines(imports) + 1
+	mut index := 0
+	while index < inputs.size()
+		input := inputs[index]
+		if repl_is_declaration(input)
+			finish := line + repl_lines(input) + 1
+			while line < finish
+				store_integer(declaration_orders, line, index + 1)
+				line += 1
+			end
+		else
+			repl_input_bindings(input).each do |name|
+				bindings[name] = index + 1
+			end
+		end
+		index += 1
+	end
+	if body_line >= 0
+		mut current := body_line
+		if active_order > 0
+			while current < body_finish
+				store_integer(declaration_orders, current, active_order)
+				current += 1
+			end
+		else
+			index = 0
+			while index < inputs.size()
+				if !repl_is_declaration(inputs[index])
+					finish := current + repl_lines(inputs[index]) + 1
+					while current < finish
+						store_integer(declaration_orders, current, index + 1)
+						current += 1
+					end
+				end
+				index += 1
+			end
+		end
+	end
+	# load_file_root lexes the synthetic entry first, followed by its imports.
+	mut token := 0
+	while token < entry_finish
+		mut order := sparse_integer_at(declaration_orders, load_integer(state.source_tokens.token_lines, token))
+		if order == 0
+			order = inputs.size() + 1
+		end
+		store_integer(state.global_bindings.global_scope_orders, token, order)
+		token += 1
+	end
+	state.global_bindings.globals.each do |row|
+		if row.source_id == state.module_graph.entry_module[0] && row.line >= first_line && row.line < last_line
+			mut order := inputs.size() + 1
+			if bindings.key?(row.name)
+				order = bindings[row.name]
+			end
+			token = row.origin
+			while token < row.finish
+				store_integer(state.global_bindings.global_scope_orders, token, order)
+				token += 1
+			end
+		end
+	end
+end
+
+# Reuse parsed statement boundaries, so bindings inside a nested control or
+# callback cannot replace the identity of a retained top-level binding.
+def repl_input_bindings(input: String): Array<String>
+	source := "def main()\n" + input + "\nend\n"
+	mut probe := compiler_new(source.size() * 3 + 16)
+	lex(probe, source)
+	parse_module(probe, 0, 0)
+	mut names: Array<String> := []
+	if has_diagnostic(probe)
+		return names
+	end
+	mut position := [load_integer(probe.declarations.function_body_starts, 0)]
+	finish := load_integer(probe.declarations.function_body_ends, 0)
+	skip_newlines(probe, position)
+	while position[0] < finish && !has_diagnostic(probe)
+		control := sparse_integer_at(probe.parsed.control_origins, position[0])
+		loop_finish := sparse_integer_at(probe.parsed.loop_finishes, position[0])
+		if control > 0
+			position[0] = probe.parsed.controls[control - 1].finish
+		elsif loop_finish > 0
+			position[0] = loop_finish
+		elsif declaration_start(probe, position[0])
+			mut name := position[0]
+			if token_is(probe, name, "mut")
+				name += 1
+			end
+			names.push(load_string(probe.source_tokens.token_texts, name))
+			parse_declaration_statement(probe, position)
+		elsif token_is(probe, position[0], "return") || syntax_loop_transfer_kind(probe, position[0]) > loop_transfer_none()
+			parse_transfer_syntax(probe, position)
+		else
+			parse_simple_statement(probe, position)
+		end
+		skip_newlines(probe, position)
+	end
+	return names
+end

@@ -1,0 +1,133 @@
+import { binary_equal, binary_not_equal } from frontend/types/operators
+import { mir_function_control, mir_terminator_branch } from mir/model/control
+import { mir_op_scalar_binary, mir_op_scalar_literal } from mir/model/instructions
+import { mir_type_integer } from mir/model/type_ids
+import { MirBlock, MirFunction, MirModule } from mir/model/module
+import { MirFlow, mir_build_flow_with_values, mir_flow_block_index, mir_flow_blocks, mir_flow_type, mir_function_value_groups } from mir/analysis/flow
+import { mir_natural_loop } from mir/analysis/loops
+import { mir_managed_contains } from mir/analysis/liveness
+import { mir_rewrite_arguments } from mir/passes/rewrite
+import { integer_string } from support/literals
+
+def mir_loop_exit_comparison(native_module: MirModule, block: MirBlock): Integer
+	if block.terminator == mir_terminator_branch()
+		mut index := block.instruction_start
+		while index < block.instruction_start + block.instruction_count
+			instruction := native_module.instructions[index]
+			if instruction.result == block.condition && instruction.kind == mir_op_scalar_binary() && (instruction.payload == binary_equal() || instruction.payload == binary_not_equal())
+				return index
+			end
+			index += 1
+		end
+	end
+	return -1
+end
+
+def mir_loop_exit_arguments(mut native_module: MirModule, start: Integer, count: Integer, value: Integer, literal: Integer): Integer
+	mut index := 0
+	while index < count
+		if native_module.arguments[start + index] == value
+			mut replacement: Hash<String, Integer> := {}
+			replacement[integer_string(value)] = literal
+			# Other edges can share the old span. The common rewrite helper
+			# appends a private span and never edits the old arguments.
+			return mir_rewrite_arguments(native_module, start, count, replacement)
+		end
+		index += 1
+	end
+	return start
+end
+
+def mir_fold_loop_exit_block(mut native_module: MirModule, function: MirFunction, flow: MirFlow, index: Integer): MirBlock
+	block := native_module.blocks[function.block_start + index]
+	position := mir_loop_exit_comparison(native_module, block)
+	if position < 0
+		return block
+	end
+	comparison := native_module.instructions[position]
+	# Float equality does not preserve the sign of zero. Nullable and
+	# composite operands do not establish this exact Integer identity either.
+	if mir_flow_type(flow, comparison.first) != mir_type_integer() || mir_flow_type(flow, comparison.second) != mir_type_integer()
+		return block
+	end
+	mut first_literal := false
+	mut second_literal := false
+	mut previous := block.instruction_start
+	while previous < position
+		definition := native_module.instructions[previous]
+		if definition.kind == mir_op_scalar_literal()
+			if definition.result == comparison.first
+				first_literal = true
+			end
+			if definition.result == comparison.second
+				second_literal = true
+			end
+		end
+		previous += 1
+	end
+	if (first_literal && second_literal) || (!first_literal && !second_literal)
+		return block
+	end
+	mut literal := comparison.first
+	mut value := comparison.second
+	if second_literal
+		literal = comparison.second
+		value = comparison.first
+	end
+	loop := mir_natural_loop(native_module, function, flow, index)
+	if loop.preheader < 0
+		return block
+	end
+	first := comparison.payload == binary_equal()
+	mut target := block.first_target
+	mut other := block.second_target
+	if !first
+		target = block.second_target
+		other = block.first_target
+	end
+	# Keep internal and backedge arguments intact: replacing induction
+	# identities there would hide existing Array traversal proofs. Only the
+	# normal termination edge establishes a constant outside this loop.
+	if mir_managed_contains(loop.members, mir_flow_block_index(flow, target)) || !mir_managed_contains(loop.members, mir_flow_block_index(flow, other))
+		return block
+	end
+	mut first_start := block.first_argument_start
+	mut second_start := block.second_argument_start
+	if first
+		first_start = mir_loop_exit_arguments(native_module, first_start, block.first_argument_count, value, literal)
+	else
+		second_start = mir_loop_exit_arguments(native_module, second_start, block.second_argument_count, value, literal)
+	end
+	if first_start == block.first_argument_start && second_start == block.second_argument_start
+		return block
+	end
+	return MirBlock.new(id: block.id, source_id: block.source_id, line: block.line, parameter_start: block.parameter_start, parameter_count: block.parameter_count, instruction_start: block.instruction_start, instruction_count: block.instruction_count, terminator: block.terminator, condition: block.condition, first_target: block.first_target, second_target: block.second_target, first_argument_start: first_start, first_argument_count: block.first_argument_count, second_argument_start: second_start, second_argument_count: block.second_argument_count, return_value: block.return_value)
+end
+
+# The verifier owns the input CFG and types. Replacing an argument span changes
+# neither graph membership nor definitions, so one flow serves every candidate
+# header in a function. Later optimization rebuilds all value-dependent plans.
+def mir_fold_loop_exit_constants(mut native_module: MirModule)
+	values := mir_function_value_groups(native_module)
+	mut function_index := 0
+	while function_index < native_module.functions.size()
+		function := native_module.functions[function_index]
+		if function.kind == mir_function_control()
+			mut candidates: Array<Integer> := []
+			mut index := 0
+			while index < function.block_count
+				if mir_loop_exit_comparison(native_module, native_module.blocks[function.block_start + index]) >= 0
+					candidates.push(index)
+				end
+				index += 1
+			end
+			if candidates.size() > 0
+				flow := mir_build_flow_with_values(native_module, function, mir_flow_blocks(native_module, function), values[function_index])
+				candidates.each do |candidate|
+					native_module.blocks[function.block_start + candidate] = mir_fold_loop_exit_block(native_module, function, flow, candidate)
+				end
+			end
+		end
+		function_index += 1
+	end
+end

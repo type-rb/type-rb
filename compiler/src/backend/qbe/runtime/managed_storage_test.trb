@@ -1,0 +1,51 @@
+import { managed_storage_class_count } from backend/qbe/runtime/managed_storage
+import { check, emit_qbe } from compiler
+import { control_test_output } from testing/mir/control
+import { logical_checked_source } from testing/pipeline
+import { logical_run_qbe } from testing/qbe_runner
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+describe("Managed String and fixed-layout storage") do
+	test("collects mixed small and large objects and releases every storage class") do
+		source := "record Box\ntext: String\nend\ndef batch(seed: Integer): String\nmut values: Array<Box> := []\nmut index := 0\nwhile index < 1200\ntext := seed.to_s() + \":\" + index.to_s()\nvalues.push(Box.new(text: text))\nindex += 1\nend\nreturn values[1199].text + \"abcdefghijklmnopqrstuvwxyz0123456789\"\nend\ndef main()\nmut index := 100\nwhile index < 104\nputs(batch(index))\nindex += 1\nend\nend\n"
+		mut state := logical_checked_source(source)
+		expect(check(state)).to_be_true()
+		# Collect frequently across String/record/Array ownership and every
+		# pooled class. At shutdown no managed object or pool page may remain.
+		mut output := control_test_output(emit_qbe(state))
+		expect(output.include?("\tcall $trbn_gc_maybe_collect(l %projected)")).to_be_true()
+		output = output.split("\tcall $trbn_gc_maybe_collect(l %projected)").join("\tcall $trbn_gc_collect(w 0)")
+		mut cleanup := "\tstorel 0, $trbn_gc_temp_count\n\tcall $memset(l $trbn_gc_global_roots, w 0, l 96)\n\tcall $trbn_gc_collect(w 0)\n\tcall $trbn_array_backing_flush()\n\t%remaining_bytes =l loadl $trbn_gc_heap_bytes\n"
+		mut index := 0
+		while index < managed_storage_class_count()
+			suffix := index.to_s()
+			cleanup += "\t%class_slot" + suffix + " =l add $trbn_storage_available, " + (index * 8).to_s() + "\n\t%class_head" + suffix + " =l loadl %class_slot" + suffix + "\n"
+			index += 1
+		end
+		cleanup += "\t%remaining =l copy %remaining_bytes\n"
+		index = 0
+		while index < managed_storage_class_count()
+			mut operand := "%remaining"
+			if index > 0
+				operand = "%pending" + (index - 1).to_s()
+			end
+			cleanup += "\t%pending" + index.to_s() + " =l or " + operand + ", %class_head" + index.to_s() + "\n"
+			index += 1
+		end
+		cleanup += "\t%leaked =w cnel %pending" + (managed_storage_class_count() - 1).to_s() + ", 0\n\tjnz %leaked, @leaked, @released\n@leaked\n\thlt\n@released"
+		expect(output.include?("\tcall $trbn_gc_finish()")).to_be_true()
+		output = output.split("\tcall $trbn_gc_finish()").join(cleanup)
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, output)
+			when Result::Ok(actual)
+				expect(actual).to_equal("100:1199abcdefghijklmnopqrstuvwxyz0123456789\n101:1199abcdefghijklmnopqrstuvwxyz0123456789\n102:1199abcdefghijklmnopqrstuvwxyz0123456789\n103:1199abcdefghijklmnopqrstuvwxyz0123456789\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+end

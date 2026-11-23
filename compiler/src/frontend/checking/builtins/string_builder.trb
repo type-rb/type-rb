@@ -1,0 +1,40 @@
+import { builder_adapter_start, builder_method, builder_mutates, builder_parameters, builder_result, builder_signature_name } from mir/model/string_builder_contract
+import { mir_signature_standard } from mir/model/call_kinds
+import { MirSignature } from mir/model/module
+import { mir_semantic_type_id } from mir/model/types
+import { mir_checked_call } from mir/lowering/calls
+import { CheckedValue } from frontend/checking/body/values
+import { CompilerState } from state/state
+import { CheckedLocals } from state/local_state
+import { load_integer } from support/storage
+
+# Frontend mutability checks precede this shared verified call boundary.
+def mir_builder_call(mut state: CompilerState, mut locals: CheckedLocals, method: String, arguments: Array<Integer>, origin: Integer): CheckedValue
+	kind := builder_method(method)
+	adapter := builder_adapter_start() + kind
+	mut callee := state.declarations.function_count[0]
+	while callee < state.scalar_mir.signatures.size()
+		if state.scalar_mir.signatures[callee].kind == mir_signature_standard() && state.scalar_mir.signatures[callee].adapter == adapter
+			break
+		end
+		callee += 1
+	end
+	result := builder_result(kind)
+	if callee == state.scalar_mir.signatures.size()
+		parameters := builder_parameters(kind)
+		mut mutable: Array<Integer> := []
+		mut index := 0
+		parameters.each do |type_name|
+			mir_semantic_type_id(state.scalar_mir, type_name)
+			mut writes := 0
+			if index == 0 && builder_mutates(kind)
+				writes = 1
+			end
+			mutable.push(writes)
+			index += 1
+		end
+		mir_semantic_type_id(state.scalar_mir, result)
+		state.scalar_mir.signatures.push(MirSignature.new(id: callee, kind: mir_signature_standard(), name: builder_signature_name(kind), adapter: adapter, source_id: state.module_graph.active_module[0], line: load_integer(state.source_tokens.token_lines, origin), parameter_types: parameters, parameter_mutable: mutable, result_type: result))
+	end
+	return mir_checked_call(state, locals, callee, arguments, result, origin)
+end

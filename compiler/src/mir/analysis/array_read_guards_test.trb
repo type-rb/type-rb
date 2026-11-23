@@ -1,0 +1,103 @@
+import { emit_qbe } from compiler
+import { control_test_output } from testing/mir/control
+import { array_loop_mir_check } from testing/mir/array_loops
+import { MirArrayReadGuard, mir_function_index } from mir/model/module
+import { optimize_verified_mir } from mir/passes/optimize
+import { verify_mir } from mir/verify/module
+import { describe, expect, test } from trb/std/test
+
+describe("Array read guard MIR") do
+	test("shares a normalized position for repeated reads without an Integer range assumption") do
+		state := array_loop_mir_check("def twice(values: Array<Integer>, index: Integer): Integer\nreturn values[index] + values[index]\nend\ndef main()\nputs(twice([2, 3], -1))\nend\n")
+		index := mir_function_index(state.scalar_mir, 0)
+		expect(state.scalar_mir.array_read_guards[index].size()).to_equal(1)
+		guard := state.scalar_mir.array_read_guards[index][0]
+		expect(guard.source < guard.instruction).to_be_true()
+		expect(state.scalar_mir.instructions[guard.source].kind).to_equal(22)
+		expect(control_test_output(emit_qbe(state)).include?("%mir_array_checked_index")).to_be_true()
+	end
+
+	test("shares a read guard with a later assignment capture before its right hand side") do
+		state := array_loop_mir_check("def update(mut values: Array<Integer>, index: Integer): Integer\nprevious := values[index]\nvalues[index] = previous + 1\nreturn previous\nend\ndef main()\nend\n")
+		index := mir_function_index(state.scalar_mir, 0)
+		expect(state.scalar_mir.array_read_guards[index].size()).to_equal(1)
+		guard := state.scalar_mir.array_read_guards[index][0]
+		expect(state.scalar_mir.instructions[guard.instruction].kind).to_equal(21)
+	end
+
+	test("retains checks for distinct owners indexes mutations calls and allocations") do
+		bodies := [
+			"return values[index] + other[index]",
+			"return values[index] + values[index + 1]",
+			"previous := values[index]\nvalues.pop()\nreturn previous + values[index]",
+			"previous := values[index]\nvalues.push(9)\nreturn previous + values[index]",
+			"previous := values[index]\nvalues.shift()\nreturn previous + values[index]",
+			"previous := values[index]\nvalues.unshift(9)\nreturn previous + values[index]",
+			"previous := values[index]\nchange(values)\nreturn previous + values[index]",
+			"previous := values[index]\nmut created := [previous]\nreturn previous + values[index] + created.size()",
+		]
+		bodies.each do |body|
+			source := "def change(mut values: Array<Integer>)\nvalues.push(1)\nend\ndef use(mut values: Array<Integer>, other: Array<Integer>, index: Integer): Integer\n" + body + "\nend\ndef main()\nend\n"
+			state := array_loop_mir_check(source)
+			index := mir_function_index(state.scalar_mir, 1)
+			expect(state.scalar_mir.array_read_guards[index].size()).to_equal(0)
+		end
+	end
+
+	test("retains positions across primitive overwrites even when another owner aliases") do
+		["Integer", "Float", "Boolean"].each do |element|
+			source := "def use(mut values: Array<" + element + ">, mut other: Array<" + element + ">, index: Integer, replacement: " + element + "): Boolean\nprevious := values[index]\nother[0] = replacement\nreturn previous == values[index]\nend\ndef main()\nend\n"
+			state := array_loop_mir_check(source)
+			index := mir_function_index(state.scalar_mir, 0)
+			expect(state.scalar_mir.array_read_guards[index].size()).to_equal(1)
+			guard := state.scalar_mir.array_read_guards[index][0]
+			expect(state.scalar_mir.instructions[guard.source].kind).to_equal(22)
+			expect(state.scalar_mir.instructions[guard.instruction].kind).to_equal(22)
+		end
+	end
+
+	test("keeps managed overwrites and pure calls as conservative barriers") do
+		["other[0] = replacement", "ignore(1)"].each do |barrier|
+			source := "def ignore(value: Integer): Integer\nreturn value\nend\ndef use(mut values: Array<String>, mut other: Array<String>, index: Integer, replacement: String): String\nprevious := values[index]\n" + barrier + "\nreturn previous + values[index]\nend\ndef main()\nend\n"
+			state := array_loop_mir_check(source)
+			index := mir_function_index(state.scalar_mir, 1)
+			expect(state.scalar_mir.array_read_guards[index].size()).to_equal(0)
+		end
+	end
+
+	test("rejects a forged witness and missing tables") do
+		mut mode := 0
+		while mode < 3
+			mut state := array_loop_mir_check("def twice(values: Array<Float>, index: Integer): Float\nreturn values[index] + values[index]\nend\ndef main()\nend\n")
+			index := mir_function_index(state.scalar_mir, 0)
+			old := state.scalar_mir.array_read_guards[index][0]
+			if mode == 0
+				state.scalar_mir.array_read_guards[index][0] = MirArrayReadGuard.new(instruction: old.instruction, source: old.instruction, loaded_value: old.loaded_value)
+			elsif mode == 1
+				state.scalar_mir.array_read_guards[index][0] = MirArrayReadGuard.new(instruction: old.instruction + 1, source: old.source, loaded_value: old.loaded_value)
+			else
+				state.scalar_mir.array_read_guards[index] = []
+			end
+			expect(verify_mir(state.scalar_mir, true).empty?()).to_be_false()
+			mode += 1
+		end
+	end
+
+	test("keeps witness order independent of physical block order") do
+		mut state := array_loop_mir_check("def twice(values: Array<Integer>, index: Integer): Integer\nif index < 0\nreturn values[index] + values[index]\nelse\nreturn values[index] + values[index]\nend\nend\ndef main()\nend\n")
+		state.scalar_mir.functions.each do |function|
+			mut left := function.block_start
+			mut right := left + function.block_count - 1
+			while left < right
+				saved := state.scalar_mir.blocks[left]
+				state.scalar_mir.blocks[left] = state.scalar_mir.blocks[right]
+				state.scalar_mir.blocks[right] = saved
+				left += 1
+				right -= 1
+			end
+		end
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	end
+end

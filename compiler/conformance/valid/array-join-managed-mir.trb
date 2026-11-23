@@ -1,0 +1,31 @@
+def main()
+	mut words := ["a" + "b", "c" + "d"]
+	original := words
+	separator := fn(): String
+		words.push("e" + "f")
+		words = ["replacement"]
+		return "-" + "-"
+	end
+	joined := words.join(separator())
+	puts(joined)
+	puts(original.size())
+	puts(words.first())
+	mut shrinking := ["first", "second"]
+	shorten := fn(): String
+		shrinking.shift()
+		return "/"
+	end
+	puts(shrinking.join(shorten()))
+	mut result := [joined]
+	result.push([joined, joined].join("|"))
+	puts(result.join(":"))
+	mut index := 0
+	while index < 12
+		text := [index.to_s(), "retained"].join("/")
+		if index == 11
+			puts(text)
+		end
+		index += 1
+	end
+	puts(joined)
+end

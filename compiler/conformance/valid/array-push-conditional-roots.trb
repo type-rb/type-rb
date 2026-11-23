@@ -1,0 +1,23 @@
+def exercise(length: Integer)
+	mut first: Array<Integer> := []
+	mut index := 0
+	while index < length
+		first.push(index)
+		index += 1
+	end
+	mut second := [10, 20, 30, 40]
+	protected := ["kept-" + length.to_s()]
+	first.push(50)
+	second.push(60)
+	first.push(70)
+	third := ["later-" + length.to_s()]
+	puts(protected[0])
+	puts(first[-1])
+	puts(second[-1])
+	puts(third[0])
+end
+
+def main()
+	exercise(3)
+	exercise(4)
+end

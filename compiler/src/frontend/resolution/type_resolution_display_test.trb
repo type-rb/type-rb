@@ -1,0 +1,13 @@
+import { callable_type } from frontend/types/callable_types
+import { nullable_type } from frontend/types/nullable_types
+import { type_display } from frontend/resolution/type_resolution
+import { compiler_new } from state/state
+import { describe, expect, test } from trb/std/test
+
+describe("Displayed callable types") do
+	test("distinguishes an optional callable from a callable returning an optional value") do
+		state := compiler_new(8)
+		expect(type_display(state, nullable_type(callable_type([], "Integer")))).to_equal("(() -> Integer)?")
+		expect(type_display(state, callable_type([], nullable_type("Integer")))).to_equal("() -> Integer?")
+	end
+end

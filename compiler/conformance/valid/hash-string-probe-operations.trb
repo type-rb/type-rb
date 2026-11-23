@@ -1,0 +1,67 @@
+def choose(flag: Boolean): String?
+	if flag
+		return "retained"
+	end
+	return nil
+end
+
+def main()
+	mut table: Hash<String, Integer> := {}
+	puts(table.key?(""))
+	mut index := -96
+	while index < 96
+		table["k" + index.to_s()] = index * 2
+		index += 1
+	end
+	view := table
+	index = -96
+	while index < 96
+		table.delete("k" + index.to_s())
+		index += 2
+	end
+	puts(view.key?("k-96"))
+	puts(view.key?("k-95"))
+	puts(view["k-95"])
+	mut copied := table.merge({ "k-95" => 999 })
+	copied["k-96"] = 3
+	puts(copied["k-95"])
+	puts(copied.size())
+	puts(view["k-95"])
+	index = -95
+	while index < 96
+		table.delete("k" + index.to_s())
+		index += 2
+	end
+	table[""] = 11
+	puts(view[""])
+	puts(view.size())
+	# These keys collide in the initial eight-slot FNV table.
+	mut collisions: Hash<String, Integer> := {}
+	collisions["c0"] = 1
+	collisions["c8"] = 2
+	collisions.delete("c0")
+	puts(collisions["c8"])
+	puts(collisions.key?("c0"))
+	collisions["c0"] = 3
+	puts(collisions["c0"])
+	mut floats: Hash<String, Float> := {}
+	floats[""] = 1.5
+	puts(floats[""])
+	mut nullable: Hash<String, String?> := {}
+	nullable["one"] = choose(true)
+	nullable["two"] = choose(false)
+	held := nullable["one"]
+	if held != nil
+		puts(held)
+	end
+	puts(nullable["two"] == nil)
+	mut erased: Hash<String, Any> := {}
+	erased[""] = "retained"
+	mut sink: Array<Any> := [erased[""]]
+	puts(sink.size())
+	key := "é\x00key"
+	mut words: Hash<String, Integer> := {}
+	words[key] = 7
+	puts(words.key?("é\x00" + "key"))
+	puts(words["é\x00" + "key"])
+end

@@ -1,0 +1,209 @@
+import { project_config_trimmed } from project/config
+import { package_json_digit, package_name_less } from project/package_json
+import { package_version_valid } from project/package_manifest
+import { compiler_source_slice } from frontend/syntax/lexer
+import { compiler_string_bytes } from support/compiler_bytes
+import { string_ends_with, string_starts_with } from support/path
+
+def package_text_index(value: String, part: String): Integer
+	mut index := 0
+	while index + part.size() <= value.size()
+		if compiler_source_slice(value, index, index + part.size()) == part
+			return index
+		end
+		index += 1
+	end
+	return -1
+end
+
+def package_git_revision(value: String): Boolean
+	if value.size() < 7 || value.size() > 40
+		return false
+	end
+	mut index := 0
+	while index < value.size()
+		if package_text_index("0123456789abcdefABCDEF", value[index]) < 0
+			return false
+		end
+		index += 1
+	end
+	return true
+end
+
+def package_git_source_error(raw: String): String
+	value := project_config_trimmed(raw)
+	if value == ""
+		return ""
+	end
+	if string_starts_with(value, "-")
+		return "invalid package source"
+	end
+	compiler_string_bytes(value).each do |byte|
+		if byte == 0 || byte == 10 || byte == 13
+			return "invalid package source"
+		end
+	end
+	separator := package_text_index(value, "://")
+	if separator < 0
+		return ""
+	end
+	# URL sources follow the reference credential boundary. SSH scp-style
+	# sources use Git's normal credential machinery and are not URL-parsed.
+	if package_text_index(value, "?") >= 0 || package_text_index(value, "#") >= 0
+		return "package source cannot contain a query or fragment"
+	end
+	mut authority := ""
+	mut index := separator + 3
+	while index < value.size() && value[index] != "/"
+		authority += value[index]
+		index += 1
+	end
+	mut at := -1
+	index = 0
+	while index < authority.size()
+		if authority[index] == "@"
+			at = index
+		end
+		index += 1
+	end
+	if at >= 0 && package_text_index(compiler_source_slice(authority, 0, at), ":") >= 0
+		return "package source cannot contain a password; use Git credentials"
+	end
+	index = 0
+	while index < value.size()
+		if value[index] == "%"
+			if index + 2 >= value.size()
+				return "invalid package source escape"
+			end
+			if package_text_index("0123456789abcdefABCDEF", value[index + 1]) < 0 || package_text_index("0123456789abcdefABCDEF", value[index + 2]) < 0
+				return "invalid package source escape"
+			end
+			index += 2
+		end
+		index += 1
+	end
+	return ""
+end
+
+def package_git_source(name: String, source: String): String
+	trimmed := project_config_trimmed(source)
+	if trimmed != ""
+		return trimmed
+	end
+	first := name.split("/")[0]
+	if package_text_index(first, ".") >= 0
+		return name
+	end
+	return "github.com/" + name
+end
+
+def package_git_url(source: String): String
+	if package_text_index(source, "://") >= 0 || string_starts_with(source, "git@") || string_starts_with(source, "/")
+		return source
+	end
+	mut value := source
+	if string_ends_with(value, ".git")
+		value = compiler_source_slice(value, 0, value.size() - 4)
+	end
+	return "https://" + value + ".git"
+end
+
+def package_version_canonical(raw: String): String
+	if !package_version_valid(raw)
+		return ""
+	end
+	value := project_config_trimmed(raw)
+	if !string_starts_with(value, "v")
+		return "v" + value
+	end
+	return value
+end
+
+# Ref spelling retains short versions and build metadata. Only precedence
+# comparisons expand omitted components and ignore build metadata.
+def package_version_precedence(raw: String): String
+	mut value := package_version_canonical(raw)
+	build := package_text_index(value, "+")
+	if build >= 0
+		value = compiler_source_slice(value, 0, build)
+	end
+	if package_text_index(value, "-") < 0
+		mut parts := value.split(".").size()
+		while parts < 3
+			value += ".0"
+			parts += 1
+		end
+	end
+	return value
+end
+
+def package_decimal(value: String): Boolean
+	if value == ""
+		return false
+	end
+	value.chars().each do |character|
+		if !package_json_digit(character)
+			return false
+		end
+	end
+	return true
+end
+
+def package_number_less(left: String, right: String): Boolean
+	if left.size() != right.size()
+		return left.size() < right.size()
+	end
+	return package_name_less(left, right)
+end
+
+def package_version_less(left: String, right: String): Boolean
+	left_value := package_version_precedence(left)
+	right_value := package_version_precedence(right)
+	a := left_value.split("-")
+	b := right_value.split("-")
+	ac := a[0].split(".")
+	bc := b[0].split(".")
+	mut index := 0
+	while index < 3
+		if ac[index] != bc[index]
+			return package_number_less(ac[index], bc[index])
+		end
+		index += 1
+	end
+	if a.size() == 1 || b.size() == 1
+		return a.size() > b.size()
+	end
+	# A prerelease identifier may itself contain '-' characters.
+	left_start := package_text_index(left_value, "-") + 1
+	right_start := package_text_index(right_value, "-") + 1
+	ap := compiler_source_slice(left_value, left_start, left_value.size()).split(".")
+	bp := compiler_source_slice(right_value, right_start, right_value.size()).split(".")
+	index = 0
+	while index < ap.size() && index < bp.size()
+		if ap[index] != bp[index]
+			an := package_decimal(ap[index])
+			bn := package_decimal(bp[index])
+			if an && bn
+				return package_number_less(ap[index], bp[index])
+			end
+			if an != bn
+				return an
+			end
+			return package_name_less(ap[index], bp[index])
+		end
+		index += 1
+	end
+	return ap.size() < bp.size()
+end
+
+def package_git_requirement_error(source: String, version: String): String
+	error := package_git_source_error(source)
+	if error != ""
+		return error
+	end
+	value := project_config_trimmed(version)
+	if value != "latest" && !package_version_valid(value) && !package_git_revision(value)
+		return "unsupported TypeRB package version; use a semantic version, latest, or Git revision"
+	end
+	return ""
+end

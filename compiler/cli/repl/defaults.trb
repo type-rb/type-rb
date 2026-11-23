@@ -1,0 +1,102 @@
+import { find_object_type } from frontend/types/object_types
+import { literal_type_base, literal_type_display } from frontend/types/literal_types
+import { find_newtype_type } from frontend/types/newtype_types
+import { union_parts } from frontend/types/union_types
+import { callable_parts } from frontend/types/callable_types
+import { integer_string } from support/literals
+import { find_enum_type } from frontend/types/enum_types
+import { nullable_element } from frontend/types/nullable_types
+import { hash_key_type } from frontend/types/hash_types
+import { string_starts_with } from support/path
+import { find_record_type } from frontend/resolution/type_resolution
+import { repl_witness_type_name } from repl/project
+import { CompilerState } from state/state
+
+# Source witnesses are checked but never evaluated. Nominal values use typed
+# projections so retained values need neither constructors nor initializer replay.
+def repl_default(state: CompilerState, type_name: String): String
+	return repl_default_seen(state, type_name, [])
+end
+
+def repl_default_seen(state: CompilerState, type_name: String, seen: Array<String>): String
+	if literal_type_base(type_name) != ""
+		return literal_type_display(type_name)
+	end
+	if nullable_element(type_name) != ""
+		return "nil"
+	end
+	if type_name == "Range<Integer>"
+		return "(0..0)"
+	end
+	if type_name == "Hash" || hash_key_type(type_name) != ""
+		return "{}"
+	end
+	if type_name == "Integer"
+		return "0"
+	end
+	if type_name == "Float"
+		return "0.0"
+	end
+	if type_name == "Boolean"
+		return "false"
+	end
+	if type_name == "StringBuilder"
+		# This type-only projection never calls a factory or recreates the value.
+		return "(fn(): StringBuilder\n_witness: Array<StringBuilder> := []\nreturn _witness[0]\nend)()"
+	end
+	if type_name == "Bytes"
+		return "\"\".to_bytes()"
+	end
+	if type_name == "String"
+		return "\"\""
+	end
+	if type_name == "Array" || string_starts_with(type_name, "Array<")
+		return "[]"
+	end
+	parts := callable_parts(type_name)
+	if parts.size() > 0
+		mut source := "fn("
+		mut parameter := 1
+		while parameter < parts.size()
+			if parameter > 1
+				source += ", "
+			end
+			source += "_argument" + integer_string(parameter) + ": " + repl_witness_type_name(state, parts[parameter])
+			parameter += 1
+		end
+		if parts[0] == "Void"
+			return source + ")\nreturn\nend"
+		end
+		source += "): " + repl_witness_type_name(state, parts[0]) + "\n"
+		# A never-executed typed projection works even when the result contains
+		# this callable recursively. Do not construct or replay a result value.
+		return source + "_witness: Array<" + repl_witness_type_name(state, parts[0]) + "> := []\nreturn _witness[0]\nend"
+	end
+	mut path: Array<String> := []
+	mut cursor := 0
+	while cursor < seen.size()
+		if seen[cursor] == type_name
+			return ""
+		end
+		path.push(seen[cursor])
+		cursor += 1
+	end
+	path.push(type_name)
+	alternatives := union_parts(type_name)
+	if alternatives.size() > 0
+		mut selected := ""
+		alternatives.each do |alternative|
+			if selected == ""
+				selected = repl_default_seen(state, alternative, path)
+			end
+		end
+		return selected
+	end
+	if find_newtype_type(state, type_name) >= 0 || find_object_type(state, type_name) >= 0 || find_record_type(state, type_name) >= 0 || find_enum_type(state, type_name) >= 0
+		# A typed projection witnesses an already checked value without calling
+		# a closed raw constructor or executing a user factory again.
+		name := repl_witness_type_name(state, type_name)
+		return "(fn(): " + name + "\n_witness: Array<" + name + "> := []\nreturn _witness[0]\nend)()"
+	end
+	return ""
+end

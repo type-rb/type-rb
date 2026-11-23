@@ -1,0 +1,24 @@
+import { NewtypeDefinition } from frontend/types/newtype_model
+import { namespace_qualify } from frontend/types/namespace_model
+import { enum_uppercase } from frontend/types/enum_types
+import { advance, expect, expect_identifier, parse_type } from frontend/syntax/syntax_tokens
+import { CompilerState, diagnostic } from state/state
+import { load_integer } from support/storage
+
+# Declaration identity is established before resolving representation edges.
+def parse_newtype_header(mut state: CompilerState, mut position: Array<Integer>): Integer
+	line := load_integer(state.source_tokens.token_lines, position[0])
+	advance(position)
+	name := expect_identifier(state, position)
+	if !enum_uppercase(name)
+		diagnostic(state, "TRBN4002", line, "newtype name must start with an uppercase letter")
+		return -1
+	end
+	if !expect(state, position, "=")
+		return -1
+	end
+	target := parse_type(state, position)
+	owner := state.nominal.newtypes.size()
+	state.nominal.newtypes.push(NewtypeDefinition.new(name: namespace_qualify(state.global_bindings.declaration_owner[0], name), source_id: state.module_graph.active_module[0], line: line, target: target, representation: "", closed: false))
+	return owner
+end

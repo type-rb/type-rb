@@ -1,0 +1,806 @@
+{
+  "workflow": "https://github.com/type-rb/type-rb-native/actions/runs/34423530952",
+  "sourceRevision": "b230d34c1a415eab9f8eaa98c7ed418b57b5bafa",
+  "artifact": {
+    "id": 10132356654,
+    "name": "static-string-compactness-darwin-arm64",
+    "size_in_bytes": 11882,
+    "digest": "sha256:2bd32fa5b6c4a1b4259627c66ebff44e5ed1d8102ff019b338d7c631c9d69e55"
+  },
+  "evidence": {
+    "application-evidence/executable-segments.txt": "/Users/runner/work/_temp/applications/candidate/long/program:\nLoad command 0\n      cmd LC_SEGMENT_64\n  cmdsize 72\n  segname __PAGEZERO\n   vmaddr 0x0000000000000000\n   vmsize 0x0000000100000000\n  fileoff 0\n filesize 0\n  maxprot 0x00000000\n initprot 0x00000000\n   nsects 0\n    flags 0x0\nLoad command 1\n      cmd LC_SEGMENT_64\n  cmdsize 312\n  segname __TEXT\n   vmaddr 0x0000000100000000\n   vmsize 0x0000000000004000\n  fileoff 0\n filesize 16384\n  maxprot 0x00000005\n initprot 0x00000005\n   nsects 3\n    flags 0x0\nSection\n  sectname __text\n   segname __TEXT\n      addr 0x00000001000004f8\n      size 0x0000000000001e70\n    offset 1272\n     align 2^2 (4)\n    reloff 0\n    nreloc 0\n     flags 0x80000400\n reserved1 0\n reserved2 0\nSection\n  sectname __stubs\n   segname __TEXT\n      addr 0x0000000100002368\n      size 0x0000000000000108\n    offset 9064\n     align 2^2 (4)\n    reloff 0\n    nreloc 0\n     flags 0x80000408\n reserved1 0 (index into indirect symbol table)\n reserved2 12 (size of stubs)\nSection\n  sectname __const\n   segname __TEXT\n      addr 0x0000000100002470\n      size 0x0000000000000010\n    offset 9328\n     align 2^3 (8)\n    reloff 0\n    nreloc 0\n     flags 0x00000000\n reserved1 0\n reserved2 0\nLoad command 2\n      cmd LC_SEGMENT_64\n  cmdsize 152\n  segname __DATA_CONST\n   vmaddr 0x0000000100004000\n   vmsize 0x0000000000004000\n  fileoff 16384\n filesize 16384\n  maxprot 0x00000003\n initprot 0x00000003\n   nsects 1\n    flags 0x10\nSection\n  sectname __got\n   segname __DATA_CONST\n      addr 0x0000000100004000\n      size 0x00000000000000b0\n    offset 16384\n     align 2^3 (8)\n    reloff 0\n    nreloc 0\n     flags 0x00000006\n reserved1 22 (index into indirect symbol table)\n reserved2 0\nLoad command 3\n      cmd LC_SEGMENT_64\n  cmdsize 232\n  segname __DATA\n   vmaddr 0x0000000100008000\n   vmsize 0x0000000000008000\n  fileoff 32768\n filesize 16384\n  maxprot 0x00000003\n initprot 0x00000003\n   nsects 2\n    flags 0x0\nSection\n  sectname __data\n   segname __DATA\n      addr 0x0000000100008000\n      size 0x000000000000087c\n    offset 32768\n     align 2^3 (8)\n    reloff 0\n    nreloc 0\n     flags 0x00000000\n reserved1 0\n reserved2 0\nSection\n  sectname __bss\n   segname __DATA\n      addr 0x0000000100008880\n      size 0x0000000000004878\n    offset 0\n     align 2^3 (8)\n    reloff 0\n    nreloc 0\n     flags 0x00000001\n reserved1 0\n reserved2 0\nLoad command 4\n      cmd LC_SEGMENT_64\n  cmdsize 72\n  segname __LINKEDIT\n   vmaddr 0x0000000100010000\n   vmsize 0x0000000000004000\n  fileoff 49152\n filesize 1800\n  maxprot 0x00000001\n initprot 0x00000001\n   nsects 0\n    flags 0x0\nLoad command 5\n      cmd LC_DYLD_CHAINED_FIXUPS\n  cmdsize 16\n  dataoff 49152\n datasize 360\nLoad command 6\n      cmd LC_DYLD_EXPORTS_TRIE\n  cmdsize 16\n  dataoff 49512\n datasize 48\nLoad command 7\n     cmd LC_SYMTAB\n cmdsize 24\n  symoff 49648\n   nsyms 24\n  stroff 50208\n strsize 200\nLoad command 8\n            cmd LC_DYSYMTAB\n        cmdsize 80\n      ilocalsym 0\n      nlocalsym 0\n     iextdefsym 0\n     nextdefsym 2\n      iundefsym 2\n      nundefsym 22\n         tocoff 0\n           ntoc 0\n      modtaboff 0\n        nmodtab 0\n   extrefsymoff 0\n    nextrefsyms 0\n indirectsymoff 50032\n  nindirectsyms 44\n      extreloff 0\n        nextrel 0\n      locreloff 0\n        nlocrel 0\nLoad command 9\n          cmd LC_LOAD_DYLINKER\n      cmdsize 32\n         name /usr/lib/dyld (offset 12)\nLoad command 10\n     cmd LC_UUID\n cmdsize 24\n    uuid 07582D04-02EF-38AF-9E19-633D467B1FF7\nLoad command 11\n      cmd LC_BUILD_VERSION\n  cmdsize 32\n platform 1\n    minos 15.0\n      sdk 15.5\n   ntools 1\n     tool 3\n  version 1167.5\nLoad command 12\n      cmd LC_SOURCE_VERSION\n  cmdsize 16\n  version 0.0\nLoad command 13\n       cmd LC_MAIN\n   cmdsize 24\n  entryoff 8000\n stacksize 0\nLoad command 14\n          cmd LC_LOAD_DYLIB\n      cmdsize 56\n         name /usr/lib/libSystem.B.dylib (offset 24)\n   time stamp 2 Thu Jan  1 00:00:02 1970\n      current version 1351.0.0\ncompatibility version 1.0.0\nLoad command 15\n      cmd LC_FUNCTION_STARTS\n  cmdsize 16\n  dataoff 49560\n datasize 88\nLoad command 16\n      cmd LC_DATA_IN_CODE\n  cmdsize 16\n  dataoff 49648\n datasize 0\nLoad command 17\n      cmd LC_CODE_SIGNATURE\n  cmdsize 16\n  dataoff 50416\n datasize 536\n",
+    "application-evidence/sizes.tsv": [
+      {
+        "case": "no-long",
+        "artifact": "qbe",
+        "baseline_bytes": "32182",
+        "candidate_bytes": "32182",
+        "added_bytes": "0",
+        "maximum_added_bytes": "4096",
+        "status": "pass"
+      },
+      {
+        "case": "no-long",
+        "artifact": "executable",
+        "baseline_bytes": "50936",
+        "candidate_bytes": "50936",
+        "added_bytes": "0",
+        "maximum_added_bytes": "1024",
+        "status": "pass"
+      },
+      {
+        "case": "long",
+        "artifact": "qbe",
+        "baseline_bytes": "40362",
+        "candidate_bytes": "40362",
+        "added_bytes": "0",
+        "maximum_added_bytes": "4096",
+        "status": "pass"
+      },
+      {
+        "case": "long",
+        "artifact": "executable",
+        "baseline_bytes": "50952",
+        "candidate_bytes": "50952",
+        "added_bytes": "0",
+        "maximum_added_bytes": "1024",
+        "status": "pass"
+      }
+    ],
+    "baseline-bootstrap-evidence/environment.txt": "mode=previous\nprofile=darwin-arm64-v0\nrunner_image=macos-15\ncompiler_size_limit=366000\nrepository_revision=4be54adfdf01dae89675982fa64da333526d0af4\ntype_rb_revision=6cbd4025545d44a1de211335f9197772077bb478\nDarwin sjc20-bb661-3c26c944-98a5-4844-af20-4d0376e79331-BED8909045A8.local 24.6.0 Darwin Kernel Version 24.6.0: Tue Jul 21 20:51:34 PDT 2026; root:xnu-11417.140.69.711.44~1/RELEASE_ARM64_VMAPPLE arm64\nApple clang version 17.0.0 (clang-1700.0.13.5)\nTarget: arm64-apple-darwin24.6.0\nThread model: posix\nInstalledDir: /Applications/Xcode_16.4.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin\n/Users/runner/work/_temp/qbe-1.3/qbe [OPTIONS] {file.ssa, -}\n\t-h          prints this help\n\t-o file     output to file\n\t-t <target> generate for a target among:\n\t            amd64_sysv, amd64_apple, amd64_win, arm64, arm64_apple (default), rv64\n\t-d <flags>  dump debug information\n",
+    "baseline-bootstrap-evidence/executable-dependencies.txt": "/Users/runner/work/_temp/baseline-bootstrap-workspace/b4/compiler:\n\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1351.0.0)\n",
+    "baseline-bootstrap-evidence/executable-header.txt": "/Users/runner/work/_temp/baseline-bootstrap-workspace/b4/compiler: Mach-O 64-bit executable arm64\n",
+    "baseline-bootstrap-evidence/identities.txt": "input_kind=setup-only-native-transition\ninput_role=transition\ninput_size=365800\ninput_sha256=06d082248d27e518c1cd668af8823a9bebd10912102481e4506f58b0801cab2b\nb1_size=365800\nb1_sha256=06d082248d27e518c1cd668af8823a9bebd10912102481e4506f58b0801cab2b\nb2_size=365800\nb2_sha256=06d082248d27e518c1cd668af8823a9bebd10912102481e4506f58b0801cab2b\nb3_size=365800\nb3_sha256=06d082248d27e518c1cd668af8823a9bebd10912102481e4506f58b0801cab2b\nb4_size=365800\nb4_sha256=06d082248d27e518c1cd668af8823a9bebd10912102481e4506f58b0801cab2b\nfixed_point_qbe_size=1183966\nfixed_point_qbe_sha256=f811279e9ef4682618bbd53219ced46e51ee698a2d80562f11196fbe2f5d4b8f\ncompiler_size_limit=366000\n",
+    "baseline-bootstrap-evidence/measurement-policy.txt": "policy=bootstrap-seed-legacy\ncompiler_size_limit=366000\n",
+    "baseline-bootstrap-evidence/measurements.csv": [
+      {
+        "stage": "b2-b3",
+        "iteration": "1",
+        "elapsed_seconds": "2.22",
+        "peak_rss_bytes": "41369600",
+        "status": "0",
+        "cpu_seconds": "2.23"
+      },
+      {
+        "stage": "b3-b4",
+        "iteration": "1",
+        "elapsed_seconds": "2.15",
+        "peak_rss_bytes": "41402368",
+        "status": "0",
+        "cpu_seconds": "2.16"
+      },
+      {
+        "stage": "b2-b3",
+        "iteration": "2",
+        "elapsed_seconds": "1.91",
+        "peak_rss_bytes": "41369600",
+        "status": "0",
+        "cpu_seconds": "1.92"
+      },
+      {
+        "stage": "b3-b4",
+        "iteration": "2",
+        "elapsed_seconds": "1.94",
+        "peak_rss_bytes": "41402368",
+        "status": "0",
+        "cpu_seconds": "1.95"
+      },
+      {
+        "stage": "b2-b3",
+        "iteration": "3",
+        "elapsed_seconds": "2.05",
+        "peak_rss_bytes": "41369600",
+        "status": "0",
+        "cpu_seconds": "2.03"
+      },
+      {
+        "stage": "b3-b4",
+        "iteration": "3",
+        "elapsed_seconds": "1.88",
+        "peak_rss_bytes": "41254912",
+        "status": "0",
+        "cpu_seconds": "1.88"
+      },
+      {
+        "stage": "b2-b3",
+        "iteration": "4",
+        "elapsed_seconds": "1.87",
+        "peak_rss_bytes": "40910848",
+        "status": "0",
+        "cpu_seconds": "1.88"
+      },
+      {
+        "stage": "b3-b4",
+        "iteration": "4",
+        "elapsed_seconds": "2.00",
+        "peak_rss_bytes": "41091072",
+        "status": "0",
+        "cpu_seconds": "2.01"
+      },
+      {
+        "stage": "b2-b3",
+        "iteration": "5",
+        "elapsed_seconds": "2.07",
+        "peak_rss_bytes": "41353216",
+        "status": "0",
+        "cpu_seconds": "2.07"
+      },
+      {
+        "stage": "b3-b4",
+        "iteration": "5",
+        "elapsed_seconds": "1.98",
+        "peak_rss_bytes": "41238528",
+        "status": "0",
+        "cpu_seconds": "1.99"
+      },
+      {
+        "stage": "b2-b3",
+        "iteration": "6",
+        "elapsed_seconds": "2.09",
+        "peak_rss_bytes": "40976384",
+        "status": "0",
+        "cpu_seconds": "2.10"
+      },
+      {
+        "stage": "b3-b4",
+        "iteration": "6",
+        "elapsed_seconds": "2.09",
+        "peak_rss_bytes": "41287680",
+        "status": "0",
+        "cpu_seconds": "2.10"
+      },
+      {
+        "stage": "b2-b3",
+        "iteration": "7",
+        "elapsed_seconds": "2.65",
+        "peak_rss_bytes": "41336832",
+        "status": "0",
+        "cpu_seconds": "2.56"
+      },
+      {
+        "stage": "b3-b4",
+        "iteration": "7",
+        "elapsed_seconds": "2.29",
+        "peak_rss_bytes": "41467904",
+        "status": "0",
+        "cpu_seconds": "2.28"
+      }
+    ],
+    "baseline-bootstrap-evidence/medians.txt": "b1-b2 excluded=setup-only-transition\nb2-b3 elapsed_seconds=2.07 peak_rss_bytes=41353216 cpu_seconds=2.07\nb3-b4 elapsed_seconds=2.00 peak_rss_bytes=41287680 cpu_seconds=2.01\n",
+    "baseline-bootstrap-evidence/process-inventory.txt": "observer: /bin/sh tools/bootstrap-seed.sh\nordinary compiler stages: B1, B2, B3\nNative compiler child boundary: /Users/runner/work/_temp/qbe-1.3/qbe\nNative compiler child boundary: /usr/bin/cc\nsystem assembler/linker: selected by /usr/bin/cc\nforbidden ordinary stages: Go, reference trb, recovery compiler, shell child\n",
+    "baseline-bootstrap-metadata.json": {
+      "architecture": "arm64",
+      "asset": "static-string-compactness-baseline",
+      "attestationSubjectSha256": "06d082248d27e518c1cd668af8823a9bebd10912102481e4506f58b0801cab2b",
+      "ccBoundary": "system-cc",
+      "mode": "0755",
+      "os": "darwin",
+      "profile": "darwin-arm64-v0",
+      "qbeBinarySha256": "78c1b04750482800c93d695391003cdb4f93f225c8f4106a742bae17da5cd61a",
+      "qbeBinarySize": 404192,
+      "qbeTarget": "arm64_apple",
+      "runnerImage": "macos-15",
+      "sha256": "06d082248d27e518c1cd668af8823a9bebd10912102481e4506f58b0801cab2b",
+      "size": 365800
+    },
+    "candidate-bootstrap-evidence/environment.txt": "mode=previous\nprofile=darwin-arm64-v0\nrunner_image=macos-15\ncompiler_size_limit=366000\nrepository_revision=db0310c8f381ecf3957afc76d31be2ce167cd065\ntype_rb_revision=6cbd4025545d44a1de211335f9197772077bb478\nDarwin sjc20-bb661-3c26c944-98a5-4844-af20-4d0376e79331-BED8909045A8.local 24.6.0 Darwin Kernel Version 24.6.0: Tue Jul 21 20:51:34 PDT 2026; root:xnu-11417.140.69.711.44~1/RELEASE_ARM64_VMAPPLE arm64\nApple clang version 17.0.0 (clang-1700.0.13.5)\nTarget: arm64-apple-darwin24.6.0\nThread model: posix\nInstalledDir: /Applications/Xcode_16.4.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin\n/Users/runner/work/_temp/qbe-1.3/qbe [OPTIONS] {file.ssa, -}\n\t-h          prints this help\n\t-o file     output to file\n\t-t <target> generate for a target among:\n\t            amd64_sysv, amd64_apple, amd64_win, arm64, arm64_apple (default), rv64\n\t-d <flags>  dump debug information\n",
+    "candidate-bootstrap-evidence/executable-dependencies.txt": "/Users/runner/work/_temp/candidate-bootstrap-workspace/b4/compiler:\n\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1351.0.0)\n",
+    "candidate-bootstrap-evidence/executable-header.txt": "/Users/runner/work/_temp/candidate-bootstrap-workspace/b4/compiler: Mach-O 64-bit executable arm64\n",
+    "candidate-bootstrap-evidence/identities.txt": "input_kind=setup-only-native-transition\ninput_role=transition\ninput_size=365816\ninput_sha256=1ffe460be69ab71b05621bb712a231a13f3d3614e772c0e2fcc076affe07477b\nb1_size=365816\nb1_sha256=1ffe460be69ab71b05621bb712a231a13f3d3614e772c0e2fcc076affe07477b\nb2_size=365816\nb2_sha256=1ffe460be69ab71b05621bb712a231a13f3d3614e772c0e2fcc076affe07477b\nb3_size=365816\nb3_sha256=1ffe460be69ab71b05621bb712a231a13f3d3614e772c0e2fcc076affe07477b\nb4_size=365816\nb4_sha256=1ffe460be69ab71b05621bb712a231a13f3d3614e772c0e2fcc076affe07477b\nfixed_point_qbe_size=1195739\nfixed_point_qbe_sha256=ab9c8729308823f7c12e26c3616587032569e19e8eddc2e710b59cd1cf35de7a\ncompiler_size_limit=366000\n",
+    "candidate-bootstrap-evidence/measurement-policy.txt": "policy=bootstrap-seed-legacy\ncompiler_size_limit=366000\n",
+    "candidate-bootstrap-evidence/measurements.csv": [
+      {
+        "stage": "b2-b3",
+        "iteration": "1",
+        "elapsed_seconds": "2.00",
+        "peak_rss_bytes": "41156608",
+        "status": "0",
+        "cpu_seconds": "2.00"
+      },
+      {
+        "stage": "b3-b4",
+        "iteration": "1",
+        "elapsed_seconds": "1.88",
+        "peak_rss_bytes": "41353216",
+        "status": "0",
+        "cpu_seconds": "1.89"
+      },
+      {
+        "stage": "b2-b3",
+        "iteration": "2",
+        "elapsed_seconds": "1.89",
+        "peak_rss_bytes": "41238528",
+        "status": "0",
+        "cpu_seconds": "1.90"
+      },
+      {
+        "stage": "b3-b4",
+        "iteration": "2",
+        "elapsed_seconds": "1.95",
+        "peak_rss_bytes": "41385984",
+        "status": "0",
+        "cpu_seconds": "1.95"
+      },
+      {
+        "stage": "b2-b3",
+        "iteration": "3",
+        "elapsed_seconds": "1.90",
+        "peak_rss_bytes": "41336832",
+        "status": "0",
+        "cpu_seconds": "1.90"
+      },
+      {
+        "stage": "b3-b4",
+        "iteration": "3",
+        "elapsed_seconds": "1.93",
+        "peak_rss_bytes": "41189376",
+        "status": "0",
+        "cpu_seconds": "1.94"
+      },
+      {
+        "stage": "b2-b3",
+        "iteration": "4",
+        "elapsed_seconds": "1.95",
+        "peak_rss_bytes": "41451520",
+        "status": "0",
+        "cpu_seconds": "1.96"
+      },
+      {
+        "stage": "b3-b4",
+        "iteration": "4",
+        "elapsed_seconds": "2.10",
+        "peak_rss_bytes": "41074688",
+        "status": "0",
+        "cpu_seconds": "2.09"
+      },
+      {
+        "stage": "b2-b3",
+        "iteration": "5",
+        "elapsed_seconds": "2.27",
+        "peak_rss_bytes": "41058304",
+        "status": "0",
+        "cpu_seconds": "2.21"
+      },
+      {
+        "stage": "b3-b4",
+        "iteration": "5",
+        "elapsed_seconds": "2.09",
+        "peak_rss_bytes": "41238528",
+        "status": "0",
+        "cpu_seconds": "2.10"
+      },
+      {
+        "stage": "b2-b3",
+        "iteration": "6",
+        "elapsed_seconds": "2.21",
+        "peak_rss_bytes": "41205760",
+        "status": "0",
+        "cpu_seconds": "2.20"
+      },
+      {
+        "stage": "b3-b4",
+        "iteration": "6",
+        "elapsed_seconds": "1.98",
+        "peak_rss_bytes": "41304064",
+        "status": "0",
+        "cpu_seconds": "1.97"
+      },
+      {
+        "stage": "b2-b3",
+        "iteration": "7",
+        "elapsed_seconds": "2.06",
+        "peak_rss_bytes": "41254912",
+        "status": "0",
+        "cpu_seconds": "2.01"
+      },
+      {
+        "stage": "b3-b4",
+        "iteration": "7",
+        "elapsed_seconds": "2.06",
+        "peak_rss_bytes": "41451520",
+        "status": "0",
+        "cpu_seconds": "2.06"
+      }
+    ],
+    "candidate-bootstrap-evidence/medians.txt": "b1-b2 excluded=setup-only-transition\nb2-b3 elapsed_seconds=2.00 peak_rss_bytes=41238528 cpu_seconds=2.00\nb3-b4 elapsed_seconds=1.98 peak_rss_bytes=41304064 cpu_seconds=1.97\n",
+    "candidate-bootstrap-evidence/process-inventory.txt": "observer: /bin/sh tools/bootstrap-seed.sh\nordinary compiler stages: B1, B2, B3\nNative compiler child boundary: /Users/runner/work/_temp/qbe-1.3/qbe\nNative compiler child boundary: /usr/bin/cc\nsystem assembler/linker: selected by /usr/bin/cc\nforbidden ordinary stages: Go, reference trb, recovery compiler, shell child\n",
+    "candidate-bootstrap-metadata.json": {
+      "architecture": "arm64",
+      "asset": "static-string-compactness-candidate",
+      "attestationSubjectSha256": "1ffe460be69ab71b05621bb712a231a13f3d3614e772c0e2fcc076affe07477b",
+      "ccBoundary": "system-cc",
+      "mode": "0755",
+      "os": "darwin",
+      "profile": "darwin-arm64-v0",
+      "qbeBinarySha256": "78c1b04750482800c93d695391003cdb4f93f225c8f4106a742bae17da5cd61a",
+      "qbeBinarySize": 404192,
+      "qbeTarget": "arm64_apple",
+      "runnerImage": "macos-15",
+      "sha256": "1ffe460be69ab71b05621bb712a231a13f3d3614e772c0e2fcc076affe07477b",
+      "size": 365816
+    },
+    "comparison-evidence/catastrophic.tsv": [
+      {
+        "metric": "build_elapsed",
+        "stage": "b2-b3",
+        "role": "baseline",
+        "baseline_median": "1.90",
+        "maximum_observation": "2.03",
+        "ratio": "1.068421",
+        "maximum": "2.0",
+        "status": "pass"
+      },
+      {
+        "metric": "build_peak_rss",
+        "stage": "b2-b3",
+        "role": "baseline",
+        "baseline_median": "41353216",
+        "maximum_observation": "41418752",
+        "ratio": "1.001585",
+        "maximum": "2.0",
+        "status": "pass"
+      },
+      {
+        "metric": "build_elapsed",
+        "stage": "b2-b3",
+        "role": "candidate",
+        "baseline_median": "1.90",
+        "maximum_observation": "2.04",
+        "ratio": "1.073684",
+        "maximum": "2.0",
+        "status": "pass"
+      },
+      {
+        "metric": "build_peak_rss",
+        "stage": "b2-b3",
+        "role": "candidate",
+        "baseline_median": "41353216",
+        "maximum_observation": "41451520",
+        "ratio": "1.002377",
+        "maximum": "2.0",
+        "status": "pass"
+      },
+      {
+        "metric": "build_elapsed",
+        "stage": "b3-b4",
+        "role": "baseline",
+        "baseline_median": "1.89",
+        "maximum_observation": "2.02",
+        "ratio": "1.068783",
+        "maximum": "2.0",
+        "status": "pass"
+      },
+      {
+        "metric": "build_peak_rss",
+        "stage": "b3-b4",
+        "role": "baseline",
+        "baseline_median": "41304064",
+        "maximum_observation": "41369600",
+        "ratio": "1.001587",
+        "maximum": "2.0",
+        "status": "pass"
+      },
+      {
+        "metric": "build_elapsed",
+        "stage": "b3-b4",
+        "role": "candidate",
+        "baseline_median": "1.89",
+        "maximum_observation": "1.98",
+        "ratio": "1.047619",
+        "maximum": "2.0",
+        "status": "pass"
+      },
+      {
+        "metric": "build_peak_rss",
+        "stage": "b3-b4",
+        "role": "candidate",
+        "baseline_median": "41304064",
+        "maximum_observation": "41435136",
+        "ratio": "1.003173",
+        "maximum": "2.0",
+        "status": "pass"
+      }
+    ],
+    "comparison-evidence/code-sections.tsv": [
+      {
+        "target": "darwin-arm64",
+        "baseline_text_bytes": "263348",
+        "candidate_text_bytes": "265248",
+        "status": "observed"
+      }
+    ],
+    "comparison-evidence/comparison.tsv": [
+      {
+        "metric": "compiler_bytes",
+        "stage": "fixed-point",
+        "baseline": "365800",
+        "candidate": "365816",
+        "candidate_baseline_ratio": "1.000044",
+        "maximum": "1.05",
+        "status": "pass"
+      },
+      {
+        "metric": "build_elapsed",
+        "stage": "fixed-point-build",
+        "baseline": "1.895000",
+        "candidate": "1.930000",
+        "candidate_baseline_ratio": "1.018470",
+        "maximum": "1.05",
+        "status": "pass"
+      },
+      {
+        "metric": "build_peak_rss",
+        "stage": "fixed-point-build",
+        "baseline": "41320448.000000",
+        "candidate": "41353216.000000",
+        "candidate_baseline_ratio": "1.000793",
+        "maximum": "1.05",
+        "status": "pass"
+      }
+    ],
+    "comparison-evidence/identities.txt": "target=darwin-arm64\nbaseline_compiler_bytes=365800\ncandidate_compiler_bytes=365816\ncandidate_compiler_limit=366000\nbaseline_text_bytes=263348\ncandidate_text_bytes=265248\nnative_mir_policy_mode=ordinary\ninduction_phi_recovery=0\narray_reduction_transition=0\narray_loop_recovery=0\nfloat_array_reduction=0\nguarded_multiply=0\nguarded_add=0\nstable_array_header=0\ncompiler_ratio_limit=1.05\nbuild_ratio_limit=1.05\nbaseline_fixed_point_qbe_size=1183966\nfixed_point_qbe_size=1195739\nfixed_point_qbe_sha256=ab9c8729308823f7c12e26c3616587032569e19e8eddc2e710b59cd1cf35de7a\n",
+    "comparison-evidence/interleaved-measurements.csv": [
+      {
+        "phase": "warmup",
+        "round": "1",
+        "order": "1",
+        "role": "baseline",
+        "stage": "b2-b3",
+        "elapsed_seconds": "2.03",
+        "peak_rss_bytes": "41353216",
+        "status": "0"
+      },
+      {
+        "phase": "warmup",
+        "round": "1",
+        "order": "2",
+        "role": "candidate",
+        "stage": "b2-b3",
+        "elapsed_seconds": "1.85",
+        "peak_rss_bytes": "41369600",
+        "status": "0"
+      },
+      {
+        "phase": "warmup",
+        "round": "1",
+        "order": "1",
+        "role": "baseline",
+        "stage": "b3-b4",
+        "elapsed_seconds": "1.83",
+        "peak_rss_bytes": "41336832",
+        "status": "0"
+      },
+      {
+        "phase": "warmup",
+        "round": "1",
+        "order": "2",
+        "role": "candidate",
+        "stage": "b3-b4",
+        "elapsed_seconds": "1.89",
+        "peak_rss_bytes": "41189376",
+        "status": "0"
+      },
+      {
+        "phase": "warmup",
+        "round": "2",
+        "order": "1",
+        "role": "candidate",
+        "stage": "b2-b3",
+        "elapsed_seconds": "1.86",
+        "peak_rss_bytes": "41320448",
+        "status": "0"
+      },
+      {
+        "phase": "warmup",
+        "round": "2",
+        "order": "2",
+        "role": "baseline",
+        "stage": "b2-b3",
+        "elapsed_seconds": "1.87",
+        "peak_rss_bytes": "41320448",
+        "status": "0"
+      },
+      {
+        "phase": "warmup",
+        "round": "2",
+        "order": "1",
+        "role": "candidate",
+        "stage": "b3-b4",
+        "elapsed_seconds": "1.84",
+        "peak_rss_bytes": "41254912",
+        "status": "0"
+      },
+      {
+        "phase": "warmup",
+        "round": "2",
+        "order": "2",
+        "role": "baseline",
+        "stage": "b3-b4",
+        "elapsed_seconds": "1.85",
+        "peak_rss_bytes": "41254912",
+        "status": "0"
+      },
+      {
+        "phase": "retained",
+        "round": "1",
+        "order": "1",
+        "role": "baseline",
+        "stage": "b2-b3",
+        "elapsed_seconds": "2.03",
+        "peak_rss_bytes": "41271296",
+        "status": "0"
+      },
+      {
+        "phase": "retained",
+        "round": "1",
+        "order": "2",
+        "role": "candidate",
+        "stage": "b2-b3",
+        "elapsed_seconds": "1.92",
+        "peak_rss_bytes": "41222144",
+        "status": "0"
+      },
+      {
+        "phase": "retained",
+        "round": "1",
+        "order": "1",
+        "role": "baseline",
+        "stage": "b3-b4",
+        "elapsed_seconds": "1.86",
+        "peak_rss_bytes": "41287680",
+        "status": "0"
+      },
+      {
+        "phase": "retained",
+        "round": "1",
+        "order": "2",
+        "role": "candidate",
+        "stage": "b3-b4",
+        "elapsed_seconds": "1.85",
+        "peak_rss_bytes": "41402368",
+        "status": "0"
+      },
+      {
+        "phase": "retained",
+        "round": "2",
+        "order": "1",
+        "role": "candidate",
+        "stage": "b2-b3",
+        "elapsed_seconds": "1.85",
+        "peak_rss_bytes": "41418752",
+        "status": "0"
+      },
+      {
+        "phase": "retained",
+        "round": "2",
+        "order": "2",
+        "role": "baseline",
+        "stage": "b2-b3",
+        "elapsed_seconds": "1.84",
+        "peak_rss_bytes": "41336832",
+        "status": "0"
+      },
+      {
+        "phase": "retained",
+        "round": "2",
+        "order": "1",
+        "role": "candidate",
+        "stage": "b3-b4",
+        "elapsed_seconds": "1.98",
+        "peak_rss_bytes": "41353216",
+        "status": "0"
+      },
+      {
+        "phase": "retained",
+        "round": "2",
+        "order": "2",
+        "role": "baseline",
+        "stage": "b3-b4",
+        "elapsed_seconds": "1.85",
+        "peak_rss_bytes": "41369600",
+        "status": "0"
+      },
+      {
+        "phase": "retained",
+        "round": "3",
+        "order": "1",
+        "role": "baseline",
+        "stage": "b2-b3",
+        "elapsed_seconds": "1.90",
+        "peak_rss_bytes": "41189376",
+        "status": "0"
+      },
+      {
+        "phase": "retained",
+        "round": "3",
+        "order": "2",
+        "role": "candidate",
+        "stage": "b2-b3",
+        "elapsed_seconds": "2.02",
+        "peak_rss_bytes": "41402368",
+        "status": "0"
+      },
+      {
+        "phase": "retained",
+        "round": "3",
+        "order": "1",
+        "role": "baseline",
+        "stage": "b3-b4",
+        "elapsed_seconds": "2.02",
+        "peak_rss_bytes": "41254912",
+        "status": "0"
+      },
+      {
+        "phase": "retained",
+        "round": "3",
+        "order": "2",
+        "role": "candidate",
+        "stage": "b3-b4",
+        "elapsed_seconds": "1.93",
+        "peak_rss_bytes": "41435136",
+        "status": "0"
+      },
+      {
+        "phase": "retained",
+        "round": "4",
+        "order": "1",
+        "role": "candidate",
+        "stage": "b2-b3",
+        "elapsed_seconds": "2.04",
+        "peak_rss_bytes": "40976384",
+        "status": "0"
+      },
+      {
+        "phase": "retained",
+        "round": "4",
+        "order": "2",
+        "role": "baseline",
+        "stage": "b2-b3",
+        "elapsed_seconds": "2.01",
+        "peak_rss_bytes": "41418752",
+        "status": "0"
+      },
+      {
+        "phase": "retained",
+        "round": "4",
+        "order": "1",
+        "role": "candidate",
+        "stage": "b3-b4",
+        "elapsed_seconds": "1.94",
+        "peak_rss_bytes": "41058304",
+        "status": "0"
+      },
+      {
+        "phase": "retained",
+        "round": "4",
+        "order": "2",
+        "role": "baseline",
+        "stage": "b3-b4",
+        "elapsed_seconds": "1.89",
+        "peak_rss_bytes": "41304064",
+        "status": "0"
+      },
+      {
+        "phase": "retained",
+        "round": "5",
+        "order": "1",
+        "role": "baseline",
+        "stage": "b2-b3",
+        "elapsed_seconds": "1.94",
+        "peak_rss_bytes": "41402368",
+        "status": "0"
+      },
+      {
+        "phase": "retained",
+        "round": "5",
+        "order": "2",
+        "role": "candidate",
+        "stage": "b2-b3",
+        "elapsed_seconds": "1.99",
+        "peak_rss_bytes": "41451520",
+        "status": "0"
+      },
+      {
+        "phase": "retained",
+        "round": "5",
+        "order": "1",
+        "role": "baseline",
+        "stage": "b3-b4",
+        "elapsed_seconds": "1.90",
+        "peak_rss_bytes": "41304064",
+        "status": "0"
+      },
+      {
+        "phase": "retained",
+        "round": "5",
+        "order": "2",
+        "role": "candidate",
+        "stage": "b3-b4",
+        "elapsed_seconds": "1.93",
+        "peak_rss_bytes": "41156608",
+        "status": "0"
+      },
+      {
+        "phase": "retained",
+        "round": "6",
+        "order": "1",
+        "role": "candidate",
+        "stage": "b2-b3",
+        "elapsed_seconds": "1.85",
+        "peak_rss_bytes": "41287680",
+        "status": "0"
+      },
+      {
+        "phase": "retained",
+        "round": "6",
+        "order": "2",
+        "role": "baseline",
+        "stage": "b2-b3",
+        "elapsed_seconds": "1.84",
+        "peak_rss_bytes": "41353216",
+        "status": "0"
+      },
+      {
+        "phase": "retained",
+        "round": "6",
+        "order": "1",
+        "role": "candidate",
+        "stage": "b3-b4",
+        "elapsed_seconds": "1.91",
+        "peak_rss_bytes": "41353216",
+        "status": "0"
+      },
+      {
+        "phase": "retained",
+        "round": "6",
+        "order": "2",
+        "role": "baseline",
+        "stage": "b3-b4",
+        "elapsed_seconds": "1.86",
+        "peak_rss_bytes": "41320448",
+        "status": "0"
+      },
+      {
+        "phase": "retained",
+        "round": "7",
+        "order": "1",
+        "role": "baseline",
+        "stage": "b2-b3",
+        "elapsed_seconds": "1.84",
+        "peak_rss_bytes": "41369600",
+        "status": "0"
+      },
+      {
+        "phase": "retained",
+        "round": "7",
+        "order": "2",
+        "role": "candidate",
+        "stage": "b2-b3",
+        "elapsed_seconds": "2.00",
+        "peak_rss_bytes": "41435136",
+        "status": "0"
+      },
+      {
+        "phase": "retained",
+        "round": "7",
+        "order": "1",
+        "role": "baseline",
+        "stage": "b3-b4",
+        "elapsed_seconds": "1.99",
+        "peak_rss_bytes": "41320448",
+        "status": "0"
+      },
+      {
+        "phase": "retained",
+        "round": "7",
+        "order": "2",
+        "role": "candidate",
+        "stage": "b3-b4",
+        "elapsed_seconds": "1.88",
+        "peak_rss_bytes": "41058304",
+        "status": "0"
+      }
+    ],
+    "comparison-evidence/measurement-policy.txt": "decision_series=two-warmup-seven-retained-interleaved-a-b\nfirst_position=alternates-each-round\nbootstrap_series=closure-evidence-only\nfixed_point_adjacencies=pooled-b2-b3-and-b3-b4-byte-identical-builds\nnative_mir_policy_mode=ordinary\ninduction_phi_recovery=0\narray_reduction_transition=0\narray_loop_recovery=0\nfloat_array_reduction=0\nguarded_multiply=0\nguarded_add=0\nstable_array_header=0\ncompiler_ratio_limit=1.05\nbuild_ratio_limit=1.05\nrss_ratio_limit=1.05\ncatastrophic_ratio_limit=2.0\n"
+  }
+}

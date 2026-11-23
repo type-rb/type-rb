@@ -1,0 +1,225 @@
+import { mir_range_field_exclusive, mir_range_field_first, mir_range_field_last } from mir/model/operation_modes
+import { checked_category_value } from frontend/types/value_categories
+import { mir_control_loop_depth_slot } from state/local_slots
+import { transform_all, transform_any, transform_find_index, transform_none, transform_reduce, transform_select } from frontend/types/transform_kinds
+import { iteration_source_array, iteration_source_hash, iteration_source_range } from frontend/types/iteration_kinds
+import { mir_terminator_branch, mir_terminator_jump } from mir/model/control
+import { mir_op_array_load, mir_op_array_push, mir_op_array_size, mir_op_hash_method } from mir/model/instructions
+import { hash_value_type } from frontend/types/hash_types
+import { mir_checked_hash_operation } from mir/lowering/hashes
+import { CheckedValue, checked_mir_value, checked_value, mir_checked_value, scalar_mir_binary, scalar_mir_disable, scalar_mir_literal } from frontend/checking/body/values
+import { MirIteration } from mir/model/iteration
+import { MirTransform } from frontend/types/transform_model
+import { mir_nullable_coerce } from mir/lowering/nullable
+import { MirControlLoop } from mir/model/module
+import { mir_checked_array_operation } from mir/lowering/arrays
+import { mir_control_active, mir_control_allocate, mir_control_branch, mir_control_conditional, mir_control_enter, mir_control_jump, mir_control_loop_begin, mir_control_loop_branch, mir_control_prepare } from mir/build/control
+import { mir_checked_range_field } from mir/lowering/ranges
+import { CompilerState } from state/state
+import { CheckedLocals } from state/local_state
+import { load_integer, store_integer } from support/storage
+
+def mir_iteration_local(locals: CheckedLocals, slot: Integer, type_name: String, origin: Integer): CheckedValue
+	return mir_checked_value(type_name, load_integer(locals.mir_values, slot) - 1, origin, 0)
+end
+
+# A search boxes only the matching result, then takes the ordinary loop exit.
+# The visited value and internal cursor are independent of user parameters.
+def mir_transform_search_yield(mut state: CompilerState, mut locals: CheckedLocals, plan: MirTransform, result_slot: Integer, element: CheckedValue, yielded: CheckedValue)
+	if !mir_control_active(locals)
+		return
+	end
+	origin := plan.syntax.iteration.origin
+	line := load_integer(state.source_tokens.token_lines, origin)
+	frame := locals.mir_loops[locals.mir_control[mir_control_loop_depth_slot()] - 1]
+	alternate := mir_control_branch(state, locals, yielded, line)
+	mut selected := checked_value(element.type_name, element.category, element.origin, element.mutable)
+	if plan.syntax.kind == transform_find_index()
+		selected = mir_iteration_local(locals, result_slot + 2, "Integer", origin)
+		if plan.iteration.source_kind == iteration_source_range()
+			owner := load_integer(locals.mir_values, result_slot + 1) - 1
+			start := mir_checked_range_field(state, locals, owner, mir_range_field_first(), origin)
+			selected = scalar_mir_binary(state, locals, "-", selected, start, "Integer", origin)
+		end
+	end
+	present := mir_nullable_coerce(state, locals, selected, plan.type_name, origin)
+	store_integer(locals.mir_values, result_slot, checked_mir_value(present) + 1)
+	mir_control_jump(state, locals, frame.exit, frame.exit_binding_count)
+	mir_control_enter(state, locals, alternate, line)
+end
+
+# Both Range comparisons and every exit are ordinary MIR control edges. The
+# dynamic exclusivity flag never requires computing end + 1 at portable MAX.
+def mir_iteration_range_test(mut state: CompilerState, mut locals: CheckedLocals, frame: MirControlLoop, body: Integer, saved: Integer)
+	line := load_integer(state.source_tokens.token_lines, frame.origin)
+	owner := load_integer(locals.mir_values, saved) - 1
+	exclusive := mir_checked_range_field(state, locals, owner, mir_range_field_exclusive(), frame.origin)
+	first := mir_control_allocate(locals)
+	second := mir_control_allocate(locals)
+	mir_control_conditional(state, locals, checked_mir_value(exclusive), first, frame.binding_count, second, frame.binding_count)
+	mir_control_enter(state, locals, first, line)
+	first_owner := load_integer(locals.mir_values, saved) - 1
+	first_end := mir_checked_range_field(state, locals, first_owner, mir_range_field_last(), frame.origin)
+	first_cursor := mir_iteration_local(locals, saved + 1, "Integer", frame.origin)
+	before := scalar_mir_binary(state, locals, "<", first_cursor, first_end, "Boolean", frame.origin)
+	mir_control_conditional(state, locals, checked_mir_value(before), body, frame.binding_count, frame.exit, frame.exit_binding_count)
+	mir_control_enter(state, locals, second, line)
+	second_owner := load_integer(locals.mir_values, saved) - 1
+	second_end := mir_checked_range_field(state, locals, second_owner, mir_range_field_last(), frame.origin)
+	second_cursor := mir_iteration_local(locals, saved + 1, "Integer", frame.origin)
+	through := scalar_mir_binary(state, locals, "<=", second_cursor, second_end, "Boolean", frame.origin)
+	mir_control_conditional(state, locals, checked_mir_value(through), body, frame.binding_count, frame.exit, frame.exit_binding_count)
+end
+
+def mir_checked_iteration_begin(mut state: CompilerState, mut locals: CheckedLocals, plan: MirIteration, receiver: CheckedValue, saved: Integer): CheckedValue
+	mir_control_prepare(state, locals)
+	owner := checked_mir_value(receiver)
+	if owner < 0
+		scalar_mir_disable(locals)
+	end
+	if !mir_control_active(locals)
+		return checked_value(plan.element_type, checked_category_value(), plan.syntax.element_origin, 0)
+	end
+	store_integer(locals.mir_values, saved, owner + 1)
+	mut cursor := scalar_mir_literal(state, locals, "Integer", plan.syntax.origin, "0")
+	zero := cursor
+	if plan.source_kind == iteration_source_range()
+		cursor = mir_checked_range_field(state, locals, owner, mir_range_field_first(), plan.syntax.origin)
+	end
+	store_integer(locals.mir_values, saved + 1, checked_mir_value(cursor) + 1)
+	if plan.source_kind == iteration_source_range() && plan.syntax.second_origin >= 0
+		store_integer(locals.mir_values, saved + 2, checked_mir_value(zero) + 1)
+	end
+	if plan.source_kind == iteration_source_hash()
+		# Both arrays traverse the same table slots before any user code runs.
+		# Keys and values are separate rooted SSA values, never live lookups.
+		keys := mir_checked_hash_operation(state, locals, mir_op_hash_method(), owner, -1, 10, "Array<" + plan.element_type + ">", plan.syntax.origin)
+		store_integer(locals.mir_values, saved + 2, checked_mir_value(keys) + 1)
+		values := mir_checked_hash_operation(state, locals, mir_op_hash_method(), owner, -1, 11, "Array<" + hash_value_type(plan.type_name) + ">", plan.syntax.origin)
+		store_integer(locals.mir_values, saved + 3, checked_mir_value(values) + 1)
+	end
+	line := load_integer(state.source_tokens.token_lines, plan.syntax.origin)
+	exit := mir_control_loop_begin(state, locals, plan.syntax.origin, line)
+	depth := locals.mir_control[mir_control_loop_depth_slot()] - 1
+	previous := locals.mir_loops[depth]
+	frame := MirControlLoop.new(origin: plan.syntax.origin, header: previous.header, exit: exit, continuation: mir_control_allocate(locals), binding_count: previous.binding_count, exit_binding_count: saved)
+	locals.mir_loops[depth] = frame
+	if plan.source_kind == iteration_source_array() || plan.source_kind == iteration_source_hash()
+		mut source := saved
+		if plan.source_kind == iteration_source_hash()
+			source = saved + 2
+		end
+		array := load_integer(locals.mir_values, source) - 1
+		position := mir_iteration_local(locals, saved + 1, "Integer", plan.syntax.origin)
+		length := mir_checked_array_operation(state, locals, mir_op_array_size(), array, -1, 0, "Integer", plan.syntax.origin)
+		available := scalar_mir_binary(state, locals, "<", position, length, "Boolean", plan.syntax.origin)
+		mir_control_loop_branch(state, locals, available, exit, line)
+		body_array := load_integer(locals.mir_values, source) - 1
+		body_index := load_integer(locals.mir_values, saved + 1) - 1
+		return mir_checked_array_operation(state, locals, mir_op_array_load(), body_array, body_index, 0, plan.element_type, plan.syntax.element_origin)
+	end
+	body := mir_control_allocate(locals)
+	mir_iteration_range_test(state, locals, frame, body, saved)
+	mir_control_enter(state, locals, body, line)
+	return mir_iteration_local(locals, saved + 1, "Integer", plan.syntax.element_origin)
+end
+
+def mir_iteration_has_edge(locals: CheckedLocals, target: Integer): Boolean
+	locals.mir_blocks.each do |block|
+		if (block.terminator == mir_terminator_jump() || block.terminator == mir_terminator_branch()) && block.first_target == target
+			return true
+		end
+		if block.terminator == mir_terminator_branch() && block.second_target == target
+			return true
+		end
+	end
+	return false
+end
+
+def mir_checked_iteration_end(mut state: CompilerState, mut locals: CheckedLocals, plan: MirIteration, saved: Integer)
+	if !mir_control_active(locals)
+		return
+	end
+	depth := locals.mir_control[mir_control_loop_depth_slot()] - 1
+	frame := locals.mir_loops[depth]
+	line := load_integer(state.source_tokens.token_lines, plan.syntax.body_finish)
+	mir_control_jump(state, locals, frame.continuation, frame.binding_count)
+	locals.count[0] = frame.binding_count
+	# An unconditional break/return may leave no continuation predecessor.
+	# Do not publish an unreachable latch with artificial unbound parameters.
+	if mir_iteration_has_edge(locals, frame.continuation)
+		mir_control_enter(state, locals, frame.continuation, line)
+		if plan.source_kind == iteration_source_range()
+			owner := load_integer(locals.mir_values, saved) - 1
+			bound := mir_checked_range_field(state, locals, owner, mir_range_field_last(), plan.syntax.origin)
+			cursor := mir_iteration_local(locals, saved + 1, "Integer", plan.syntax.origin)
+			last := scalar_mir_binary(state, locals, "==", cursor, bound, "Boolean", plan.syntax.origin)
+			step := mir_control_allocate(locals)
+			mir_control_conditional(state, locals, checked_mir_value(last), frame.exit, frame.exit_binding_count, step, frame.binding_count)
+			mir_control_enter(state, locals, step, line)
+		end
+		cursor := mir_iteration_local(locals, saved + 1, "Integer", plan.syntax.origin)
+		one := scalar_mir_literal(state, locals, "Integer", plan.syntax.origin, "1")
+		next_cursor := scalar_mir_binary(state, locals, "+", cursor, one, "Integer", plan.syntax.origin)
+		store_integer(locals.mir_values, saved + 1, checked_mir_value(next_cursor) + 1)
+		if plan.source_kind == iteration_source_range() && plan.syntax.second_origin >= 0
+			# No ordinal is needed after the final exclusive element, either.
+			advance := mir_control_allocate(locals)
+			mir_iteration_range_test(state, locals, frame, advance, saved)
+			mir_control_enter(state, locals, advance, line)
+			ordinal := mir_iteration_local(locals, saved + 2, "Integer", plan.syntax.origin)
+			increment := scalar_mir_literal(state, locals, "Integer", plan.syntax.origin, "1")
+			next_ordinal := scalar_mir_binary(state, locals, "+", ordinal, increment, "Integer", plan.syntax.origin)
+			store_integer(locals.mir_values, saved + 2, checked_mir_value(next_ordinal) + 1)
+		end
+		mir_control_jump(state, locals, frame.header, frame.binding_count)
+	end
+	locals.mir_control[mir_control_loop_depth_slot()] = depth
+	locals.count[0] = saved
+	mir_control_enter(state, locals, frame.exit, line)
+end
+
+# Selection appends the retained visited value even if the source slot or the
+# user parameter changes. Reducers and predicates carry their result through
+# SSA bindings; a predicate exits the loop as soon as its answer is known.
+def mir_transform_yield(mut state: CompilerState, mut locals: CheckedLocals, kind: Integer, result_slot: Integer, element: CheckedValue, yielded: CheckedValue, origin: Integer)
+	if !mir_control_active(locals)
+		return
+	end
+	if kind == transform_reduce()
+		store_integer(locals.mir_values, result_slot, checked_mir_value(yielded) + 1)
+		return
+	end
+	if kind >= transform_any() && kind <= transform_none()
+		mut result := checked_mir_value(yielded)
+		if kind == transform_none()
+			zero := scalar_mir_literal(state, locals, "Boolean", origin, "false")
+			inverted := scalar_mir_binary(state, locals, "==", yielded, zero, "Boolean", origin)
+			result = checked_mir_value(inverted)
+		end
+		store_integer(locals.mir_values, result_slot, result + 1)
+		frame := locals.mir_loops[locals.mir_control[mir_control_loop_depth_slot()] - 1]
+		continuation := mir_control_allocate(locals)
+		if kind == transform_all()
+			mir_control_conditional(state, locals, checked_mir_value(yielded), continuation, locals.count[0], frame.exit, frame.exit_binding_count)
+		else
+			mir_control_conditional(state, locals, checked_mir_value(yielded), frame.exit, frame.exit_binding_count, continuation, locals.count[0])
+		end
+		mir_control_enter(state, locals, continuation, load_integer(state.source_tokens.token_lines, origin))
+		return
+	end
+	mut alternate := -1
+	if kind == transform_select()
+		alternate = mir_control_branch(state, locals, yielded, load_integer(state.source_tokens.token_lines, origin))
+	end
+	owner := load_integer(locals.mir_values, result_slot) - 1
+	mut value := checked_mir_value(yielded)
+	if kind == transform_select()
+		value = checked_mir_value(element)
+	end
+	mir_checked_array_operation(state, locals, mir_op_array_push(), owner, value, 0, "Void", origin)
+	if kind == transform_select()
+		mir_control_jump(state, locals, alternate, locals.count[0])
+		mir_control_enter(state, locals, alternate, load_integer(state.source_tokens.token_lines, origin))
+	end
+end

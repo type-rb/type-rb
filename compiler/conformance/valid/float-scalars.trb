@@ -1,0 +1,183 @@
+record FloatBox
+	value: Float
+end
+
+def widened(value: Integer): Float
+	return value
+end
+
+def combine(left: Float, right: Float): Float
+	return (left + right) * 2.0 / 4.0 - 0.25
+end
+
+def main()
+	mut ok := true
+	mut box := FloatBox.new(value: 1)
+	box = FloatBox.new(value: combine(box.value, 2))
+	mut value: Float := box.value
+	value += 1
+	value -= 0.5
+	value *= 2
+	value /= 2.0
+	mut assigned: Float := 0
+	assigned = 2
+	assigned += 1
+	separated := 1_0.5_0
+	minimum := 0.000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000005
+	negative_underflow := -0.0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000005
+	maximum := 179769313486231580793728971405303415079934132710037826936173778980444968292764750946649017977587207096330286416692887910946555547851940402630657488671505820681908902000708383676273854845817711531764475730270069855571366959622842914819860834936475292719074168444365510704342711559699508093042880177904174497791.0
+	positive_infinity := 1.0 / 0.0
+	negative_zero := -0.0
+	negative_infinity := 1.0 / negative_zero
+	not_a_number := 0.0 / 0.0
+	if value == 1.75
+	else
+		ok = false
+	end
+	if +value == value
+	else
+		ok = false
+	end
+	if assigned == 3.0
+	else
+		ok = false
+	end
+	if widened(2) == 2.0
+	else
+		ok = false
+	end
+	if 1 + 1.5 == 2.5
+	else
+		ok = false
+	end
+	if 1.5 + 1 == 2.5
+	else
+		ok = false
+	end
+	if 5 - 0.5 == 4.5
+	else
+		ok = false
+	end
+	if 5.5 - 1 == 4.5
+	else
+		ok = false
+	end
+	if 2 * 1.5 == 3.0
+	else
+		ok = false
+	end
+	if 1.5 * 2 == 3.0
+	else
+		ok = false
+	end
+	if 3 / 2.0 == 1.5
+	else
+		ok = false
+	end
+	if 3.0 / 2 == 1.5
+	else
+		ok = false
+	end
+	if 1 == 1.0
+	else
+		ok = false
+	end
+	if 1.0 == 1
+	else
+		ok = false
+	end
+	if 1 != 2.0
+	else
+		ok = false
+	end
+	if 1.0 != 2
+	else
+		ok = false
+	end
+	if 1 < 1.5
+	else
+		ok = false
+	end
+	if 1.5 < 2
+	else
+		ok = false
+	end
+	if 2 > 1.5
+	else
+		ok = false
+	end
+	if 1.5 > 1
+	else
+		ok = false
+	end
+	if 1 <= 1.0
+	else
+		ok = false
+	end
+	if 1.0 <= 1
+	else
+		ok = false
+	end
+	if 1 >= 1.0
+	else
+		ok = false
+	end
+	if 1.0 >= 1
+	else
+		ok = false
+	end
+	if 1.0 <= 1.0
+	else
+		ok = false
+	end
+	if 1.0 >= 1.0
+	else
+		ok = false
+	end
+	if separated == 10.5
+	else
+		ok = false
+	end
+	if minimum > 0.0
+	else
+		ok = false
+	end
+	if maximum > 1.0
+	else
+		ok = false
+	end
+	if maximum - maximum == 0.0
+	else
+		ok = false
+	end
+	if positive_infinity > 1.0
+	else
+		ok = false
+	end
+	if negative_infinity < -1.0
+	else
+		ok = false
+	end
+	if not_a_number != not_a_number
+	else
+		ok = false
+	end
+	if negative_zero == 0.0
+	else
+		ok = false
+	end
+	if negative_underflow == 0.0
+	else
+		ok = false
+	end
+	if 1.0 / negative_underflow < 0.0
+	else
+		ok = false
+	end
+	if ok
+		puts("float-scalars-ok")
+	else
+		puts("float-scalars-bad")
+	end
+	return
+end

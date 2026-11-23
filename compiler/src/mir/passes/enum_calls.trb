@@ -1,0 +1,194 @@
+import { mir_function_control, mir_terminator_return } from mir/model/control
+import { mir_signature_ordinary } from mir/model/call_kinds
+import { mir_op_direct_call, mir_op_enum_field, mir_op_enum_new, mir_op_enum_test, mir_op_integer_to_float, mir_op_scalar_binary, mir_op_scalar_literal, mir_op_scalar_unary, mir_op_string_literal } from mir/model/instructions
+import { MirFunction, MirModule, mir_block_index, mir_function_index, mir_value_type } from mir/model/module
+import { mir_enum_id, mir_managed_type } from mir/model/types
+import { mir_enum_stack_definition, mir_enum_stack_result_type, mir_enum_stack_scalar_payloads } from mir/analysis/enum_stack
+import { mir_refine_call_effects } from mir/analysis/call_effects
+import { mir_managed_add, mir_managed_contains } from mir/analysis/liveness
+import { mir_enum_component_fields, mir_scalarize_enum_components } from mir/passes/enum_components
+import { mir_rewrite_commit, mir_rewrite_fork } from mir/passes/rewrite
+import { mir_function_body_size, mir_inline_call } from mir/passes/inline_calls
+
+# Topological elimination includes unreachable blocks. A recursive call edge is
+# rejected separately; neither a source ordering nor a guessed trip count proves
+# that a body is acyclic.
+def mir_enum_acyclic(native_module: MirModule, function: MirFunction): Boolean
+	mut removed: Array<Integer> := []
+	mut round := 0
+	while round < function.block_count
+		mut selected := -1
+		mut index := function.block_start
+		while index < function.block_start + function.block_count && selected < 0
+			block := native_module.blocks[index]
+			if !mir_managed_contains(removed, block.id)
+				mut incoming := false
+				mut other := function.block_start
+				while other < function.block_start + function.block_count
+					predecessor := native_module.blocks[other]
+					if !mir_managed_contains(removed, predecessor.id) && (predecessor.first_target == block.id || predecessor.second_target == block.id)
+						incoming = true
+					end
+					other += 1
+				end
+				if !incoming
+					selected = block.id
+				end
+			end
+			index += 1
+		end
+		if selected < 0
+			return false
+		end
+		mir_managed_add(removed, selected)
+		round += 1
+	end
+	return true
+end
+
+def mir_enum_callee_eligible(native_module: MirModule, function: MirFunction, path: Array<Integer>): Boolean
+	if path.size() >= 3 || mir_managed_contains(path, function.id) || function.kind != mir_function_control() || function.block_count > 24 || function.parameter_count > 8 || mir_function_body_size(native_module, function) > 64
+		return false
+	end
+	if function.id < 0 || function.id >= native_module.signatures.size() || native_module.signatures[function.id].kind != mir_signature_ordinary()
+		return false
+	end
+	entry := mir_block_index(native_module, function, function.entry_block)
+	if entry < 0 || native_module.blocks[entry].parameter_count != 0
+		return false
+	end
+	if mir_enum_component_fields(native_module, mir_enum_stack_result_type(native_module, function.id)).size() == 0 || !mir_enum_acyclic(native_module, function)
+		return false
+	end
+	mut count := 0
+	native_module.values.each do |value|
+		if value.function_id == function.id
+			count += 1
+		end
+	end
+	if count > 128
+		return false
+	end
+	mut parameter := 0
+	while parameter < function.parameter_count
+		type_id := mir_value_type(native_module, function.id, native_module.arguments[function.parameter_start + parameter])
+		if mir_managed_type(native_module, type_id) && !mir_enum_stack_scalar_payloads(native_module, type_id)
+			return false
+		end
+		parameter += 1
+	end
+	mut nested: Array<Integer> := []
+	path.each do |id|
+		nested.push(id)
+	end
+	mir_managed_add(nested, function.id)
+	mut index := function.block_start
+	while index < function.block_start + function.block_count
+		block := native_module.blocks[index]
+		if block.terminator == mir_terminator_return()
+			definition := mir_enum_stack_definition(native_module, function, block.return_value)
+			if definition < 0 || (native_module.instructions[definition].kind != mir_op_enum_new() && native_module.instructions[definition].kind != mir_op_direct_call())
+				return false
+			end
+		end
+		mut cursor := block.instruction_start
+		while cursor < block.instruction_start + block.instruction_count
+			instruction := native_module.instructions[cursor]
+			kind := instruction.kind
+			if kind == mir_op_direct_call()
+				callee := mir_function_index(native_module, native_module.calls[instruction.payload].callee)
+				if callee < 0 || !mir_enum_callee_eligible(native_module, native_module.functions[callee], nested)
+					return false
+				end
+			elsif kind != mir_op_scalar_literal() && kind != mir_op_scalar_binary() && kind != mir_op_scalar_unary() && kind != mir_op_integer_to_float() && kind != mir_op_string_literal() && kind != mir_op_enum_new() && kind != mir_op_enum_test() && kind != mir_op_enum_field()
+				return false
+			end
+			cursor += 1
+		end
+		index += 1
+	end
+	return true
+end
+
+def mir_enum_call_candidate(native_module: MirModule, function: MirFunction, eligible: Array<Integer>): Array<Integer>
+	mut index := function.block_start
+	while index < function.block_start + function.block_count
+		block := native_module.blocks[index]
+		mut cursor := block.instruction_start
+		while cursor < block.instruction_start + block.instruction_count
+			instruction := native_module.instructions[cursor]
+			if instruction.kind == mir_op_direct_call()
+				callee := mir_function_index(native_module, native_module.calls[instruction.payload].callee)
+				if callee >= 0 && eligible[callee] == 1
+					return [index, cursor, callee]
+				end
+			end
+			cursor += 1
+		end
+		index += 1
+	end
+	return []
+end
+
+def mir_expand_enum_calls(mut native_module: MirModule)
+	mut eligible: Array<Integer> := []
+	mut any := false
+	native_module.functions.each do |function|
+		mut selected := 0
+		if mir_enum_callee_eligible(native_module, function, [])
+			selected = 1
+			any = true
+		end
+		eligible.push(selected)
+	end
+	if !any
+		return
+	end
+	mut module_calls := 0
+	mut module_growth := 0
+	mut changed := false
+	mut function_index := 0
+	while function_index < native_module.functions.size()
+		function := native_module.functions[function_index]
+		original_size := mir_function_body_size(native_module, function)
+		if function.kind == mir_function_control() && function.block_count <= 64 && original_size <= 256 && mir_enum_id(native_module, mir_enum_stack_result_type(native_module, function.id)) < 0
+			mut candidate := mir_enum_call_candidate(native_module, function, eligible)
+			if candidate.size() > 0
+				mut rewritten := mir_rewrite_fork(native_module)
+				mut expanded := 0
+				mut growth := 0
+				mut block_growth := 0
+				while candidate.size() > 0 && expanded < 8 && module_calls + expanded < 32
+					callee := rewritten.functions[candidate[2]]
+					size := mir_function_body_size(rewritten, callee)
+					if growth + size > 256 || module_growth + growth + size > 1024 || block_growth + callee.block_count + 1 > 127
+						break
+					end
+					mir_inline_call(rewritten, function_index, candidate[0], candidate[1], callee)
+					expanded += 1
+					growth += size
+					block_growth += callee.block_count + 1
+					candidate = mir_enum_call_candidate(rewritten, rewritten.functions[function_index], eligible)
+				end
+				mut accepted := false
+				if expanded > 0 && candidate.size() == 0
+					accepted = mir_scalarize_enum_components(rewritten, function_index)
+				end
+				final_growth := mir_function_body_size(rewritten, rewritten.functions[function_index]) - original_size
+				if final_growth > growth
+					growth = final_growth
+				end
+				if accepted && growth <= 256 && module_growth + growth <= 1024
+					mir_rewrite_commit(native_module, rewritten)
+					module_calls += expanded
+					module_growth += growth
+					changed = true
+				end
+			end
+		end
+		function_index += 1
+	end
+	if changed
+		mir_refine_call_effects(native_module)
+	end
+end

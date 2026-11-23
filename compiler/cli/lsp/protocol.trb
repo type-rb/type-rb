@@ -1,0 +1,117 @@
+import trb/std/json
+import { native_cli_byte_length, native_cli_eof, native_cli_line, native_cli_read_exact, native_cli_write_message } from host
+import { compiler_source_is_utf8 } from frontend/syntax/lexer
+import { package_json_quote } from project/package_json
+import { ascii_code, integer_string } from support/literals
+
+def lsp_field(value: JSON::Value, key: String): JSON::Value
+	case value
+	when JSON::Value::Object(fields)
+		if fields.key?(key)
+			return fields[key]
+		end
+		return JSON::Value::Null
+	else
+		return JSON::Value::Null
+	end
+end
+
+def lsp_text(value: JSON::Value): String
+	case value
+	when JSON::Value::String(text)
+		return text
+	else
+		return ""
+	end
+end
+
+def lsp_integer(value: JSON::Value): Integer
+	case value
+	when JSON::Value::Integer(number)
+		return number
+	else
+		return -1
+	end
+end
+
+def lsp_id(value: JSON::Value): String
+	case value
+	when JSON::Value::String(text)
+		return package_json_quote(text)
+	when JSON::Value::Integer(number)
+		return integer_string(number)
+	else
+		return ""
+	end
+end
+
+def lsp_frame_length(value: String): Integer
+	mut length := 0
+	mut index := 0
+	while index < value.size()
+		digit := ascii_code(value[index]) - 48
+		if digit < 0 || digit > 9 || length > (67108864 - digit) / 10
+			return -1
+		end
+		length = length * 10 + digit
+		index += 1
+	end
+	return length
+end
+
+def lsp_read(mut failure: Array<String>): String
+	mut length := -1
+	mut started := false
+	while true
+		line := native_cli_line("").strip()
+		if native_cli_eof() != 0
+			if started
+				failure[0] = "incomplete LSP headers"
+			end
+			return ""
+		end
+		started = true
+		if line == ""
+			break
+		end
+		header := line.split(":")
+		if header.size() < 2
+			failure[0] = "invalid LSP header"
+			return ""
+		end
+		if header[0].strip().downcase() == "content-length"
+			if length >= 0 || header.size() != 2
+				failure[0] = "invalid LSP Content-Length"
+				return ""
+			end
+			length = lsp_frame_length(header[1].strip())
+			if length < 1
+				failure[0] = "invalid LSP Content-Length"
+				return ""
+			end
+		end
+	end
+	if length < 1
+		failure[0] = "missing LSP Content-Length"
+		return ""
+	end
+	body := native_cli_read_exact(length)
+	if native_cli_byte_length(body) != length || !compiler_source_is_utf8(body)
+		failure[0] = "incomplete or invalid UTF-8 LSP message"
+		return ""
+	end
+	return body
+end
+
+def lsp_send(body: String): Boolean
+	frame := "Content-Length: " + integer_string(native_cli_byte_length(body)) + "\r\n\r\n" + body
+	return native_cli_write_message(frame) == 0
+end
+
+def lsp_result(id: String, value: String): Boolean
+	return lsp_send("{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"result\":" + value + "}")
+end
+
+def lsp_error(id: String, code: Integer, message: String): Boolean
+	return lsp_send("{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"error\":{\"code\":" + integer_string(code) + ",\"message\":" + package_json_quote(message) + "}}")
+end

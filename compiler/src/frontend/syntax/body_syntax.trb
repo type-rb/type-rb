@@ -1,0 +1,863 @@
+import { control_syntax_case, control_syntax_guarded_transfer, control_syntax_if, control_syntax_ternary, loop_transfer_none } from state/control_kinds
+import { transform_concurrent_map, transform_reduce, transform_select } from frontend/types/transform_kinds
+import { binary_add_assign } from frontend/types/operators
+import { token_kind_attribute, token_kind_end_of_input, token_kind_end_of_module, token_kind_identifier, token_kind_newline, token_kind_number, token_kind_string } from state/token_kinds
+import { TransformSyntax, transform_kind } from frontend/types/transform_model
+import { expand_quoted_token } from frontend/syntax/literal_syntax
+import { CallBlockSyntax, LambdaParameter, LambdaSyntax } from frontend/types/callable_types
+import { parse_lambda_parameters } from frontend/syntax/lambda_syntax
+import { CatchSyntax } from frontend/types/result_model
+import { nominal_application_end, nominal_application_name } from frontend/syntax/generic_syntax
+import { advance, expect, expect_identifier, finish_statement, parse_type, skip_newlines, token_is, valid_identifier } from frontend/syntax/syntax_tokens
+import frontend/syntax/iteration_syntax
+import { CompilerState, diagnostic, has_diagnostic, terminal_token } from state/state
+import { ControlBranch, ControlSyntax } from state/source_state
+import { load_integer, load_string, sparse_integer_at, store_integer, store_string } from support/storage
+import { binary_operator_id, declaration_start, syntax_block_end, syntax_conditional_tail, syntax_expression_precedence, syntax_iteration_suffix, syntax_loop_transfer_kind, syntax_statement_boundary, syntax_transform_suffix } from frontend/syntax/syntax_forms
+import { test_declaration_name, test_syntax_error } from frontend/syntax/test_syntax
+
+def parse_arguments_syntax(mut state: CompilerState, mut position: Array<Integer>): Boolean
+	skip_newlines(state, position)
+	if token_is(state, position[0], ")")
+		advance(position)
+		return true
+	end
+	mut finished := false
+	while !finished
+		skip_newlines(state, position)
+		if token_is(state, position[0], ")")
+			finished = true
+		else
+			if load_integer(state.source_tokens.token_kinds, position[0]) == token_kind_identifier()
+				if token_is(state, position[0] + 1, ":")
+					if !valid_identifier(state, position[0])
+						return false
+					end
+					advance(position)
+					advance(position)
+				end
+			end
+			if !parse_expression_syntax(state, position, 1)
+				return false
+			end
+			if token_is(state, position[0], ",")
+				advance(position)
+				skip_newlines(state, position)
+			else
+				finished = true
+			end
+		end
+	end
+	skip_newlines(state, position)
+	return expect(state, position, ")")
+end
+
+def parse_iteration_statement(mut state: CompilerState, mut position: Array<Integer>, origin: Integer): Boolean
+	receiver_finish := position[0]
+	delimiter := syntax_iteration_suffix(state, receiver_finish)
+	if delimiter < 0
+		return false
+	end
+	brace := token_is(state, delimiter, "{")
+	mut slice_start := -1
+	mut slice_finish := -1
+	position[0] = receiver_finish + 2
+	if token_is(state, receiver_finish + 1, "each_slice")
+		if !expect(state, position, "(")
+			return false
+		end
+		skip_newlines(state, position)
+		slice_start = position[0]
+		if !parse_expression_syntax(state, position, 1)
+			return false
+		end
+		slice_finish = position[0]
+		skip_newlines(state, position)
+		if token_is(state, position[0], ",")
+			advance(position)
+			skip_newlines(state, position)
+		end
+		if !expect(state, position, ")")
+			return false
+		end
+	end
+	mut indexed := false
+	mut scan := position[0]
+	while scan < delimiter
+		if token_is(state, scan, "with_index")
+			indexed = true
+		end
+		scan += 1
+	end
+	position[0] = delimiter + 1
+	if !expect(state, position, "|")
+		return false
+	end
+	element_origin := position[0]
+	expect_identifier(state, position)
+	mut second_origin := -1
+	if indexed || token_is(state, position[0], ",")
+		if !expect(state, position, ",")
+			return false
+		end
+		second_origin = position[0]
+		expect_identifier(state, position)
+	end
+	if !expect(state, position, "|")
+		return false
+	end
+	if brace
+		skip_newlines(state, position)
+	elsif !finish_statement(state, position)
+		return false
+	end
+	body_start := position[0]
+	mut terminator := "end"
+	if brace
+		terminator = "}"
+	end
+	if !parse_statement_block(state, position)
+		return false
+	end
+	body_finish := position[0]
+	if !expect(state, position, terminator)
+		return false
+	end
+	# Re-parsing unreachable syntax must not replace an already checked plan.
+	if sparse_integer_at(state.parsed.iteration_origins, origin) == 0
+		state.parsed.iterations.push(IterationSyntax.new(origin: origin, receiver_finish: receiver_finish, slice_start: slice_start, slice_finish: slice_finish, element_origin: element_origin, second_origin: second_origin, body_start: body_start, body_finish: body_finish, finish: position[0]))
+		store_integer(state.parsed.iteration_origins, origin, state.parsed.iterations.size())
+		store_integer(state.parsed.iteration_origins, body_finish, -state.parsed.iterations.size())
+	end
+	return finish_statement(state, position)
+end
+
+def parse_primary_syntax(mut state: CompilerState, mut position: Array<Integer>): Boolean
+	if !expand_quoted_token(state, position[0], true)
+		return false
+	end
+	symbol := token_is(state, position[0], ":")
+	if symbol
+		advance(position)
+		if !expand_quoted_token(state, position[0], false)
+			return false
+		end
+		kind := load_integer(state.source_tokens.token_kinds, position[0])
+		if kind == token_kind_end_of_input() || kind == token_kind_newline() || kind == token_kind_end_of_module()
+			diagnostic(state, "TRBN4002", load_integer(state.source_tokens.token_lines, position[0]), "expected a Symbol literal name")
+			return false
+		end
+		store_integer(state.source_tokens.token_kinds, position[0], token_kind_string())
+		advance(position)
+	end
+	if !symbol && token_is(state, position[0], "try")
+		advance(position)
+		return parse_primary_syntax(state, position)
+	end
+	mut control := false
+	mut lambda := false
+	mut hash_literal := false
+	if !symbol
+		control = token_is(state, position[0], "if")
+		if !control
+			control = token_is(state, position[0], "case")
+		end
+		lambda = token_is(state, position[0], "fn")
+		hash_literal = token_is(state, position[0], "{")
+	end
+	if control && !parse_control_syntax(state, position)
+		return false
+	end
+	if lambda && !parse_lambda_syntax(state, position)
+		return false
+	end
+	if hash_literal
+		advance(position)
+		skip_newlines(state, position)
+		while !token_is(state, position[0], "}")
+			key_start := position[0]
+			if !parse_expression_syntax(state, position, 1)
+				return false
+			end
+			if token_is(state, position[0], ":")
+				mut first := key_start
+				mut last := position[0] - 1
+				while first < last && token_is(state, first, "(") && token_is(state, last, ")")
+					first += 1
+					last -= 1
+					while first < last && load_integer(state.source_tokens.token_kinds, first) == token_kind_newline()
+						first += 1
+					end
+				end
+				# Parentheses preserve an identifier label; other expressions retain
+				# their evaluated key and are checked against the Hash key types.
+				if first == last && load_integer(state.source_tokens.token_kinds, first) == token_kind_identifier() && !token_is(state, first, "true") && !token_is(state, first, "false") && !token_is(state, first, "nil")
+					store_integer(state.source_tokens.token_kinds, first, token_kind_string())
+				end
+				store_string(state.source_tokens.token_texts, position[0], "=>")
+			end
+			if !expect(state, position, "=>")
+				return false
+			end
+			if !parse_expression_syntax(state, position, 1)
+				return false
+			end
+			skip_newlines(state, position)
+			if !token_is(state, position[0], ",")
+				break
+			end
+			advance(position)
+			skip_newlines(state, position)
+		end
+		if !expect(state, position, "}")
+			return false
+		end
+	end
+	kind := load_integer(state.source_tokens.token_kinds, position[0])
+	if hash_literal || control || lambda || symbol
+	elsif kind == token_kind_identifier() || kind == token_kind_attribute()
+		application_end := nominal_application_end(state, position[0])
+		if application_end >= 0
+			position[0] = nominal_application_name(state, position[0])
+			parse_type(state, position)
+		else
+			advance(position)
+		end
+	else
+		if kind == token_kind_number()
+			advance(position)
+		else
+			if kind == token_kind_string()
+				advance(position)
+			else
+				if token_is(state, position[0], "(")
+					advance(position)
+					skip_newlines(state, position)
+					if !parse_expression_syntax(state, position, 1)
+						return false
+					end
+					if !expect(state, position, ")")
+						return false
+					end
+				else
+					if token_is(state, position[0], "[")
+						advance(position)
+						skip_newlines(state, position)
+						if !token_is(state, position[0], "]")
+							mut finished := false
+							while !finished
+								if token_is(state, position[0], "]")
+									finished = true
+								else
+									if !parse_expression_syntax(state, position, 1)
+										return false
+									end
+									if token_is(state, position[0], ",")
+										advance(position)
+										skip_newlines(state, position)
+									else
+										finished = true
+									end
+								end
+							end
+						end
+						skip_newlines(state, position)
+						if !expect(state, position, "]")
+							return false
+						end
+					else
+						if token_is(state, position[0], "!")
+							advance(position)
+							return parse_binary_syntax(state, position, 8)
+						end
+						if token_is(state, position[0], "-")
+							advance(position)
+							return parse_binary_syntax(state, position, 8)
+						end
+						if token_is(state, position[0], "+")
+							advance(position)
+							return parse_binary_syntax(state, position, 8)
+						end
+						diagnostic(state, "TRBN4002", load_integer(state.source_tokens.token_lines, position[0]), "expected an expression")
+						return false
+					end
+				end
+			end
+		end
+	end
+	mut postfix := true
+	while postfix
+		if token_is(state, position[0], "(")
+			advance(position)
+			skip_newlines(state, position)
+			if !parse_arguments_syntax(state, position)
+				return false
+			end
+		else
+			if syntax_transform_suffix(state, position[0]) >= 0
+				if !parse_transform_syntax(state, position)
+					return false
+				end
+				next
+			end
+			if token_is(state, position[0], ".") || token_is(state, position[0], "&.") || token_is(state, position[0], "::")
+				advance(position)
+				member := expect_identifier(state, position)
+				if (member == "each" || member == "each_slice") && syntax_iteration_suffix(state, position[0] - 2) >= 0
+					position[0] -= 2
+					break
+				end
+				if has_diagnostic(state)
+					return false
+				end
+				if nominal_application_end(state, position[0] - 1) > position[0]
+					position[0] -= 1
+					parse_type(state, position)
+				end
+				if token_is(state, position[0], "(")
+					advance(position)
+					skip_newlines(state, position)
+					if !parse_arguments_syntax(state, position)
+						return false
+					end
+				end
+				# Valid iteration bodies were consumed by their own grammar above.
+				# A malformed iteration suffix must not become a generic call body.
+				if member == "each" || member == "each_slice" || member == "with_index"
+					if token_is(state, position[0], "do") || token_is(state, position[0], "{")
+						return finish_statement(state, position)
+					end
+				end
+			else
+				if token_is(state, position[0], "[")
+					advance(position)
+					skip_newlines(state, position)
+					if !parse_expression_syntax(state, position, 1)
+						return false
+					end
+					if !expect(state, position, "]")
+						return false
+					end
+				else
+					postfix = false
+				end
+			end
+		end
+	end
+	return true
+end
+
+def parse_lambda_syntax(mut state: CompilerState, mut position: Array<Integer>): Boolean
+	origin := position[0]
+	advance(position)
+	parameters := parse_lambda_parameters(state, position)
+	if has_diagnostic(state)
+		return false
+	end
+	mut result_type := "Void"
+	if token_is(state, position[0], ":")
+		advance(position)
+		result_type = parse_type(state, position)
+		if result_type == "Void"
+			diagnostic(state, "TRBN4002", load_integer(state.source_tokens.token_lines, origin), "fn without a result must omit the return annotation")
+			return false
+		end
+	end
+	if !finish_statement(state, position)
+		return false
+	end
+	body_start := position[0]
+	if !parse_statement_block(state, position)
+		return false
+	end
+	body_finish := position[0]
+	if !expect(state, position, "end")
+		return false
+	end
+	# Unreachable syntax may be parsed again after resolution. Never replace
+	# immutable syntax or register a lambda in the ordinary function catalog.
+	if sparse_integer_at(state.callables.lambda_origins, origin) == 0
+		state.callables.lambdas.push(LambdaSyntax.new(origin: origin, parameters: parameters, result_type: result_type, body_start: body_start, body_finish: body_finish, finish: position[0]))
+		store_integer(state.callables.lambda_origins, origin, state.callables.lambdas.size())
+	end
+	return !has_diagnostic(state)
+end
+
+def parse_binary_syntax(
+		mut state: CompilerState,
+		mut position: Array<Integer>,
+		minimum_precedence: Integer,
+	): Boolean
+	if !parse_primary_syntax(state, position)
+		return false
+	end
+	mut scanning := true
+	while scanning
+		precedence := syntax_expression_precedence(load_string(state.source_tokens.token_texts, position[0]))
+		if precedence < minimum_precedence
+			scanning = false
+		else
+			advance(position)
+			skip_newlines(state, position)
+			mut right_precedence := precedence + 1
+			if precedence == 8
+				right_precedence = precedence
+			end
+			if !parse_expression_syntax(state, position, right_precedence)
+				return false
+			end
+		end
+	end
+	return true
+end
+
+def parse_expression_syntax(mut state: CompilerState, mut position: Array<Integer>, minimum_precedence: Integer): Boolean
+	if !parse_binary_syntax(state, position, minimum_precedence)
+		return false
+	end
+	if minimum_precedence == 1 && token_is(state, position[0], "?")
+		origin := position[0]
+		advance(position)
+		skip_newlines(state, position)
+		first := position[0]
+		if !parse_binary_syntax(state, position, 1)
+			return false
+		end
+		first_finish := position[0]
+		if !expect(state, position, ":")
+			return false
+		end
+		skip_newlines(state, position)
+		second := position[0]
+		if !parse_binary_syntax(state, position, 1)
+			return false
+		end
+		if token_is(state, position[0], "?")
+			diagnostic(state, "TRBN4002", load_integer(state.source_tokens.token_lines, position[0]), "nested conditional expressions must be parenthesized")
+			return false
+		end
+		publish_control(state, ControlSyntax.new(kind: control_syntax_ternary(), origin: origin, finish: position[0], selector: -1, selector_finish: -1, branches: [ControlBranch.new(condition: -1, condition_finish: -1, body: first, finish: first_finish), ControlBranch.new(condition: -1, condition_finish: -1, body: second, finish: position[0])]))
+	end
+	return true
+end
+
+def parse_declaration_statement(mut state: CompilerState, mut position: Array<Integer>): Boolean
+	# The reference treats a statement-leading next as loop control, not a
+	# binding. Keep contextual identifiers (including mut next) unchanged.
+	if token_is(state, position[0], "next")
+		diagnostic(state, "TRBN4002", load_integer(state.source_tokens.token_lines, position[0]), "next does not take a value")
+		return false
+	end
+	if token_is(state, position[0], "mut")
+		advance(position)
+	end
+	expect_identifier(state, position)
+	if has_diagnostic(state)
+		return false
+	end
+	if token_is(state, position[0], ":")
+		advance(position)
+		parse_type(state, position)
+	end
+	if !expect(state, position, ":=")
+		return false
+	end
+	if !parse_statement_value_syntax(state, position)
+		return false
+	end
+	return finish_statement(state, position)
+end
+
+def parse_simple_statement(mut state: CompilerState, mut position: Array<Integer>): Boolean
+	origin := position[0]
+	if !parse_statement_value_syntax(state, position)
+		return false
+	end
+	operator := load_string(state.source_tokens.token_texts, position[0])
+	if (operator == "." || operator == "&.") && syntax_iteration_suffix(state, position[0]) >= 0
+		return parse_iteration_statement(state, position, origin)
+	end
+	if operator == "="
+		advance(position)
+		if !parse_statement_value_syntax(state, position)
+			return false
+		end
+	else
+		if binary_operator_id(operator) >= binary_add_assign()
+			advance(position)
+			if !parse_statement_value_syntax(state, position)
+				return false
+			end
+		end
+	end
+	return finish_statement(state, position)
+end
+
+def parse_statement_syntax(mut state: CompilerState, mut position: Array<Integer>): Boolean
+	statement_origin := position[0]
+	if token_is(state, position[0], "if") || token_is(state, position[0], "case")
+		parse_control_syntax(state, position)
+		finish_statement(state, position)
+	elsif token_is(state, position[0], "while")
+		origin := position[0]
+		advance(position)
+		if parse_expression_syntax(state, position, 1)
+			if finish_statement(state, position)
+				parse_statement_block(state, position)
+				if expect(state, position, "end")
+					store_integer(state.parsed.loop_finishes, origin, position[0])
+					finish_statement(state, position)
+				end
+			end
+		end
+	elsif syntax_loop_transfer_kind(state, position[0]) > loop_transfer_none() || token_is(state, position[0], "return")
+		parse_transfer_syntax(state, position)
+	elsif declaration_start(state, position[0])
+		parse_declaration_statement(state, position)
+	else
+		parse_simple_statement(state, position)
+	end
+	store_integer(state.parsed.statement_finishes, statement_origin, position[0])
+	return !has_diagnostic(state)
+end
+
+def parse_statement_block(mut state: CompilerState, mut position: Array<Integer>): Boolean
+	return parse_statement_block_with_test_guard(state, position, false)
+end
+
+def parse_statement_block_with_test_guard(mut state: CompilerState, mut position: Array<Integer>, test_body: Boolean): Boolean
+	skip_newlines(state, position)
+	while true
+		statement_origin := position[0]
+		if test_body && test_declaration_name(state, statement_origin) != ""
+			return test_syntax_error(state, statement_origin, "describe() and test() cannot be nested inside test()")
+		end
+		if terminal_token(state, position[0])
+			diagnostic(state, "TRBN4002", load_integer(state.source_tokens.token_lines, position[0]), "expected end")
+			break
+		elsif syntax_block_end(state, position[0])
+			break
+		elsif syntax_conditional_tail(state, position[0])
+			break
+		end
+		parse_statement_syntax(state, position)
+		if has_diagnostic(state)
+			break
+		end
+	end
+	return !has_diagnostic(state)
+end
+
+def publish_control(mut state: CompilerState, control: ControlSyntax)
+	encoded := sparse_integer_at(state.parsed.control_origins, control.origin)
+	if encoded == 0
+		state.parsed.controls.push(control)
+		store_integer(state.parsed.control_origins, control.origin, state.parsed.controls.size())
+	end
+end
+
+def parse_control_syntax(mut state: CompilerState, mut position: Array<Integer>): Boolean
+	origin := position[0]
+	encoded := sparse_integer_at(state.parsed.control_origins, origin)
+	if encoded > 0
+		position[0] = state.parsed.controls[encoded - 1].finish
+		return true
+	end
+	mut kind := control_syntax_if()
+	if token_is(state, origin, "case")
+		kind = control_syntax_case()
+	end
+	advance(position)
+	selector := position[0]
+	if !parse_expression_syntax(state, position, 1)
+		return false
+	end
+	selector_finish := position[0]
+	if !finish_statement(state, position)
+		return false
+	end
+	mut branches: Array<ControlBranch> := []
+	if kind == control_syntax_if()
+		body := position[0]
+		if !parse_statement_block(state, position)
+			return false
+		end
+		branches.push(ControlBranch.new(condition: selector, condition_finish: selector_finish, body: body, finish: position[0]))
+	end
+	while token_is(state, position[0], "elsif") || token_is(state, position[0], "when")
+		if (kind == control_syntax_if() && !token_is(state, position[0], "elsif")) || (kind == control_syntax_case() && !token_is(state, position[0], "when"))
+			diagnostic(state, "TRBN4002", load_integer(state.source_tokens.token_lines, position[0]), "unexpected control branch")
+			return false
+		end
+		advance(position)
+		condition := position[0]
+		if !parse_expression_syntax(state, position, 1)
+			return false
+		end
+		while kind == control_syntax_case() && token_is(state, position[0], ",")
+			advance(position)
+			if !parse_expression_syntax(state, position, 1)
+				return false
+			end
+		end
+		condition_finish := position[0]
+		if !finish_statement(state, position)
+			return false
+		end
+		body := position[0]
+		if !parse_statement_block(state, position)
+			return false
+		end
+		branches.push(ControlBranch.new(condition: condition, condition_finish: condition_finish, body: body, finish: position[0]))
+	end
+	if token_is(state, position[0], "else")
+		advance(position)
+		if !finish_statement(state, position)
+			return false
+		end
+		body := position[0]
+		if !parse_statement_block(state, position)
+			return false
+		end
+		branches.push(ControlBranch.new(condition: -1, condition_finish: -1, body: body, finish: position[0]))
+	end
+	if branches.size() == 0 || (kind == control_syntax_case() && branches[0].condition < 0)
+		diagnostic(state, "TRBN4002", load_integer(state.source_tokens.token_lines, origin), "case requires at least one when branch")
+		return false
+	end
+	if !expect(state, position, "end")
+		return false
+	end
+	publish_control(state, ControlSyntax.new(kind: kind, origin: origin, finish: position[0], selector: selector, selector_finish: selector_finish, branches: branches))
+	return true
+end
+
+def parse_transfer_syntax(mut state: CompilerState, mut position: Array<Integer>): Boolean
+	origin := position[0]
+	returns := token_is(state, origin, "return")
+	advance(position)
+	if returns && !syntax_statement_boundary(state, position[0]) && !token_is(state, position[0], "if")
+		if !parse_statement_value_syntax(state, position)
+			return false
+		end
+	end
+	body_finish := position[0]
+	if token_is(state, position[0], "if")
+		advance(position)
+		condition := position[0]
+		if !parse_expression_syntax(state, position, 1)
+			return false
+		end
+		publish_control(state, ControlSyntax.new(kind: control_syntax_guarded_transfer(), origin: origin, finish: position[0], selector: condition, selector_finish: position[0], branches: [ControlBranch.new(condition: condition, condition_finish: position[0], body: origin, finish: body_finish)]))
+	elsif !returns && !syntax_statement_boundary(state, position[0])
+		diagnostic(state, "TRBN4002", load_integer(state.source_tokens.token_lines, origin), load_string(state.source_tokens.token_texts, origin) + " does not take a value")
+		return false
+	end
+	return finish_statement(state, position)
+end
+
+# Catch attaches only to a whole statement value. Nested argument/element
+# expressions continue through parse_expression_syntax and cannot consume it.
+def parse_statement_value_syntax(mut state: CompilerState, mut position: Array<Integer>): Boolean
+	origin := position[0]
+	if !parse_expression_syntax(state, position, 1)
+		return false
+	end
+	if token_is(state, position[0], "do") || token_is(state, position[0], "{")
+		if !parse_call_block_syntax(state, position, origin)
+			return false
+		end
+	end
+	if !token_is(state, position[0], "catch")
+		return true
+	end
+	operand_finish := position[0]
+	advance(position)
+	if !expect(state, position, "|")
+		return false
+	end
+	binding := position[0]
+	expect_identifier(state, position)
+	if !expect(state, position, "|") || !finish_statement(state, position)
+		return false
+	end
+	skip_newlines(state, position)
+	body := position[0]
+	if !parse_statement_block(state, position) || !expect(state, position, "end")
+		return false
+	end
+	state.parsed.catch_syntax.push(CatchSyntax.new(origin: origin, operand_finish: operand_finish, binding: binding, body: body, finish: position[0]))
+	store_integer(state.parsed.catch_origins, origin, state.parsed.catch_syntax.size())
+	return true
+end
+
+# Parse the shared statement grammar inside an expression-owned block.
+def parse_transform_syntax(mut state: CompilerState, mut position: Array<Integer>): Boolean
+	origin := position[0]
+	kind := transform_kind(load_string(state.source_tokens.token_texts, origin + 1))
+	position[0] += 2
+	mut initial_start := -1
+	mut initial_finish := -1
+	if kind == transform_reduce()
+		if !expect(state, position, "(")
+			return false
+		end
+		skip_newlines(state, position)
+		initial_start = position[0]
+		if !parse_expression_syntax(state, position, 1)
+			return false
+		end
+		initial_finish = position[0]
+		skip_newlines(state, position)
+		if !expect(state, position, ")")
+			return false
+		end
+	elsif kind == transform_concurrent_map() && token_is(state, position[0], "(")
+		advance(position)
+		skip_newlines(state, position)
+		if !token_is(state, position[0], ")")
+			if !token_is(state, position[0], "limit") || !token_is(state, position[0] + 1, ":")
+				diagnostic(state, "TRBN4004", load_integer(state.source_tokens.token_lines, position[0]), "concurrent_map accepts only the named argument limit")
+				return false
+			end
+			position[0] += 2
+			skip_newlines(state, position)
+			initial_start = position[0]
+			if !parse_expression_syntax(state, position, 1)
+				return false
+			end
+			initial_finish = position[0]
+			skip_newlines(state, position)
+			if token_is(state, position[0], ",")
+				advance(position)
+				skip_newlines(state, position)
+			end
+		end
+		if !expect(state, position, ")")
+			return false
+		end
+	elsif token_is(state, position[0], "(")
+		advance(position)
+		if !expect(state, position, ")")
+			return false
+		end
+	end
+	mut indexed := false
+	if kind <= transform_select() && token_is(state, position[0], ".") && token_is(state, position[0] + 1, "with_index")
+		indexed = true
+		position[0] += 2
+		if token_is(state, position[0], "(")
+			advance(position)
+			if !expect(state, position, ")")
+				return false
+			end
+		end
+	end
+	brace := token_is(state, position[0], "{")
+	mut terminator := "end"
+	if brace
+		terminator = "}"
+		advance(position)
+	elsif !expect(state, position, "do")
+		return false
+	end
+	if !expect(state, position, "|")
+		return false
+	end
+	mut accumulator_origin := -1
+	if kind == transform_reduce()
+		accumulator_origin = position[0]
+		expect_identifier(state, position)
+		if !expect(state, position, ",")
+			return false
+		end
+	end
+	element_origin := position[0]
+	expect_identifier(state, position)
+	mut second_origin := -1
+	if indexed
+		if !expect(state, position, ",")
+			return false
+		end
+		second_origin = position[0]
+		expect_identifier(state, position)
+	end
+	if !expect(state, position, "|")
+		return false
+	end
+	if !brace && !finish_statement(state, position)
+		return false
+	end
+	skip_newlines(state, position)
+	body_start := position[0]
+	if !parse_statement_block(state, position)
+		return false
+	end
+	body_finish := position[0]
+	if !expect(state, position, terminator)
+		return false
+	end
+	if sparse_integer_at(state.parsed.transform_origins, origin) == 0
+		shape := IterationSyntax.new(origin: origin, receiver_finish: origin, slice_start: -1, slice_finish: -1, element_origin: element_origin, second_origin: second_origin, body_start: body_start, body_finish: body_finish, finish: position[0])
+		state.parsed.transforms.push(TransformSyntax.new(iteration: shape, kind: kind, initial_start: initial_start, initial_finish: initial_finish, accumulator_origin: accumulator_origin))
+		store_integer(state.parsed.transform_origins, origin, state.parsed.transforms.size())
+		store_integer(state.parsed.transform_origins, body_finish, -state.parsed.transforms.size())
+	end
+	return !has_diagnostic(state)
+end
+
+# A trailing body belongs to a whole statement value. The parser records only
+# syntax; neither the spelling File nor a provider flag grants a resource here.
+def parse_call_block_syntax(mut state: CompilerState, mut position: Array<Integer>, call_start: Integer): Boolean
+	origin := position[0]
+	encoded := sparse_integer_at(state.callables.call_block_origins, origin)
+	if encoded > 0
+		position[0] = state.callables.call_blocks[encoded - 1].finish
+		return true
+	end
+	brace := token_is(state, origin, "{")
+	advance(position)
+	mut parameters: Array<LambdaParameter> := []
+	if token_is(state, position[0], "|")
+		advance(position)
+		while !token_is(state, position[0], "|") && !has_diagnostic(state)
+			binding := position[0]
+			name := expect_identifier(state, position)
+			parameters.each do |parameter|
+				if parameter.name == name
+					diagnostic(state, "TRBN4002", load_integer(state.source_tokens.token_lines, binding), "duplicate block parameter " + name)
+				end
+			end
+			parameters.push(LambdaParameter.new(name: name, type_name: "", origin: binding, mutable: 0))
+			if !token_is(state, position[0], ",")
+				break
+			end
+			advance(position)
+		end
+		if !expect(state, position, "|")
+			return false
+		end
+	elsif brace
+		diagnostic(state, "TRBN4002", load_integer(state.source_tokens.token_lines, origin), "call block parameters must be written as |name, ...|")
+		return false
+	end
+	if !brace && !finish_statement(state, position)
+		return false
+	end
+	skip_newlines(state, position)
+	body_start := position[0]
+	if !parse_statement_block(state, position)
+		return false
+	end
+	body_finish := position[0]
+	mut terminator := "end"
+	if brace
+		terminator = "}"
+	end
+	if !expect(state, position, terminator)
+		return false
+	end
+	state.callables.call_blocks.push(CallBlockSyntax.new(origin: origin, call_start: call_start, parameters: parameters, body_start: body_start, body_finish: body_finish, finish: position[0]))
+	store_integer(state.callables.call_block_origins, origin, state.callables.call_blocks.size())
+	return !has_diagnostic(state)
+end

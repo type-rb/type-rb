@@ -1,0 +1,65 @@
+import { check } from compiler
+import { compiler_test_instruction_with_cell } from testing/compiler
+import { managed_mir_test_fixture } from testing/mir/managed
+import { logical_checked_source } from testing/pipeline
+import { MirRootPlan } from mir/model/module
+import { mir_instruction_effects } from mir/analysis/call_effects
+import { verify_mir } from mir/verify/module
+import { describe, expect, test } from trb/std/test
+
+describe("String transform MIR") do
+	test("owns splitting and literal replacement after source erasure and reordered blocks") do
+		managed_mir_test_fixture("string-transforms-mir", 8)
+	end
+	test("owns case conversion after source erasure and reordered blocks") do
+		managed_mir_test_fixture("string-case-mir", 8)
+	end
+	test("retains original receivers and all replacement arguments across collection") do
+		managed_mir_test_fixture("string-transforms-managed-mir", 12)
+	end
+	test("rejects forged transform types operands modes and failures independently") do
+		mut kind := 60
+		while kind <= 62
+			mut cell := 0
+			while cell < 6
+				mut state := logical_checked_source("def main()\nnumber := 1\nputs(\"a:b\".split(\":\").size())\nputs(\"a:b\".replace_all(\"a\", \"c\"))\nputs(\"value\".upcase())\nputs(number)\nend\n")
+				expect(check(state)).to_be_true()
+				mut index := 0
+				while index < state.scalar_mir.instructions.size() && state.scalar_mir.instructions[index].kind != kind
+					index += 1
+				end
+				expect(index < state.scalar_mir.instructions.size()).to_be_true()
+				instruction := state.scalar_mir.instructions[index]
+				expect(mir_instruction_effects(state.scalar_mir, instruction)).to_equal(9)
+				state.scalar_mir.instructions[index] = compiler_test_instruction_with_cell(instruction, cell, 999999)
+				expect(verify_mir(state.scalar_mir, true).empty?()).to_be_false()
+				cell += 1
+			end
+			kind += 1
+		end
+	end
+	test("requires roots for receiver pattern and replacement until allocation") do
+		mut removed := 0
+		while removed < 3
+			mut state := logical_checked_source("def main()\nputs((1.to_s() + \"b\").replace_all(1.to_s(), 2.to_s()))\nend\n")
+			expect(check(state)).to_be_true()
+			plan := state.scalar_mir.root_plans[0]
+			mut point := 0
+			while state.scalar_mir.instructions[plan.instructions[point]].kind != 61
+				point += 1
+			end
+			expect(plan.roots[point].size()).to_equal(3)
+			mut roots := plan.roots
+			mut kept: Array<Integer> := []
+			roots[point].each.with_index do |value, index|
+				if index != removed
+					kept.push(value)
+				end
+			end
+			roots[point] = kept
+			state.scalar_mir.root_plans[0] = MirRootPlan.new(function_id: plan.function_id, instructions: plan.instructions, roots: roots, capacity: plan.capacity)
+			expect(verify_mir(state.scalar_mir, true)).to_equal("MIR live root plan differs")
+			removed += 1
+		end
+	end
+end

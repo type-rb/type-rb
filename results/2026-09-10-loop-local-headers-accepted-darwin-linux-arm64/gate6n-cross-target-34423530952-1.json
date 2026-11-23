@@ -1,0 +1,15 @@
+{
+  "workflow": "https://github.com/type-rb/type-rb-native/actions/runs/34423530952",
+  "sourceRevision": "b230d34c1a415eab9f8eaa98c7ed418b57b5bafa",
+  "artifact": {
+    "id": 10131907562,
+    "name": "gate6n-cross-target-34423530952-1",
+    "size_in_bytes": 1264,
+    "digest": "sha256:409b45d9cdf6ab39091acba3d0a5a73f65e235eadb86c3c3fc728e28a8590789"
+  },
+  "evidence": {
+    "identities.txt": "fixed_point_qbe_sha256=ab9c8729308823f7c12e26c3616587032569e19e8eddc2e710b59cd1cf35de7a\nportable_entry_qbe_sha256=3deb18dcfc43842551eda05c5a6eabe9fb38d5822674fc17af3c9d3902feb722\n",
+    "invocation.txt": "candidate_revision=db0310c8f381ecf3957afc76d31be2ce167cd065\nworkflow_run_id=34423530952\nworkflow_run_attempt=1\n",
+    "observed-identities.txt": "candidate_revision=db0310c8f381ecf3957afc76d31be2ce167cd065\namd64_profile=linux-amd64-v0\narm64_profile=linux-arm64-v0\namd64_producer_attempt=1\narm64_producer_attempt=1\namd64_artifact=gate6n-linux-amd64-34423530952-1\narm64_artifact=gate6n-linux-arm64-34423530952-1\namd64_fixed_point_qbe_sha256=ab9c8729308823f7c12e26c3616587032569e19e8eddc2e710b59cd1cf35de7a\narm64_fixed_point_qbe_sha256=ab9c8729308823f7c12e26c3616587032569e19e8eddc2e710b59cd1cf35de7a\namd64_portable_entry_qbe_sha256=3deb18dcfc43842551eda05c5a6eabe9fb38d5822674fc17af3c9d3902feb722\narm64_portable_entry_qbe_sha256=3deb18dcfc43842551eda05c5a6eabe9fb38d5822674fc17af3c9d3902feb722\n"
+  }
+}

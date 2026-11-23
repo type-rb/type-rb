@@ -1,0 +1,328 @@
+import { default_parameter, default_record_field } from state/default_kinds
+import { generic_record } from frontend/types/generic_kinds
+import { attribute_record_field } from frontend/types/attribute_kinds
+import { GlobalDeclaration } from frontend/types/global_model
+import { namespace_qualify } from frontend/types/namespace_model
+import { enum_uppercase } from frontend/types/enum_types
+import { find_newtype_type } from frontend/types/newtype_types
+import { GenericDefinition, GenericField, GenericFunction, GenericParameter, GenericVariant } from frontend/types/generic_model
+import { parse_generic_parameters } from frontend/syntax/generic_syntax
+import { parse_declaration_attributes } from frontend/syntax/attribute_syntax
+import { advance, expect, expect_identifier, finish_statement, parse_type, skip_newlines, token_is } from frontend/syntax/syntax_tokens
+import { CompilerState, diagnostic, function_index_key, terminal_token } from state/state
+import { DefaultInitializer } from state/source_state
+import { load_integer, load_string, store_integer, store_string } from support/storage
+import { parse_expression_syntax, parse_statement_block } from frontend/syntax/body_syntax
+
+def parse_default_initializer(mut state: CompilerState, mut position: Array<Integer>, kind: Integer, owner: Integer, slot: Integer): Boolean
+	advance(position)
+	start := position[0]
+	if !parse_expression_syntax(state, position, 1)
+		return false
+	end
+	state.parsed.default_initializers.push(DefaultInitializer.new(kind: kind, owner: owner, slot: slot, start: start, finish: position[0]))
+	state.parsed.default_functions.push(-1)
+	if kind == default_parameter()
+		store_integer(state.parsed.parameter_defaults, slot, state.parsed.default_initializers.size())
+	else
+		store_integer(state.parsed.field_defaults, slot, state.parsed.default_initializers.size())
+	end
+	return true
+end
+
+def parse_record(mut state: CompilerState, mut position: Array<Integer>): Boolean
+	line := load_integer(state.source_tokens.token_lines, position[0])
+	advance(position)
+	name := namespace_qualify(state.global_bindings.declaration_owner[0], expect_identifier(state, position))
+	mut parameters: Array<String> := []
+	mut fields: Array<GenericField> := []
+	if token_is(state, position[0], "<")
+		parameters = parse_generic_parameters(state, position, line)
+	end
+	if !finish_statement(state, position)
+		return false
+	end
+	record_index := state.declarations.record_count[0]
+	if parameters.size() == 0
+		store_string(state.declarations.record_names, record_index, name)
+		store_integer(state.declarations.record_modules, record_index, state.module_graph.active_module[0])
+		store_integer(state.declarations.record_field_starts, record_index, state.declarations.field_count[0])
+		store_integer(state.declarations.record_lines, record_index, line)
+	end
+	mut count := 0
+	mut default_seen := false
+	while !token_is(state, position[0], "end")
+		if terminal_token(state, position[0])
+			diagnostic(state, "TRBN4002", load_integer(state.source_tokens.token_lines, position[0]), "expected end for record " + name)
+			return false
+		end
+		field_line := load_integer(state.source_tokens.token_lines, position[0])
+		field_name := expect_identifier(state, position)
+		if !expect(state, position, ":")
+			return false
+		end
+		field_type := parse_type(state, position)
+		mut default_start := -1
+		mut default_finish := -1
+		if token_is(state, position[0], "=")
+			if parameters.size() > 0
+				advance(position)
+				default_start = position[0]
+				if !parse_expression_syntax(state, position, 1)
+					return false
+				end
+				default_finish = position[0]
+			elsif !parse_default_initializer(state, position, default_record_field(), record_index, state.declarations.field_count[0])
+				return false
+			end
+			default_seen = true
+		elsif default_seen
+			diagnostic(state, "TRBN4002", field_line, "required record field cannot follow a default field")
+			return false
+		end
+		if !parse_declaration_attributes(state, position, attribute_record_field(), name, field_name)
+			return false
+		end
+		if !finish_statement(state, position)
+			return false
+		end
+		if parameters.size() > 0
+			fields.push(GenericField.new(name: field_name, type_name: field_type, line: field_line, named_only: true, default_start: default_start, default_finish: default_finish))
+		else
+			field_index := state.declarations.field_count[0]
+			store_string(state.declarations.field_names, field_index, field_name)
+			store_string(state.declarations.field_types, field_index, field_type)
+			store_string(state.parsed.field_type_names, field_index, field_type)
+			store_integer(state.declarations.field_lines, field_index, field_line)
+			state.declarations.field_count[0] = field_index + 1
+		end
+		count += 1
+	end
+	advance(position)
+	if parameters.size() > 0
+		variant := GenericVariant.new(name: name, line: line, fields: fields)
+		state.type_resolution.generic_definitions.push(GenericDefinition.new(kind: generic_record(), name: name, source_id: state.module_graph.active_module[0], line: line, parameters: parameters, variants: [variant]))
+	else
+		store_integer(state.declarations.record_field_counts, record_index, count)
+		state.declarations.record_count[0] = record_index + 1
+	end
+	return finish_statement(state, position)
+end
+
+def parse_function(mut state: CompilerState, mut position: Array<Integer>, receiver_type: String, outer_parameters: Array<String>, object_member: Boolean, signature_only: Boolean): Boolean
+	line := load_integer(state.source_tokens.token_lines, position[0])
+	if !signature_only || token_is(state, position[0], "def")
+		advance(position)
+	end
+	mut name := expect_identifier(state, position)
+	mut class_member := false
+	if name == "self" && token_is(state, position[0], ".")
+		if receiver_type != ""
+			diagnostic(state, "TRBN4002", line, "enum class methods are not supported")
+			return false
+		end
+		if state.global_bindings.declaration_owner[0] == ""
+			diagnostic(state, "TRBN4002", line, "class method requires a declaration owner")
+			return false
+		end
+		advance(position)
+		name = expect_identifier(state, position)
+		class_member = true
+	elsif state.global_bindings.declaration_owner[0] != "" && receiver_type == ""
+		diagnostic(state, "TRBN4002", line, "module methods currently require def self.name")
+		return false
+	end
+	if object_member && class_member
+		name = "self::" + name
+	end
+	name = namespace_qualify(state.global_bindings.declaration_owner[0], name)
+	mut type_parameters: Array<String> := []
+	outer_parameters.each do |parameter|
+		type_parameters.push(parameter)
+	end
+	mut generic_parameters: Array<GenericParameter> := []
+	if token_is(state, position[0], "<")
+		method_parameters := parse_generic_parameters(state, position, line)
+		method_parameters.each do |parameter|
+			type_parameters.push(parameter)
+		end
+		if state.global_bindings.declaration_owner[0] != "" && !object_member && find_newtype_type(state, receiver_type) < 0
+			diagnostic(state, "TRBN4002", line, "module methods do not support type parameters")
+			return false
+		end
+	end
+	if !expect(state, position, "(")
+		return false
+	end
+	skip_newlines(state, position)
+	parameter_start := state.declarations.parameter_count[0]
+	mut parameter_count := 0
+	if receiver_type != ""
+		if type_parameters.size() > 0 || object_member
+			generic_parameters.push(GenericParameter.new(name: "self", type_name: receiver_type, line: line, mutable: 0, named_only: 0, default_start: -1, default_finish: -1))
+		else
+			store_string(state.declarations.parameter_names, parameter_start, "self")
+			store_string(state.declarations.parameter_types, parameter_start, receiver_type)
+			store_integer(state.declarations.parameter_mutable, parameter_start, 0)
+			store_integer(state.declarations.parameter_named_only, parameter_start, 0)
+			store_integer(state.declarations.parameter_lines, parameter_start, line)
+			state.declarations.parameter_count[0] += 1
+		end
+		parameter_count = 1
+	end
+	mut named_only := 0
+	mut named_count := 0
+	mut default_seen := false
+	if !token_is(state, position[0], ")")
+		mut finished := false
+		while !finished
+			skip_newlines(state, position)
+			if token_is(state, position[0], ")")
+				finished = true
+			elsif token_is(state, position[0], "*")
+				if named_only == 1
+					diagnostic(state, "TRBN4002", load_integer(state.source_tokens.token_lines, position[0]), "parameter list has more than one named-only boundary")
+					return false
+				end
+				named_only = 1
+				default_seen = false
+				advance(position)
+				if !expect(state, position, ",")
+					return false
+				end
+			else
+				mut mutable := 0
+				if token_is(state, position[0], "mut")
+					mutable = 1
+					advance(position)
+				end
+				parameter_line := load_integer(state.source_tokens.token_lines, position[0])
+				parameter_name := expect_identifier(state, position)
+				if !expect(state, position, ":")
+					return false
+				end
+				parameter_type := parse_type(state, position)
+				parameter_index := state.declarations.parameter_count[0]
+				mut default_start := -1
+				mut default_finish := -1
+				if token_is(state, position[0], "=")
+					if type_parameters.size() > 0 || object_member
+						advance(position)
+						default_start = position[0]
+						if !parse_expression_syntax(state, position, 1)
+							return false
+						end
+						default_finish = position[0]
+					elsif !parse_default_initializer(state, position, default_parameter(), state.declarations.function_count[0], parameter_index)
+						return false
+					end
+					default_seen = true
+				elsif default_seen
+					diagnostic(state, "TRBN4002", parameter_line, "required parameter cannot follow a default parameter in the same parameter group")
+					return false
+				end
+				if signature_only && (mutable != 0 || default_start >= 0)
+					diagnostic(state, "TRBN4002", parameter_line, "interface parameter cannot have mut or a default")
+					return false
+				end
+				if type_parameters.size() > 0 || object_member
+					generic_parameters.push(GenericParameter.new(name: parameter_name, type_name: parameter_type, line: parameter_line, mutable: mutable, named_only: named_only, default_start: default_start, default_finish: default_finish))
+				else
+					store_string(state.declarations.parameter_names, parameter_index, parameter_name)
+					store_string(state.declarations.parameter_types, parameter_index, parameter_type)
+					store_integer(state.declarations.parameter_mutable, parameter_index, mutable)
+					store_integer(state.declarations.parameter_named_only, parameter_index, named_only)
+					store_integer(state.declarations.parameter_lines, parameter_index, parameter_line)
+					state.declarations.parameter_count[0] = parameter_index + 1
+				end
+				named_count += named_only
+				parameter_count += 1
+				if token_is(state, position[0], ",")
+					advance(position)
+					skip_newlines(state, position)
+				else
+					finished = true
+				end
+			end
+		end
+	end
+	if named_only == 1 && named_count == 0
+		diagnostic(state, "TRBN4002", line, "named-only boundary requires a parameter")
+		return false
+	end
+	skip_newlines(state, position)
+	if !expect(state, position, ")")
+		return false
+	end
+	mut result_type := "Void"
+	if token_is(state, position[0], ":")
+		advance(position)
+		result_type = parse_type(state, position)
+	end
+	if !finish_statement(state, position)
+		return false
+	end
+	body_start := position[0]
+	mut body_end := body_start
+	if !signature_only
+		if !parse_statement_block(state, position)
+			return false
+		end
+		body_end = position[0]
+		if !expect(state, position, "end") || !finish_statement(state, position)
+			return false
+		end
+	end
+	if type_parameters.size() > 0 || object_member
+		state.type_resolution.generic_functions.push(GenericFunction.new(receiver_type: receiver_type, name: name, source_id: state.module_graph.active_module[0], line: line, type_parameters: type_parameters, parameters: generic_parameters, result_type: result_type, body_start: body_start, body_finish: body_end))
+		return true
+	end
+	function_index := state.declarations.function_count[0]
+	store_string(state.nominal.function_receivers, function_index, receiver_type)
+	store_string(state.declarations.function_names, function_index, name)
+	store_integer(state.declarations.function_modules, function_index, state.module_graph.active_module[0])
+	store_integer(state.declarations.function_parameter_starts, function_index, parameter_start)
+	store_integer(state.declarations.function_parameter_counts, function_index, parameter_count)
+	store_string(state.declarations.function_result_types, function_index, result_type)
+	store_integer(state.declarations.function_body_starts, function_index, body_start)
+	store_integer(state.declarations.function_body_ends, function_index, body_end)
+	store_integer(state.declarations.function_lines, function_index, line)
+	state.declarations.function_lookup[function_index_key(state.module_graph.active_module[0], name)] = function_index
+	state.declarations.function_count[0] = function_index + 1
+	return true
+end
+
+def parse_global(mut state: CompilerState, mut position: Array<Integer>): Boolean
+	origin := position[0]
+	line := load_integer(state.source_tokens.token_lines, origin)
+	mut mutable := false
+	if token_is(state, position[0], "mut")
+		mutable = true
+		advance(position)
+	end
+	constant := enum_uppercase(load_string(state.source_tokens.token_texts, position[0]))
+	leaf := expect_identifier(state, position)
+	name := namespace_qualify(state.global_bindings.declaration_owner[0], leaf)
+	if leaf == "_"
+		diagnostic(state, "TRBN4002", line, "blank binding _ is only valid as a parameter or pattern binding")
+		return false
+	end
+	if constant && mutable
+		diagnostic(state, "TRBN4002", line, "constant cannot be mutable")
+		return false
+	end
+	mut annotation := ""
+	if token_is(state, position[0], ":")
+		advance(position)
+		annotation = parse_type(state, position)
+	end
+	if !expect(state, position, ":=")
+		return false
+	end
+	start := position[0]
+	if !parse_expression_syntax(state, position, 1)
+		return false
+	end
+	state.global_bindings.globals.push(GlobalDeclaration.new(constant: constant, mutable: mutable, name: name, source_id: state.module_graph.active_module[0], line: line, origin: origin, start: start, finish: position[0], annotation: annotation))
+	return finish_statement(state, position)
+end

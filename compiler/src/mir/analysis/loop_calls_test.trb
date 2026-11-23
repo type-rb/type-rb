@@ -1,0 +1,174 @@
+import { emit_qbe } from compiler
+import { array_loop_mir_check } from testing/mir/array_loops
+import { control_test_output } from testing/mir/control
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { logical_run_qbe } from testing/qbe_runner
+import { MirLoopCall, mir_function_index, mir_module_new } from mir/model/module
+import { optimize_verified_mir } from mir/passes/optimize
+import { verify_mir } from mir/verify/module
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+def loop_call_source(body: String): String
+	return "def read_value(values: Array<Integer>): Integer\nreturn values[0]\nend\ndef repeat(mut values: Array<Integer>, limit: Integer): Integer\nmut index := 0\nmut total := 0\nwhile index < limit\n" + body + "\nindex += 1\nend\nreturn total\nend\ndef main()\nputs(repeat([7], 4))\nend\n"
+end
+
+def loop_call_execute(source: String, expected: String)
+	state := array_loop_mir_check(source)
+	qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+	if qbe != nil
+		case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+		when Result::Ok(actual)
+			expect(actual).to_equal(expected)
+		when Result::Err(error)
+			puts(error)
+			expect(false).to_be_true()
+		end
+	end
+end
+
+describe("MIR invariant loop calls") do
+	test("lazily reuses a scalar read with exact invariant Array identity") do
+		source := loop_call_source("total += read_value(values)")
+		state := array_loop_mir_check(source)
+		expect(state.scalar_mir.loop_calls[mir_function_index(state.scalar_mir, 1)].size()).to_equal(1)
+		qbe := control_test_output(emit_qbe(state))
+		expect(qbe.include?("%mir_loop_ready")).to_be_true()
+		expect(qbe.include?("%mir_loop_result")).to_be_true()
+		loop_call_execute(source, "28\n")
+	end
+
+	test("rejects alias mutation growth allocation and observable calls anywhere in the loop") do
+		[
+			"total += read_value(values)\nvalues[0] += 1",
+			"total += read_value(values)\nvalues.push(9)",
+			"total += read_value(values)\nputs(index)",
+			"total += read_value(values)\ntext := index.to_s()\ntotal += text.size()",
+		].each do |body|
+			state := array_loop_mir_check(loop_call_source(body))
+			expect(state.scalar_mir.loop_calls[mir_function_index(state.scalar_mir, 1)].size()).to_equal(0)
+		end
+		loop_call_execute(loop_call_source("total += read_value(values)\nvalues[0] += 1"), "34\n")
+	end
+
+	test("keeps changing arguments and allocating scalar callees out of the cache") do
+		source := "def next_value(value: Integer): Integer\nreturn value + 1\nend\ndef allocated(value: Integer): Integer\nreturn value.to_s().size()\nend\ndef repeat(limit: Integer): Integer\nmut index := 0\nmut total := 0\nwhile index < limit\ntotal += next_value(index)\nindex += 1\nend\nreturn total\nend\ndef other(limit: Integer): Integer\nmut index := 0\nmut total := 0\nwhile index < limit\ntotal += allocated(limit)\nindex += 1\nend\nreturn total\nend\ndef main()\nputs(repeat(4))\nputs(other(4))\nend\n"
+		state := array_loop_mir_check(source)
+		expect(state.scalar_mir.loop_calls[mir_function_index(state.scalar_mir, 2)].size()).to_equal(0)
+		expect(state.scalar_mir.loop_calls[mir_function_index(state.scalar_mir, 3)].size()).to_equal(0)
+		loop_call_execute(source, "10\n4\n")
+	end
+
+	test("does not speculate calls from zero-trip and skipped branches") do
+		source := "def first(values: Array<Integer>): Integer\nreturn values[0]\nend\ndef repeat(values: Array<Integer>, limit: Integer, enabled: Boolean): Integer\nmut index := 0\nmut total := 0\nwhile index < limit\nif enabled\ntotal += first(values)\nend\nindex += 1\nend\nreturn total\nend\ndef main()\nempty: Array<Integer> := []\nputs(repeat(empty, 0, true))\nputs(repeat(empty, 3, false))\nputs(repeat([2], 3, true))\nend\n"
+		state := array_loop_mir_check(source)
+		expect(state.scalar_mir.loop_calls[mir_function_index(state.scalar_mir, 1)].size()).to_equal(1)
+		loop_call_execute(source, "0\n0\n6\n")
+	end
+
+	test("resets on inner-loop reentry instead of reusing a previous outer argument") do
+		source := "def next_value(value: Integer): Integer\nreturn value + 1\nend\ndef repeat(limit: Integer): Integer\nmut outer := 0\nmut total := 0\nwhile outer < limit\nmut inner := 0\nwhile inner < 3\ntotal += next_value(outer)\ninner += 1\nend\nouter += 1\nend\nreturn total\nend\ndef main()\nputs(repeat(3))\nend\n"
+		state := array_loop_mir_check(source)
+		expect(state.scalar_mir.loop_calls[mir_function_index(state.scalar_mir, 1)].size()).to_equal(1)
+		loop_call_execute(source, "18\n")
+	end
+
+	test("preserves Float and Boolean scalar results") do
+		source := "def half(value: Float): Float\nreturn value / 2.0\nend\ndef positive(value: Integer): Boolean\nreturn value > 0\nend\ndef repeat(value: Float, flag: Integer): Float\nmut index := 0\nmut total := 0.0\nwhile index < 4\nif positive(flag)\ntotal += half(value)\nend\nindex += 1\nend\nreturn total\nend\ndef main()\nputs(repeat(3.0, 1))\nputs(repeat(3.0, -1))\nend\n"
+		state := array_loop_mir_check(source)
+		expect(state.scalar_mir.loop_calls[mir_function_index(state.scalar_mir, 2)].size()).to_equal(2)
+		loop_call_execute(source, "6.0\n0.0\n")
+	end
+
+	test("independently rejects missing forged and stale cache plans") do
+		mut state := array_loop_mir_check(loop_call_source("total += read_value(values)"))
+		index := mir_function_index(state.scalar_mir, 1)
+		old := state.scalar_mir.loop_calls[index][0]
+		state.scalar_mir.loop_calls[index][0] = MirLoopCall.new(header: old.header, preheader: old.header, instruction: old.instruction)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR loop-call plan differs")
+		state.scalar_mir.loop_calls[index] = []
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR loop-call plan differs")
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		mut changed := array_loop_mir_check(loop_call_source("total += read_value(values)\nvalues[0] += 1"))
+		changed.scalar_mir.loop_calls[mir_function_index(changed.scalar_mir, 1)].push(old)
+		expect(verify_mir(changed.scalar_mir, true)).to_equal("MIR loop-call plan differs")
+	end
+
+	test("rejects input facts and empty-module forged cache containers") do
+		mut raw := mir_module_new()
+		raw.loop_calls.push([MirLoopCall.new(header: 0, preheader: 1, instruction: 0)])
+		expect(verify_mir(raw, false).empty?()).to_be_false()
+		expect(verify_mir(raw, true).empty?()).to_be_false()
+	end
+
+	test("does not retain results across global or field mutation") do
+		source := "mut shared := 1\ndef read_shared(): Integer\nreturn shared\nend\ndef repeat(): Integer\nmut index := 0\nmut total := 0\nwhile index < 4\ntotal += read_shared()\nshared += 1\nindex += 1\nend\nreturn total\nend\ndef main()\nputs(repeat())\nend\n"
+		state := array_loop_mir_check(source)
+		expect(state.scalar_mir.loop_calls[mir_function_index(state.scalar_mir, 1)].size()).to_equal(0)
+		loop_call_execute(source, "10\n")
+		fields := "class Cell\n@value: Integer\ndef initialize(value: Integer)\n@value = value\nend\ndef read(): Integer\nreturn @value\nend\ndef bump()\n@value += 1\nend\nend\ndef repeat(cell: Cell): Integer\nmut index := 0\nmut total := 0\nwhile index < 4\ntotal += cell.read()\ncell.bump()\nindex += 1\nend\nreturn total\nend\ndef main()\nputs(repeat(Cell.new(1)))\nend\n"
+		loop_call_execute(fields, "10\n")
+	end
+
+	test("keeps the first failing call at its original position") do
+		source := "def first(values: Array<Integer>): Integer\nreturn values[0]\nend\ndef repeat(values: Array<Integer>, limit: Integer): Integer\nmut index := 0\nmut total := 0\nwhile index < limit\ntotal += first(values)\nindex += 1\nend\nreturn total\nend\ndef main()\nempty: Array<Integer> := []\nputs(repeat(empty, 1))\nend\n"
+		state := array_loop_mir_check(source)
+		expect(state.scalar_mir.loop_calls[mir_function_index(state.scalar_mir, 1)].size()).to_equal(1)
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+			when Result::Ok(_actual)
+				expect(false).to_be_true()
+			when Result::Err(error)
+				expect(error.include?("index")).to_be_true()
+			end
+		end
+	end
+
+	test("survives source erasure storage reordering and repeated optimization") do
+		mut state := array_loop_mir_check(loop_call_source("total += read_value(values)"))
+		before := control_test_output(emit_qbe(state))
+		intrinsic_mir_erase(state)
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+		# Groups belong to function identities, not contiguous value-table rows.
+		mut first := 0
+		mut last := state.scalar_mir.values.size() - 1
+		while first < last
+			saved := state.scalar_mir.values[first]
+			state.scalar_mir.values[first] = state.scalar_mir.values[last]
+			state.scalar_mir.values[last] = saved
+			first += 1
+			last -= 1
+		end
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+		state.scalar_mir.functions.each do |function|
+			mut left := function.block_start
+			mut right := left + function.block_count - 1
+			while left < right
+				saved := state.scalar_mir.blocks[left]
+				state.scalar_mir.blocks[left] = state.scalar_mir.blocks[right]
+				state.scalar_mir.blocks[right] = saved
+				left += 1
+				right -= 1
+			end
+		end
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+			when Result::Ok(actual)
+				expect(actual).to_equal("28\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+end

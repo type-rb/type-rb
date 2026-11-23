@@ -1,0 +1,27 @@
+def main()
+	values := [10, 20]
+	mut total := 0
+	mut index := 0
+	while index < values.size()
+		mut pass := 0
+		while pass < 1
+			total += values[index]
+			pass += 1
+		end
+		index += 1
+	end
+	mut outer := 0
+	while outer < values.size()
+		mut other := outer + 1
+		while other < values.size()
+			total += values[other]
+			other += 1
+		end
+		outer += 1
+	end
+	index = 0
+	puts(total.to_s())
+	puts(values[index].to_s())
+	puts(values[-1].to_s())
+	return
+end

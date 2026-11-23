@@ -1,0 +1,91 @@
+import { install_test_body } from frontend/providers/test_origins
+import { TypeAlias } from frontend/types/alias_model
+import { CompilerState, diagnostic } from state/state
+import { integer_string } from support/literals
+import { load_integer } from support/storage
+
+def test_scalar_inspection(target: String, name: String): String
+	return "inspect_value<" + target + ">(" + name + ")"
+end
+
+# Assertion bodies use one typed inspector; layout support is independently
+# verified in MIR before any runtime adapter is emitted.
+def test_scalar_assertion_body(kind: Integer, target: String): String
+	actual := test_scalar_inspection("Target", "actual")
+	expected := test_scalar_inspection("Target", "expected")
+	if kind < 10 || kind > 14 || actual == ""
+		return ""
+	end
+	mut condition := "false"
+	mut message := ""
+	if kind == 10 || kind == 11
+		condition = "deep_equal<Target>(actual, expected)"
+		mut relation := " to equal "
+		if kind == 11
+			condition = "!" + condition
+			relation = " not to equal "
+		end
+		message = "\"expected \" + " + actual + " + \"" + relation + "\" + " + expected
+	elsif kind == 12 || kind == 13
+		mut wanted := "true"
+		if kind == 13
+			wanted = "false"
+		end
+		mut classification := "1"
+		if kind == 13
+			classification = "2"
+		end
+		condition = "scalar_kind<Target>(actual) == " + classification
+		message = "\"expected \" + " + actual + " + \" to be " + wanted + "\""
+	else
+		condition = "scalar_kind<Target>(actual) == 0"
+		message = "\"expected \" + " + actual + " + \" to be nil\""
+	end
+	return "if " + condition + "\nreturn\nend\nfail<Integer>(" + message + ", path, line, column)\nend\n"
+end
+
+# The successful payload retains its actual type, including managed values.
+# Only the opposite variant needs an inspector for a failure diagnostic.
+def test_result_assertion_body(kind: Integer, arguments: Array<String>): String
+	mut wanted := "Ok"
+	mut unexpected := "Err"
+	mut result_type := "Target"
+	if kind == 16
+		wanted = "Err"
+		unexpected = "Ok"
+		result_type = "Error"
+	end
+	mut inspected := test_scalar_inspection("Error", "value")
+	if kind == 16
+		inspected = test_scalar_inspection("Target", "value")
+	end
+	if inspected == ""
+		return ""
+	end
+	return "case actual\nwhen Result::" + wanted + "(value)\nreturn value\nwhen Result::" + unexpected + "(value)\nreturn fail<" + result_type + ">(\"expected " + wanted + ", got " + unexpected + "(\" + " + inspected + " + \")\", path, line, column)\nend\nend\n"
+end
+
+def specialize_test_assertion(mut state: CompilerState, function: Integer, arguments: Array<String>, kind: Integer, line: Integer): Boolean
+	if state.type_resolution.generic_template_mode[0]
+		return true
+	end
+	mut body := ""
+	namespace := "$test_assertion" + integer_string(function)
+	if arguments.size() == 1
+		owner := load_integer(state.declarations.function_modules, function)
+		state.type_resolution.type_aliases.push(TypeAlias.new(name: namespace + "::Target", source_id: owner, line: line, parameters: [], target: arguments[0]))
+		body = test_scalar_assertion_body(kind, arguments[0])
+	elsif arguments.size() == 2 && (kind == 15 || kind == 16)
+		body = test_result_assertion_body(kind, arguments)
+		if body != ""
+			owner := load_integer(state.declarations.function_modules, function)
+			state.type_resolution.type_aliases.push(TypeAlias.new(name: namespace + "::Target", source_id: owner, line: line, parameters: [], target: arguments[0]))
+			state.type_resolution.type_aliases.push(TypeAlias.new(name: namespace + "::Error", source_id: owner, line: line, parameters: [], target: arguments[1]))
+		end
+	end
+	if body == ""
+		diagnostic(state, "TRBN4003", line, "test assertion requires an implemented value comparator and inspector")
+		return false
+	end
+	return install_test_body(state, function, namespace, body)
+end

@@ -1,0 +1,214 @@
+import { MirObject, MirObjectField, ObjectInstance } from frontend/types/object_model
+import { mir_object_id, mir_object_types_error } from mir/model/objects
+import { object_resolution_state } from testing/types/objects
+import { MirType } from mir/model/module
+import { mir_declare_types, mir_managed_type, mir_semantic_type_id, mir_types_error } from mir/model/types
+import { resolve_declarations } from frontend/checking/program/resolution
+import { CompilerState } from state/state
+import { resolve_type_name } from frontend/resolution/type_resolution
+import { store_integer, store_string } from support/storage
+import { expect_compiler_phase } from testing/pipeline
+import { describe, expect, test } from trb/std/test
+
+def object_mir_types_state(): CompilerState
+	mut state := object_resolution_state("interface Contract\nend\nclass Base implements Contract\nreadonly @text: String\nend\nclass Child < Base\n@following: Child?\n@rows: Array<Holder>\nend\nrecord Holder\nvalue: Child\nend\ndef main()\nend\n")
+	expect(resolve_declarations(state)).to_be_true()
+	mir_declare_types(state)
+	expect(mir_types_error(state.scalar_mir)).to_equal("")
+	return state
+end
+
+def object_mir_replace(declaration: Integer, type_id: Integer, name: String, source: Integer, line: Integer, interface_type: Boolean, parent: Integer, interfaces: Array<Integer>, fields: Array<MirObjectField>): MirObject
+	return MirObject.new(resource_kind: 0, initializer: -1, declaration: declaration, type_id: type_id, name: name, arguments: [], source_id: source, line: line, interface_type: interface_type, superclass: parent, interfaces: interfaces, fields: fields)
+end
+
+def object_mir_same_display_state(): CompilerState
+	mut state := object_resolution_state("record Left\nvalue: Integer\nend\nrecord Right\nvalue: Integer\nend\nclass Box<T>\n@value: T\nend\ndef main()\nend\n")
+	expect_compiler_phase(state, "declarations", resolve_declarations(state))
+	resolve_type_name(state, 0, "Box<Left>", false)
+	resolve_type_name(state, 0, "Box<Right>", false)
+	# Model two imported declarations with the same authored name. Their
+	# resolved record IDs remain distinct after diagnostic names are erased.
+	store_string(state.declarations.record_names, 0, "Same")
+	store_string(state.declarations.record_names, 1, "Same")
+	store_integer(state.declarations.record_modules, 1, 1)
+	state.module_graph.module_count[0] = 2
+	store_string(state.module_graph.module_names, 0, "left/model")
+	store_string(state.module_graph.module_names, 1, "right/model")
+	mir_declare_types(state)
+	return state
+end
+
+describe("Object MIR type graph") do
+	test("distinguishes generic arguments with identical diagnostic names") do
+		state := object_mir_same_display_state()
+		native_module := state.scalar_mir
+		expect(mir_types_error(native_module)).to_equal("")
+		expect(native_module.objects[0].name).to_equal("Box<Same>")
+		expect(native_module.objects[1].name).to_equal("Box<Same>")
+		expect(native_module.objects[0].arguments[0]).to_equal(native_module.records[0].type_id)
+		expect(native_module.objects[1].arguments[0]).to_equal(native_module.records[1].type_id)
+	end
+	test("rejects duplicated and invalid generic argument identities") do
+		[0, 999999, -1].each do |damage|
+			state := object_mir_same_display_state()
+			mut native_module := state.scalar_mir
+			row := native_module.objects[1]
+			mut argument := damage
+			if damage == -1
+				argument = native_module.objects[0].arguments[0]
+			end
+			native_module.objects[1] = MirObject.new(resource_kind: row.resource_kind, initializer: row.initializer, declaration: row.declaration, type_id: row.type_id, name: row.name, arguments: [argument], source_id: row.source_id, line: row.line, interface_type: row.interface_type, superclass: row.superclass, interfaces: row.interfaces, fields: row.fields)
+			expect(mir_types_error(native_module).empty?()).to_be_false()
+		end
+	end
+	test("owns class interface inheritance and recursive storage independently") do
+		mut state := object_mir_types_state()
+		mut native_module := state.scalar_mir
+		expect(native_module.objects.size()).to_equal(3)
+		contract := native_module.objects[0]
+		base := native_module.objects[1]
+		child := native_module.objects[2]
+		expect(contract.interface_type).to_be_true()
+		expect(base.interfaces[0]).to_equal(contract.type_id)
+		expect(child.superclass).to_equal(base.type_id)
+		expect(base.fields[0].readonly).to_be_true()
+		expect(native_module.fields[0].type_id).to_equal(child.type_id)
+		expect(mir_object_id(native_module, native_module.records[0].type_id)).to_equal(-1)
+		expect(mir_managed_type(native_module, child.type_id)).to_be_true()
+		expect(mir_managed_type(native_module, contract.type_id)).to_be_true()
+		state.nominal.object_instances[1].interfaces.push(99999)
+		state.nominal.object_instances[2] = ObjectInstance.new(definition: 99999, arguments: [], superclass: 99999, interfaces: [], fields: [])
+		mut token := 0
+		while token < state.source_tokens.token_count[0]
+			store_string(state.source_tokens.token_texts, token, "erased")
+			token += 1
+		end
+		expect(mir_object_types_error(native_module)).to_equal("")
+		expect(mir_types_error(native_module)).to_equal("")
+	end
+	test("retains concrete generic identities in fields and containers") do
+		mut state := object_resolution_state("class Node<T>\n@data: T\n@next: Node<T>?\nend\n")
+		resolve_type_name(state, 0, "Node<Integer>", false)
+		resolve_type_name(state, 0, "Node<String>", false)
+		mir_declare_types(state)
+		mut native_module := state.scalar_mir
+		expect(mir_types_error(native_module)).to_equal("")
+		expect(native_module.objects[0].name).to_equal("Node<Integer>")
+		expect(native_module.objects[1].name).to_equal("Node<String>")
+		expect(native_module.objects[0].fields[0].type_id).to_equal(1)
+		expect(native_module.objects[1].fields[0].type_id).to_equal(8)
+		expect(mir_semantic_type_id(native_module, "Array<Class#0>") > 0).to_be_true()
+		expect(mir_types_error(native_module)).to_equal("")
+	end
+	test("rejects forged nominal ownership kinds and declaration origins") do
+		mut kind := 0
+		while kind < 7
+			state := object_mir_types_state()
+			mut native_module := state.scalar_mir
+			row := native_module.objects[1]
+			mut declaration := row.declaration
+			mut type_id := row.type_id
+			mut name := row.name
+			mut source := row.source_id
+			mut line := row.line
+			mut interface_type := row.interface_type
+			if kind == 0
+				declaration = 99999
+			elsif kind == 1
+				type_id = native_module.records[0].type_id
+			elsif kind == 2
+				name = ""
+			elsif kind == 3
+				source = 99999
+			elsif kind == 4
+				line = 0
+			elsif kind == 5
+				interface_type = true
+			else
+				name = native_module.objects[2].name
+			end
+			native_module.objects[1] = object_mir_replace(declaration, type_id, name, source, line, interface_type, row.superclass, row.interfaces, row.fields)
+			expect(mir_types_error(native_module).empty?()).to_be_false()
+			kind += 1
+		end
+	end
+	test("rejects missing object rows and swapped class or interface types") do
+		mut kind := 0
+		while kind < 4
+			state := object_mir_types_state()
+			mut native_module := state.scalar_mir
+			row := native_module.types[native_module.objects[1].type_id - 9]
+			mut declaration := row.declaration
+			mut name := row.name
+			mut type_kind := row.kind
+			if kind == 0
+				declaration = 99999
+			elsif kind == 1
+				declaration = 0
+			elsif kind == 2
+				name = "Class#99"
+			else
+				type_kind = 14
+				name = "Interface#1"
+			end
+			native_module.types[native_module.objects[1].type_id - 9] = MirType.new(kind: type_kind, name: name, element: 0, key: 0, declaration: declaration)
+			expect(mir_types_error(native_module).empty?()).to_be_false()
+			kind += 1
+		end
+	end
+	test("rejects forged parent edges interface edges and cycles") do
+		mut kind := 0
+		while kind < 7
+			state := object_mir_types_state()
+			mut native_module := state.scalar_mir
+			row := native_module.objects[1]
+			mut parent := row.superclass
+			mut interfaces := row.interfaces
+			if kind == 0
+				parent = 99999
+			elsif kind == 1
+				parent = native_module.objects[0].type_id
+			elsif kind == 2
+				parent = native_module.objects[2].type_id
+			elsif kind == 3
+				interfaces = [99999]
+			elsif kind == 4
+				interfaces = [row.type_id]
+			elsif kind == 5
+				interfaces = [interfaces[0], interfaces[0]]
+			else
+				parent = -2
+			end
+			native_module.objects[1] = object_mir_replace(row.declaration, row.type_id, row.name, row.source_id, row.line, row.interface_type, parent, interfaces, row.fields)
+			expect(mir_types_error(native_module).empty?()).to_be_false()
+			kind += 1
+		end
+	end
+	test("rejects malformed fields and interface storage") do
+		mut kind := 0
+		while kind < 6
+			state := object_mir_types_state()
+			mut native_module := state.scalar_mir
+			mut row := native_module.objects[1]
+			field := row.fields[0]
+			mut fields := row.fields
+			if kind == 0
+				fields[0] = MirObjectField.new(name: "text", type_id: field.type_id, line: field.line, readonly: field.readonly)
+			elsif kind == 1
+				fields[0] = MirObjectField.new(name: field.name, type_id: 99999, line: field.line, readonly: field.readonly)
+			elsif kind == 2
+				fields[0] = MirObjectField.new(name: field.name, type_id: field.type_id, line: 0, readonly: field.readonly)
+			elsif kind == 3
+				fields.push(field)
+			elsif kind == 4
+				fields[0] = MirObjectField.new(name: field.name, type_id: 0, line: field.line, readonly: field.readonly)
+			else
+				row = native_module.objects[0]
+			end
+			native_module.objects[row.declaration] = object_mir_replace(row.declaration, row.type_id, row.name, row.source_id, row.line, row.interface_type, row.superclass, row.interfaces, fields)
+			expect(mir_types_error(native_module).empty?()).to_be_false()
+			kind += 1
+		end
+	end
+end

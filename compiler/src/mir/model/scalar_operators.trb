@@ -1,0 +1,27 @@
+# Internal scalar MIR payloads may overlap source operator numbers. Logical
+# expressions and compound assignments are normalized before scalar MIR is
+# built; these named tags describe verified backend permissions and operations.
+
+def mir_scalar_inline_multiply(): Integer
+	return 12
+end
+
+def mir_scalar_inline_add(): Integer
+	return 13
+end
+
+# Eager conjunction/disjunction of canonical Boolean SSA values. Source logical
+# operators still lower to short-circuit control flow; these do not evaluate RHS.
+def mir_scalar_boolean_and(): Integer
+	return 15
+end
+
+def mir_scalar_boolean_or(): Integer
+	return 16
+end
+
+# Permit single-rounding contraction with a later Float add/subtract. This
+# retains ordinary multiplication when the backend cannot prove a safe fusion.
+def mir_scalar_contract_multiply(): Integer
+	return 17
+end

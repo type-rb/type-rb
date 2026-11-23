@@ -1,4 +1,0 @@
-import { Model } from trb/orm
-
-class Report < Model
-end

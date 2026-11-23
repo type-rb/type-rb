@@ -1,0 +1,78 @@
+import { array_mir_test_read } from testing/mir/arrays
+import { check } from compiler
+import { lex } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { compiler_new, has_diagnostic } from state/state
+import { load_integer, load_string } from support/storage
+import { describe, expect, test } from trb/std/test
+import { object_syntax_state } from testing/syntax/objects
+import trb/std/process
+
+describe("Object declaration syntax") do
+	test("parses the complete prepared class fixture family") do
+		root := Process.environment("TYPE_RB_NATIVE_ROOT")
+		if root != nil
+			["object-class-array-field", "object-class-branch-initialization", "object-class-captured-value", "object-class-constant", "object-class-constructor-named-default", "object-class-field-assignment", "object-class-field-default", "object-class-float-boolean-fields", "object-class-generic-field", "object-class-generic-instance-method", "object-class-generic-interface", "object-class-in-hash", "object-class-in-record", "object-class-inherited-interface", "object-class-inherited-method", "object-class-initializer", "object-class-interface-array", "object-class-interface-dispatch", "object-class-interface-two-implementations", "object-class-managed-fields", "object-class-mutable-fields", "object-class-named-constructor", "object-class-named-method-default", "object-class-nullable", "object-class-private-method", "object-class-readonly-initialization", "object-class-recursive-field", "object-class-reference-alias", "object-class-self-method-call", "object-class-self-return", "object-class-static-method"].each do |name|
+				source := array_mir_test_read(root + "/compiler/conformance/valid/" + name + ".trb")
+				expect(source.size() > 0).to_be_true()
+				state := object_syntax_state(source)
+				expect(state.nominal.objects.size() > 0).to_be_true()
+			end
+		end
+	end
+	test("retains declared field defaults before constructor specialization") do
+		mut state := object_syntax_state("class Label\nreadonly @text: String := \"held\"\nend\ndef main()\nputs(1)\nend\n")
+		expect(state.nominal.objects.size()).to_equal(1)
+		definition := state.nominal.objects[0]
+		expect(definition.name).to_equal("Label")
+		expect(definition.fields[0].name).to_equal("@text")
+		expect(definition.fields[0].readonly).to_be_true()
+		expect(definition.fields[0].default_start >= 0).to_be_true()
+		expect(definition.fields[0].default_finish > definition.fields[0].default_start).to_be_true()
+		expect(check(state)).to_be_true()
+		expect(state.scalar_mir.functions.size()).to_equal(1)
+	end
+	test("retains generic contracts receivers and method declaration kinds") do
+		state := object_syntax_state("interface Source<T>\nget(): T\nend\nclass Box<T> implements Source<T>\nreadonly @value: T\ndef initialize(value: T)\n@value = value\nend\ndef get(): T\nreturn @value\nend\ndef self.number(): Integer\nreturn 1\nend\nend\n")
+		expect(state.nominal.objects.size()).to_equal(2)
+		expect(state.nominal.objects[0].interface_type).to_be_true()
+		expect(state.nominal.objects[0].parameters[0]).to_equal("T")
+		definition := state.nominal.objects[1]
+		expect(definition.interfaces[0]).to_equal("Source<T>")
+		expect(definition.methods.size()).to_equal(3)
+		expect(definition.methods[0].name).to_equal("initialize")
+		expect(definition.methods[0].class_member).to_be_false()
+		expect(definition.methods[2].class_member).to_be_true()
+		method := state.type_resolution.generic_functions[definition.methods[1].generic_function]
+		expect(method.receiver_type).to_equal("Box<T>")
+		expect(method.parameters[0].name).to_equal("self")
+		expect(method.result_type).to_equal("T")
+		expect(method.body_finish > method.body_start).to_be_true()
+	end
+	test("distinguishes superclass angles and preserves namespace origins") do
+		state := object_syntax_state("module Models\nclass Base\nend\nclass Derived<T> < Parent<T> implements First, Second<T>\n@value: T\nend\nclass Child < Base\nend\nend\n")
+		expect(state.nominal.objects.size()).to_equal(3)
+		expect(state.nominal.objects[1].name).to_equal("Models::Derived")
+		expect(state.nominal.objects[1].superclass).to_equal("Parent<T>")
+		expect(state.nominal.objects[1].interfaces.size()).to_equal(2)
+		expect(state.nominal.objects[2].superclass).to_equal("Base")
+		expect(state.nominal.objects[2].parameters.size()).to_equal(0)
+		expect(state.nominal.objects[1].fields[0].line).to_equal(5)
+	end
+	test("keeps instance tokens separate from ordinary binding declarations") do
+		mut state := compiler_new(32)
+		expect(lex(state, "@value @other value \"@quoted\"")).to_be_true()
+		expect(load_integer(state.source_tokens.token_kinds, 0)).to_equal(8)
+		expect(load_string(state.source_tokens.token_texts, 0)).to_equal("@value")
+		expect(load_integer(state.source_tokens.token_kinds, 2)).to_equal(1)
+		expect(load_integer(state.source_tokens.token_kinds, 3)).to_equal(3)
+	end
+	test("rejects incomplete object bodies and malformed field declarations") do
+		["class Missing\n", "class Broken\nreadonly value: Integer\nend\n", "class Broken\n@value: Integer = 1\nend\n", "interface Broken\n@value: Integer\nend\n"].each do |source|
+			mut state := compiler_new(source.size() + 1)
+			expect(lex(state, source)).to_be_true()
+			expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_false()
+			expect(has_diagnostic(state)).to_be_true()
+		end
+	end
+end

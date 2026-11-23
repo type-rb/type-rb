@@ -1,0 +1,84 @@
+import { native_write_text } from project/native_file_system
+import trb/std/process
+import trb/std/result
+
+def logical_run_qbe(qbe_path: String, source: String, expected_status: Integer = 0): Result<String, String>
+	return logical_run_qbe_arguments(qbe_path, source, [], expected_status)
+end
+
+def logical_run_qbe_arguments(qbe_path: String, source: String, arguments: Array<String>, expected_status: Integer = 0): Result<String, String>
+	allocated := case Process.run("/usr/bin/mktemp", ["-d", "/tmp/type-rb-native-logical-layout.XXXXXX"])
+	when Result::Ok(result)
+		result
+	when Result::Err(error)
+		return Result<String, String>::Err(error.message)
+	end
+	if !allocated.success
+		return Result<String, String>::Err(allocated.stderr)
+	end
+	workspace := allocated.stdout.strip()
+	result := logical_run_qbe_workspace(qbe_path, source, arguments, workspace, expected_status)
+	mut cleanup_error := ""
+	case Process.run("/bin/rm", ["-r", workspace])
+	when Result::Ok(cleanup)
+		if !cleanup.success
+			cleanup_error = "QBE cleanup failed for " + workspace + ": " + cleanup.stderr
+		end
+	when Result::Err(error)
+		cleanup_error = "QBE cleanup failed for " + workspace + ": " + error.message
+	end
+	if cleanup_error != ""
+		case result
+		when Result::Err(original)
+			return Result<String, String>::Err(original + "\n" + cleanup_error)
+		when Result::Ok(_value)
+			return Result<String, String>::Err(cleanup_error)
+		end
+	end
+	return result
+end
+
+# The caller always removes generated files. Failed phase/output remains in the
+# returned diagnostic; the owning test keeps the source fixture reproducible.
+def logical_run_qbe_workspace(qbe_path: String, source: String, arguments: Array<String>, workspace: String, expected_status: Integer = 0): Result<String, String>
+	case native_write_text(workspace + "/module.ssa", source)
+	when Result::Ok(_unit)
+	when Result::Err(error)
+		return Result<String, String>::Err(error.message)
+	end
+	assembled := case Process.run(qbe_path, ["-t", "arm64_apple", workspace + "/module.ssa"])
+	when Result::Ok(result)
+		result
+	when Result::Err(error)
+		return Result<String, String>::Err(error.message)
+	end
+	if !assembled.success
+		return Result<String, String>::Err(assembled.stderr)
+	end
+	case native_write_text(workspace + "/module.s", assembled.stdout)
+	when Result::Ok(_unit)
+	when Result::Err(error)
+		return Result<String, String>::Err(error.message)
+	end
+	linked := case Process.run("/usr/bin/cc", [workspace + "/module.s", "-lm", "-o", workspace + "/program"])
+	when Result::Ok(result)
+		result
+	when Result::Err(error)
+		return Result<String, String>::Err(error.message)
+	end
+	if !linked.success
+		return Result<String, String>::Err(linked.stderr)
+	end
+	case Process.run(workspace + "/program", arguments)
+	when Result::Ok(result)
+		if result.status != expected_status
+			return Result<String, String>::Err("program status " + result.status.to_s() + ", expected " + expected_status.to_s() + "\n" + result.stdout + result.stderr)
+		end
+		if !result.stderr.empty?()
+			return Result<String, String>::Err(result.stderr)
+		end
+		return Result<String, String>::Ok(result.stdout)
+	when Result::Err(error)
+		return Result<String, String>::Err(error.message)
+	end
+end

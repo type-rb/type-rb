@@ -1,0 +1,12 @@
+import { Context, Next, Response } from trb/web
+import trb/internal/runtime as Runtime
+
+module Timeout
+end
+
+def call(context: Context, next_handler: Next, milliseconds: Integer, fallback: Response): Response
+	action := fn(): Response
+		return next_handler.call(context)
+	end
+	return Runtime.deadline<Response>(action, milliseconds, fallback)
+end

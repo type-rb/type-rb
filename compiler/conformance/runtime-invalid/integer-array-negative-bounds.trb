@@ -1,0 +1,5 @@
+def main()
+	values: Array<Integer> := [1]
+	_value := values[-2]
+	return
+end

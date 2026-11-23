@@ -1,0 +1,20 @@
+import { mir_effect_allocation, mir_effect_allocation_failure, mir_effect_allocation_io_failure, mir_effect_allocation_mutation_failure, mir_effect_conservative, mir_effect_failure, mir_effect_io, mir_effect_io_failure, mir_effect_mutation, mir_effect_mutation_failure, mir_effect_none } from mir/model/effects
+import { describe, expect, test } from trb/std/test
+
+describe("MIR effect encoding") do
+	test("preserves independent bits and established combined masks") do
+		# Literal expectations deliberately pin the internal ABI independently
+		# of the names used by producers and consumers.
+		expect(mir_effect_none()).to_equal(0)
+		expect(mir_effect_allocation()).to_equal(1)
+		expect(mir_effect_mutation()).to_equal(2)
+		expect(mir_effect_io()).to_equal(4)
+		expect(mir_effect_failure()).to_equal(8)
+		expect(mir_effect_allocation_failure()).to_equal(9)
+		expect(mir_effect_mutation_failure()).to_equal(10)
+		expect(mir_effect_allocation_mutation_failure()).to_equal(11)
+		expect(mir_effect_io_failure()).to_equal(12)
+		expect(mir_effect_allocation_io_failure()).to_equal(13)
+		expect(mir_effect_conservative()).to_equal(15)
+	end
+end

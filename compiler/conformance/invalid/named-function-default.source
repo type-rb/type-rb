@@ -1,0 +1,7 @@
+def calculate(value: Integer = 1): Integer
+return value
+end
+def main()
+callback := calculate
+puts(callback(1))
+end

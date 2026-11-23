@@ -1,0 +1,40 @@
+import { package_git_requirement_error, package_git_source, package_git_source_error, package_git_url, package_version_canonical, package_version_less } from project/package_git
+import { describe, expect, test } from trb/std/test
+
+describe("Git package requirements") do
+	test("canonicalizes semantic versions and compares unbounded numeric identifiers") do
+		expect(package_version_canonical("1")).to_equal("v1")
+		expect(package_version_canonical("v1.2")).to_equal("v1.2")
+		expect(package_version_canonical(" 1.2 ")).to_equal("v1.2")
+		expect(package_version_canonical("1.2.3-rc.1+build")).to_equal("v1.2.3-rc.1+build")
+		versions := ["v1.0.0-alpha", "v1.0.0-alpha.1", "v1.0.0-alpha.beta", "v1.0.0-beta", "v1.0.0-beta.2", "v1.0.0-beta.11", "v1.0.0-rc.1", "v1.0.0", "v2.0.0", "v20.0.0", "v99999999999999999999.0.0"]
+		mut index := 1
+		while index < versions.size()
+			expect(package_version_less(versions[index - 1], versions[index])).to_be_true()
+			expect(package_version_less(versions[index], versions[index - 1])).to_be_false()
+			index += 1
+		end
+		expect(package_version_less("v1.0.0+one", "1.0.0+two")).to_be_false()
+		expect(package_version_less("1", "1.0.0+build")).to_be_false()
+		expect(package_version_less("1.0.0", "1.0")).to_be_false()
+		expect(package_version_less("1.0.0-rc-1", "1.0.0-rc-2")).to_be_true()
+	end
+
+	test("retains source defaults and Git credential boundaries") do
+		expect(package_git_source("team/package", "")).to_equal("github.com/team/package")
+		expect(package_git_source("example.invalid/team/package", "")).to_equal("example.invalid/team/package")
+		expect(package_git_url("example.invalid/team/package.git")).to_equal("https://example.invalid/team/package.git")
+		expect(package_git_url("/local/source")).to_equal("/local/source")
+		expect(package_git_url("git@example.invalid:team/package")).to_equal("git@example.invalid:team/package")
+		["https://user:secret@example.invalid/package", "https://example.invalid/package?token=secret", "https://example.invalid/package#branch", "-option", "https://example.invalid/%zz"].each do |source|
+			expect(package_git_source_error(source).empty?()).to_be_false()
+		end
+		expect(package_git_source_error("https://user@example.invalid/package")).to_equal("")
+		["latest", "1", "v1.2.3", "123abcd"].each do |version|
+			expect(package_git_requirement_error("example.invalid/package", version)).to_equal("")
+		end
+		["main", "^1.0", "~1", "1.02", "abc"].each do |version|
+			expect(package_git_requirement_error("example.invalid/package", version).empty?()).to_be_false()
+		end
+	end
+end

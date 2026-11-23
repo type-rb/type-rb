@@ -1,0 +1,13 @@
+# Checked program bindings are canonical inputs, not derived optimization plans.
+# The retained host literal is an explicit internal adapter payload.
+record MirProgram
+	entry_source: Integer
+	main_function: Integer
+	compiler_function: Integer
+	compiler_file_function: Integer
+	cli_function: Integer
+	runtime_function: Integer
+	runtime_literal: String
+	# 0: available, 1: missing declaration, 2: nonliteral source body.
+	runtime_error: Integer
+end

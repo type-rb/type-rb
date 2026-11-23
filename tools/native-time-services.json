@@ -1,0 +1,493 @@
+{
+  "schemaVersion": 1,
+  "issue": 1315,
+  "initiative": 625,
+  "referenceRevision": "c49b67ec0f9e5941c52b787885f11a33c19f795f",
+  "referenceToolchain": "Go 1.27.3",
+  "sourceRevision": "37c321e478253184bb29b0e739d8180789c6ac61",
+  "scope": "Initial twenty M3a service scenario groups, not full v0.5 parity. Local-unset compares the exact reference and Native on the same host; all named/configured zones use deterministic synthetic data.",
+  "programs": {
+    "zones": {
+      "declarations": "import { Instant, TimeZone } from trb/std/time\nimport trb/std/result\ndef show_zone(name: String)\ncase TimeZone.try_get(name)\nwhen Result::Ok(zone)\nputs(\"ok|\" + name + \"|\" + Instant.parse(\"2024-01-01T18:00:00Z\").to_datetime(zone).to_s())\nwhen Result::Err(error)\nputs(\"err|\" + name + \"|\" + error.message)\nend\nend\n",
+      "body": "show_zone(\"Local\")\nshow_zone(\"Example/Native\")\nshow_zone(\"Asia/Tokyo\")\nshow_zone(\"Missing/Zone\")\n"
+    },
+    "invalid": {
+      "declarations": "import { Instant, TimeZone } from trb/std/time\nimport trb/std/result\ndef show_zone(name: String)\ncase TimeZone.try_get(name)\nwhen Result::Ok(zone)\nputs(\"ok|\" + name + \"|\" + Instant.parse(\"2024-01-01T18:00:00Z\").to_datetime(zone).to_s())\nwhen Result::Err(error)\nputs(\"err|\" + name + \"|\" + error.message)\nend\nend\n",
+      "body": "show_zone(\"../outside\")\nshow_zone(\"/outside\")\nshow_zone(\"\\\\outside\")\nshow_zone(\"Null\\x00Zone\")\n"
+    },
+    "cache": {
+      "declarations": "import { Instant, TimeZone } from trb/std/time\nimport trb/std/result\ndef show_zone(name: String)\ncase TimeZone.try_get(name)\nwhen Result::Ok(zone)\nputs(\"ok|\" + name + \"|\" + Instant.parse(\"2024-01-01T18:00:00Z\").to_datetime(zone).to_s())\nwhen Result::Err(error)\nputs(\"err|\" + name + \"|\" + error.message)\nend\nend\nimport trb/std/path\nimport trb/std/file\nimport { FileMode } from trb/std/file\nimport { FileSystemError } from trb/std/errors\nimport trb/std/unit\ndef replace_local(): Result<Unit, FileSystemError>\nreturn File.open(Path.new(\"local.tzif\"), mode: FileMode::Write) do |file|\ntry file.write(\"\\x54\\x5a\\x69\\x66\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x01\\x00\\x00\\x00\\x05\\x00\\x00\\x1c\\x20\\x00\\x00\\x54\\x45\\x53\\x54\\x00\".to_bytes())\nend\nend\n",
+      "body": "show_zone(\"Local\")\ncase replace_local()\nwhen Result::Ok(_value)\nputs(\"replaced\")\nwhen Result::Err(error)\nputs(\"write-error|\" + error.message)\nend\nshow_zone(\"Local\")\n"
+    }
+  },
+  "registry": [
+    {
+      "id": "bytes-unicode",
+      "caseSha256": "fa3dcc91a7e47197115ebe1e55ea064632df4ebf93482658a22e0fdf9686bc7d"
+    },
+    {
+      "id": "bytes-empty-nul",
+      "caseSha256": "b64a558bd24ef6d0462bde6574c44cba9cd68084b10bab5f6cc8e2dfe20d421f"
+    },
+    {
+      "id": "json-values-jsonc",
+      "caseSha256": "f34f4acfc520b4461d73fc03765d091bc0f58762eb58c948d93e31288010ea27"
+    },
+    {
+      "id": "json-codec-nested-record",
+      "caseSha256": "820cab8380ed78249d86d222f16e98c63623b4f98f1af9b8a0875e1793cd3c30"
+    },
+    {
+      "id": "json-codec-nullable-root",
+      "caseSha256": "5aad17c31a18e5488455b2636057f4dee6d688cc1749421bd857bd038af8b9dd"
+    },
+    {
+      "id": "time-json-nested",
+      "caseSha256": "ae482a23e6e58bacda5e24d17d58a3dbe818db865c08a14500e72df3e537f4f6"
+    },
+    {
+      "id": "time-date-arithmetic",
+      "caseSha256": "ddd1ed888b5c3b008889d7387b905007cecf3ed37978f41ac3c7d8f2bc21754a"
+    },
+    {
+      "id": "time-system-clock",
+      "caseSha256": "19f42d334f44c254e33a392789dca735f10acc4304682035aa2b47c899ab1557"
+    }
+  ],
+  "environment": [
+    {
+      "id": "local-unset",
+      "variants": [
+        {
+          "environment": {
+            "TZ": null
+          },
+          "reference": {
+            "execute": {
+              "code": 0,
+              "stdout": "ok|Local|2024-01-02T03:00:00\nerr|Example/Native|unknown time zone Example/Native\nok|Asia/Tokyo|2024-01-02T03:00:00\nerr|Missing/Zone|unknown time zone Missing/Zone\n",
+              "stderr": ""
+            },
+            "repl": {
+              "code": 0,
+              "stdout": "ok|Local|2024-01-02T03:00:00\nerr|Example/Native|unknown time zone Example/Native\nok|Asia/Tokyo|2024-01-02T03:00:00\nerr|Missing/Zone|unknown time zone Missing/Zone\n",
+              "stderr": ""
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "local-utc",
+      "variants": [
+        {
+          "environment": {
+            "TZ": ""
+          },
+          "reference": {
+            "execute": {
+              "code": 0,
+              "stdout": "ok|Local|2024-01-01T18:00:00\nerr|Example/Native|unknown time zone Example/Native\nok|Asia/Tokyo|2024-01-02T03:00:00\nerr|Missing/Zone|unknown time zone Missing/Zone\n",
+              "stderr": ""
+            },
+            "repl": {
+              "code": 0,
+              "stdout": "ok|Local|2024-01-01T18:00:00\nerr|Example/Native|unknown time zone Example/Native\nok|Asia/Tokyo|2024-01-02T03:00:00\nerr|Missing/Zone|unknown time zone Missing/Zone\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "environment": {
+            "TZ": "UTC"
+          },
+          "reference": {
+            "execute": {
+              "code": 0,
+              "stdout": "ok|Local|2024-01-01T18:00:00\nerr|Example/Native|unknown time zone Example/Native\nok|Asia/Tokyo|2024-01-02T03:00:00\nerr|Missing/Zone|unknown time zone Missing/Zone\n",
+              "stderr": ""
+            },
+            "repl": {
+              "code": 0,
+              "stdout": "ok|Local|2024-01-01T18:00:00\nerr|Example/Native|unknown time zone Example/Native\nok|Asia/Tokyo|2024-01-02T03:00:00\nerr|Missing/Zone|unknown time zone Missing/Zone\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "environment": {
+            "TZ": ":UTC"
+          },
+          "reference": {
+            "execute": {
+              "code": 0,
+              "stdout": "ok|Local|2024-01-01T18:00:00\nerr|Example/Native|unknown time zone Example/Native\nok|Asia/Tokyo|2024-01-02T03:00:00\nerr|Missing/Zone|unknown time zone Missing/Zone\n",
+              "stderr": ""
+            },
+            "repl": {
+              "code": 0,
+              "stdout": "ok|Local|2024-01-01T18:00:00\nerr|Example/Native|unknown time zone Example/Native\nok|Asia/Tokyo|2024-01-02T03:00:00\nerr|Missing/Zone|unknown time zone Missing/Zone\n",
+              "stderr": ""
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "local-named",
+      "variants": [
+        {
+          "environment": {
+            "TZ": "Asia/Tokyo"
+          },
+          "reference": {
+            "execute": {
+              "code": 0,
+              "stdout": "ok|Local|2024-01-02T03:00:00\nerr|Example/Native|unknown time zone Example/Native\nok|Asia/Tokyo|2024-01-02T03:00:00\nerr|Missing/Zone|unknown time zone Missing/Zone\n",
+              "stderr": ""
+            },
+            "repl": {
+              "code": 0,
+              "stdout": "ok|Local|2024-01-02T03:00:00\nerr|Example/Native|unknown time zone Example/Native\nok|Asia/Tokyo|2024-01-02T03:00:00\nerr|Missing/Zone|unknown time zone Missing/Zone\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "environment": {
+            "TZ": ":Asia/Tokyo"
+          },
+          "reference": {
+            "execute": {
+              "code": 0,
+              "stdout": "ok|Local|2024-01-02T03:00:00\nerr|Example/Native|unknown time zone Example/Native\nok|Asia/Tokyo|2024-01-02T03:00:00\nerr|Missing/Zone|unknown time zone Missing/Zone\n",
+              "stderr": ""
+            },
+            "repl": {
+              "code": 0,
+              "stdout": "ok|Local|2024-01-02T03:00:00\nerr|Example/Native|unknown time zone Example/Native\nok|Asia/Tokyo|2024-01-02T03:00:00\nerr|Missing/Zone|unknown time zone Missing/Zone\n",
+              "stderr": ""
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "local-file",
+      "variants": [
+        {
+          "environment": {
+            "TZ": "<fixture>/local.tzif"
+          },
+          "reference": {
+            "execute": {
+              "code": 0,
+              "stdout": "ok|Local|2024-01-01T19:00:00\nerr|Example/Native|unknown time zone Example/Native\nok|Asia/Tokyo|2024-01-02T03:00:00\nerr|Missing/Zone|unknown time zone Missing/Zone\n",
+              "stderr": ""
+            },
+            "repl": {
+              "code": 0,
+              "stdout": "ok|Local|2024-01-01T19:00:00\nerr|Example/Native|unknown time zone Example/Native\nok|Asia/Tokyo|2024-01-02T03:00:00\nerr|Missing/Zone|unknown time zone Missing/Zone\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "environment": {
+            "TZ": ":<fixture>/local.tzif"
+          },
+          "reference": {
+            "execute": {
+              "code": 0,
+              "stdout": "ok|Local|2024-01-01T19:00:00\nerr|Example/Native|unknown time zone Example/Native\nok|Asia/Tokyo|2024-01-02T03:00:00\nerr|Missing/Zone|unknown time zone Missing/Zone\n",
+              "stderr": ""
+            },
+            "repl": {
+              "code": 0,
+              "stdout": "ok|Local|2024-01-01T19:00:00\nerr|Example/Native|unknown time zone Example/Native\nok|Asia/Tokyo|2024-01-02T03:00:00\nerr|Missing/Zone|unknown time zone Missing/Zone\n",
+              "stderr": ""
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "local-invalid",
+      "variants": [
+        {
+          "environment": {
+            "TZ": "Unknown/TimeZone"
+          },
+          "reference": {
+            "execute": {
+              "code": 0,
+              "stdout": "ok|Local|2024-01-01T18:00:00\nerr|Example/Native|unknown time zone Example/Native\nok|Asia/Tokyo|2024-01-02T03:00:00\nerr|Missing/Zone|unknown time zone Missing/Zone\n",
+              "stderr": ""
+            },
+            "repl": {
+              "code": 0,
+              "stdout": "ok|Local|2024-01-01T18:00:00\nerr|Example/Native|unknown time zone Example/Native\nok|Asia/Tokyo|2024-01-02T03:00:00\nerr|Missing/Zone|unknown time zone Missing/Zone\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "environment": {
+            "TZ": ":"
+          },
+          "reference": {
+            "execute": {
+              "code": 0,
+              "stdout": "ok|Local|2024-01-01T18:00:00\nerr|Example/Native|unknown time zone Example/Native\nok|Asia/Tokyo|2024-01-02T03:00:00\nerr|Missing/Zone|unknown time zone Missing/Zone\n",
+              "stderr": ""
+            },
+            "repl": {
+              "code": 0,
+              "stdout": "ok|Local|2024-01-01T18:00:00\nerr|Example/Native|unknown time zone Example/Native\nok|Asia/Tokyo|2024-01-02T03:00:00\nerr|Missing/Zone|unknown time zone Missing/Zone\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "environment": {
+            "TZ": "<fixture>/absent.tzif"
+          },
+          "reference": {
+            "execute": {
+              "code": 0,
+              "stdout": "ok|Local|2024-01-01T18:00:00\nerr|Example/Native|unknown time zone Example/Native\nok|Asia/Tokyo|2024-01-02T03:00:00\nerr|Missing/Zone|unknown time zone Missing/Zone\n",
+              "stderr": ""
+            },
+            "repl": {
+              "code": 0,
+              "stdout": "ok|Local|2024-01-01T18:00:00\nerr|Example/Native|unknown time zone Example/Native\nok|Asia/Tokyo|2024-01-02T03:00:00\nerr|Missing/Zone|unknown time zone Missing/Zone\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "environment": {
+            "TZ": "<fixture>/malformed/Example/Native"
+          },
+          "reference": {
+            "execute": {
+              "code": 0,
+              "stdout": "ok|Local|2024-01-01T18:00:00\nerr|Example/Native|unknown time zone Example/Native\nok|Asia/Tokyo|2024-01-02T03:00:00\nerr|Missing/Zone|unknown time zone Missing/Zone\n",
+              "stderr": ""
+            },
+            "repl": {
+              "code": 0,
+              "stdout": "ok|Local|2024-01-01T18:00:00\nerr|Example/Native|unknown time zone Example/Native\nok|Asia/Tokyo|2024-01-02T03:00:00\nerr|Missing/Zone|unknown time zone Missing/Zone\n",
+              "stderr": ""
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "zone-directory",
+      "variants": [
+        {
+          "environment": {
+            "ZONEINFO": "<fixture>/zones"
+          },
+          "reference": {
+            "execute": {
+              "code": 0,
+              "stdout": "ok|Local|2024-01-01T18:00:00\nok|Example/Native|2024-01-01T23:45:00\nok|Asia/Tokyo|2024-01-01T23:45:00\nerr|Missing/Zone|unknown time zone Missing/Zone\n",
+              "stderr": ""
+            },
+            "repl": {
+              "code": 0,
+              "stdout": "ok|Local|2024-01-01T18:00:00\nok|Example/Native|2024-01-01T23:45:00\nok|Asia/Tokyo|2024-01-01T23:45:00\nerr|Missing/Zone|unknown time zone Missing/Zone\n",
+              "stderr": ""
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "zone-stored-zip",
+      "variants": [
+        {
+          "environment": {
+            "ZONEINFO": "<fixture>/stored.zip"
+          },
+          "reference": {
+            "execute": {
+              "code": 0,
+              "stdout": "ok|Local|2024-01-01T18:00:00\nok|Example/Native|2024-01-01T23:45:00\nok|Asia/Tokyo|2024-01-01T23:45:00\nerr|Missing/Zone|unknown time zone Missing/Zone\n",
+              "stderr": ""
+            },
+            "repl": {
+              "code": 0,
+              "stdout": "ok|Local|2024-01-01T18:00:00\nok|Example/Native|2024-01-01T23:45:00\nok|Asia/Tokyo|2024-01-01T23:45:00\nerr|Missing/Zone|unknown time zone Missing/Zone\n",
+              "stderr": ""
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "zone-fallback",
+      "variants": [
+        {
+          "environment": {
+            "ZONEINFO": "<fixture>/absent"
+          },
+          "reference": {
+            "execute": {
+              "code": 0,
+              "stdout": "ok|Local|2024-01-01T18:00:00\nerr|Example/Native|unknown time zone Example/Native\nok|Asia/Tokyo|2024-01-02T03:00:00\nerr|Missing/Zone|unknown time zone Missing/Zone\n",
+              "stderr": ""
+            },
+            "repl": {
+              "code": 0,
+              "stdout": "ok|Local|2024-01-01T18:00:00\nerr|Example/Native|unknown time zone Example/Native\nok|Asia/Tokyo|2024-01-02T03:00:00\nerr|Missing/Zone|unknown time zone Missing/Zone\n",
+              "stderr": ""
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "zone-malformed",
+      "variants": [
+        {
+          "environment": {
+            "ZONEINFO": "<fixture>/malformed"
+          },
+          "reference": {
+            "execute": {
+              "code": 0,
+              "stdout": "ok|Local|2024-01-01T18:00:00\nerr|Example/Native|unknown time zone Example/Native\nok|Asia/Tokyo|2024-01-02T03:00:00\nerr|Missing/Zone|unknown time zone Missing/Zone\n",
+              "stderr": ""
+            },
+            "repl": {
+              "code": 0,
+              "stdout": "ok|Local|2024-01-01T18:00:00\nerr|Example/Native|unknown time zone Example/Native\nok|Asia/Tokyo|2024-01-02T03:00:00\nerr|Missing/Zone|unknown time zone Missing/Zone\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "environment": {
+            "ZONEINFO": "<fixture>/v4"
+          },
+          "reference": {
+            "execute": {
+              "code": 0,
+              "stdout": "ok|Local|2024-01-01T18:00:00\nerr|Example/Native|unknown time zone Example/Native\nok|Asia/Tokyo|2024-01-02T03:00:00\nerr|Missing/Zone|unknown time zone Missing/Zone\n",
+              "stderr": ""
+            },
+            "repl": {
+              "code": 0,
+              "stdout": "ok|Local|2024-01-01T18:00:00\nerr|Example/Native|unknown time zone Example/Native\nok|Asia/Tokyo|2024-01-02T03:00:00\nerr|Missing/Zone|unknown time zone Missing/Zone\n",
+              "stderr": ""
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "zone-invalid-zip",
+      "variants": [
+        {
+          "environment": {
+            "ZONEINFO": "<fixture>/invalid.zip"
+          },
+          "reference": {
+            "execute": {
+              "code": 0,
+              "stdout": "ok|Local|2024-01-01T18:00:00\nerr|Example/Native|corrupt zip file <fixture>/invalid.zip\nok|Asia/Tokyo|2024-01-02T03:00:00\nerr|Missing/Zone|corrupt zip file <fixture>/invalid.zip\n",
+              "stderr": ""
+            },
+            "repl": {
+              "code": 0,
+              "stdout": "ok|Local|2024-01-01T18:00:00\nerr|Example/Native|corrupt zip file <fixture>/invalid.zip\nok|Asia/Tokyo|2024-01-02T03:00:00\nerr|Missing/Zone|corrupt zip file <fixture>/invalid.zip\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "environment": {
+            "ZONEINFO": "<fixture>/truncated.zip"
+          },
+          "reference": {
+            "execute": {
+              "code": 0,
+              "stdout": "ok|Local|2024-01-01T18:00:00\nerr|Example/Native|corrupt zip file <fixture>/truncated.zip\nok|Asia/Tokyo|2024-01-02T03:00:00\nerr|Missing/Zone|corrupt zip file <fixture>/truncated.zip\n",
+              "stderr": ""
+            },
+            "repl": {
+              "code": 0,
+              "stdout": "ok|Local|2024-01-01T18:00:00\nerr|Example/Native|corrupt zip file <fixture>/truncated.zip\nok|Asia/Tokyo|2024-01-02T03:00:00\nerr|Missing/Zone|corrupt zip file <fixture>/truncated.zip\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "environment": {
+            "ZONEINFO": "<fixture>/compressed.zip"
+          },
+          "reference": {
+            "execute": {
+              "code": 0,
+              "stdout": "ok|Local|2024-01-01T18:00:00\nerr|Example/Native|unsupported compression for Example/Native in <fixture>/compressed.zip\nok|Asia/Tokyo|2024-01-02T03:00:00\nerr|Missing/Zone|unknown time zone Missing/Zone\n",
+              "stderr": ""
+            },
+            "repl": {
+              "code": 0,
+              "stdout": "ok|Local|2024-01-01T18:00:00\nerr|Example/Native|unsupported compression for Example/Native in <fixture>/compressed.zip\nok|Asia/Tokyo|2024-01-02T03:00:00\nerr|Missing/Zone|unknown time zone Missing/Zone\n",
+              "stderr": ""
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "zone-invalid-name",
+      "variants": [
+        {
+          "environment": {
+            "ZONEINFO": "<fixture>/zones"
+          },
+          "reference": {
+            "execute": {
+              "code": 0,
+              "stdout": "err|../outside|time: invalid location name\nerr|/outside|time: invalid location name\nerr|\\outside|time: invalid location name\nerr|Null\u0000Zone|invalid argument\n",
+              "stderr": ""
+            },
+            "repl": {
+              "code": 0,
+              "stdout": "err|../outside|time: invalid location name\nerr|/outside|time: invalid location name\nerr|\\outside|time: invalid location name\nerr|Null\u0000Zone|invalid argument\n",
+              "stderr": ""
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "local-lifetime",
+      "variants": [
+        {
+          "environment": {
+            "TZ": "<fixture>/local.tzif"
+          },
+          "reference": {
+            "execute": {
+              "code": 0,
+              "stdout": "ok|Local|2024-01-01T19:00:00\nreplaced\nok|Local|2024-01-01T19:00:00\n",
+              "stderr": ""
+            },
+            "repl": {
+              "code": 0,
+              "stdout": "ok|Local|2024-01-01T19:00:00\nreplaced\nok|Local|2024-01-01T19:00:00\n",
+              "stderr": ""
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

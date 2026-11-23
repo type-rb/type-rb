@@ -1,0 +1,51 @@
+def integer_or(value: Integer?, fallback: Integer): Integer
+	if value == nil
+		return fallback
+	end
+	return value
+end
+
+def truth(value: Boolean?): Boolean
+	if value == nil
+		return false
+	end
+	return value
+end
+
+def initial(mut calls: Array<Integer>): Integer
+	calls.push(10)
+	return 10
+end
+
+def summarize(values: Array<Integer>?, mut calls: Array<Integer>)
+	puts(values&.map { |value| calls.push(value); value + 1 } == nil)
+	puts(integer_or(values&.select { |value| value > 1 }&.size(), -1))
+	puts(integer_or(values&.reduce(initial(calls)) { |sum, value| sum + value }, -1))
+	puts(truth(values&.any? { |value| value == 2 }))
+	puts(truth(values&.all? { |value| value > 0 }))
+	puts(truth(values&.none? { |value| value < 0 }))
+	puts(integer_or(values&.find { |value| value == 2 }, -1))
+	puts(integer_or(values&.find_index { |value| value == 2 }, -1))
+	puts(integer_or(values&.sort_by { |value| value % 2 }&.size(), -1))
+	puts(integer_or(values&.sort_by_descending { |value| value }&.size(), -1))
+end
+
+def range_sum(values: Range<Integer>?): Integer?
+	return values&.map.with_index { |value, index| value + index }&.reduce(0) { |sum, value| sum + value }
+end
+
+def main()
+	mut calls: Array<Integer> := []
+	summarize(nil, calls)
+	puts(calls.size())
+	summarize([3, 1, 2], calls)
+	puts(calls.size())
+	puts(calls[3])
+	puts(range_sum(nil) == nil)
+	puts(integer_or(range_sum(2..4), -1))
+	values: Array<Integer> := [2, 1]&.map { |value| value + 1 }
+	puts(values[0])
+	optional: Array<Integer?>? := [nil, 2]
+	puts(optional&.find { |value| value == nil } == nil)
+	puts(integer_or(optional&.map { |value| value }&.size(), -1))
+end

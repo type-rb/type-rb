@@ -1,0 +1,312 @@
+import { decode_recovery_aggregate_snapshot } from aggregate/snapshot
+import { build_recovery_aggregate_executable } from aggregate/toolchain
+import { native_create_directory } from support/file_system
+import trb/std/process
+import trb/std/result
+import { describe, expect, test } from trb/std/test
+
+record RecoveryAggregateObservation
+	status: Integer
+	stdout: String
+	stderr: String
+end
+
+record RecoveryAggregateDifferentialPair
+	reference: RecoveryAggregateObservation
+	native: RecoveryAggregateObservation
+end
+
+record RecoveryAggregateDifferentialExpectation
+	name: String
+	stdout: String
+	stderr: String
+	status: Integer
+end
+
+def _recovery_aggregate_observe(command: String): Result<RecoveryAggregateObservation, String>
+	case Process.run("/usr/bin/env", ["GOTRACEBACK=none", command])
+	when Result::Ok(process)
+		return Result<RecoveryAggregateObservation, String>::Ok(
+			RecoveryAggregateObservation.new(
+				status: process.status,
+				stdout: process.stdout,
+				stderr: process.stderr,
+			)
+		)
+	when Result::Err(error)
+		return Result<RecoveryAggregateObservation, String>::Err(error.operation + ": " + error.message)
+	end
+end
+
+def _recovery_aggregate_snapshot(name: String): Result<String, String>
+	root := Process.environment("TYPE_RB_NATIVE_ROOT")
+	reference_trb := Process.environment("TYPE_RB_NATIVE_REFERENCE_TRB")
+	if root == nil
+		return Result<String, String>::Err("Aggregate recovery snapshot root is unavailable")
+	end
+	if reference_trb == nil
+		return Result<String, String>::Err("Aggregate recovery snapshot environment is incomplete")
+	end
+	config := root + "/corpus/recovery-aggregate/" + name + "/trbconfig.jsonc"
+	case Process.run(
+			reference_trb,
+			["compiler", "bootstrap-snapshot", "--snapshot-version", "3", "--config", config],
+		)
+	when Result::Ok(process)
+		if process.success
+			return Result<String, String>::Ok(process.stdout)
+		end
+		return Result<String, String>::Err("snapshot: " + process.stderr)
+	when Result::Err(error)
+		return Result<String, String>::Err("snapshot: " + error.operation + ": " + error.message)
+	end
+end
+
+def _recovery_aggregate_reproducibility_case(name: String): Result<Boolean, String>
+	qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+	if qbe == nil
+		return Result<Boolean, String>::Err("TYPE_RB_NATIVE_QBE is unavailable")
+	end
+	first_snapshot := try _recovery_aggregate_snapshot(name)
+	second_snapshot := try _recovery_aggregate_snapshot(name)
+	if first_snapshot != second_snapshot
+		return Result<Boolean, String>::Err("source snapshots differ for " + name)
+	end
+	first_module := case decode_recovery_aggregate_snapshot(first_snapshot)
+	when Result::Ok(value)
+		value
+	when Result::Err(diagnostic)
+		return Result<Boolean, String>::Err(
+			"first decode: " + diagnostic.code + " " + diagnostic.path + ": " + diagnostic.message
+		)
+	end
+	second_module := case decode_recovery_aggregate_snapshot(second_snapshot)
+	when Result::Ok(value)
+		value
+	when Result::Err(diagnostic)
+		return Result<Boolean, String>::Err(
+			"second decode: " + diagnostic.code + " " + diagnostic.path + ": " + diagnostic.message
+		)
+	end
+	first_workspace := "/tmp/type-rb-native-recovery-aggregate-reproducibility-" + name + "-first"
+	second_workspace := "/tmp/type-rb-native-recovery-aggregate-reproducibility-" + name + "-second"
+	case native_create_directory(first_workspace)
+	when Result::Ok(_unit)
+	when Result::Err(_error)
+	end
+	case native_create_directory(second_workspace)
+	when Result::Ok(_unit)
+	when Result::Err(_error)
+	end
+	first_output := first_workspace + "/native"
+	second_output := second_workspace + "/native"
+	first_report := case build_recovery_aggregate_executable(
+			first_module,
+			qbe,
+			"/usr/bin/cc",
+			first_workspace,
+			first_output,
+		)
+	when Result::Ok(report)
+		report
+	when Result::Err(error)
+		return Result<Boolean, String>::Err("first build " + error.phase + ": " + error.message)
+	end
+	second_report := case build_recovery_aggregate_executable(
+			second_module,
+			qbe,
+			"/usr/bin/cc",
+			second_workspace,
+			second_output,
+		)
+	when Result::Ok(report)
+		report
+	when Result::Err(error)
+		return Result<Boolean, String>::Err("second build " + error.phase + ": " + error.message)
+	end
+	try _recovery_aggregate_compare_files(first_report.qbe_ir_path, second_report.qbe_ir_path)
+	try _recovery_aggregate_compare_files(first_report.assembly_path, second_report.assembly_path)
+	try _recovery_aggregate_compare_files(first_output, second_output)
+	return Result<Boolean, String>::Ok(true)
+end
+
+def _recovery_aggregate_compare_files(left: String, right: String): Result<Boolean, String>
+	case Process.run("/usr/bin/cmp", [left, right])
+	when Result::Ok(process)
+		if process.success
+			return Result<Boolean, String>::Ok(true)
+		end
+		return Result<Boolean, String>::Err("artifacts differ: " + left + " and " + right)
+	when Result::Err(error)
+		return Result<Boolean, String>::Err("cmp: " + error.operation + ": " + error.message)
+	end
+end
+
+def _recovery_aggregate_differential_case(name: String): Result<RecoveryAggregateDifferentialPair, String>
+	root := Process.environment("TYPE_RB_NATIVE_ROOT")
+	reference_trb := Process.environment("TYPE_RB_NATIVE_REFERENCE_TRB")
+	qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+	if root == nil
+		return Result<RecoveryAggregateDifferentialPair, String>::Err("TYPE_RB_NATIVE_ROOT is unavailable")
+	end
+	if reference_trb == nil
+		return Result<RecoveryAggregateDifferentialPair, String>::Err("TYPE_RB_NATIVE_REFERENCE_TRB is unavailable")
+	end
+	if qbe == nil
+		return Result<RecoveryAggregateDifferentialPair, String>::Err("Aggregate recovery differential environment is incomplete")
+	end
+	config := root + "/corpus/recovery-aggregate/" + name + "/trbconfig.jsonc"
+	workspace := "/tmp/type-rb-native-recovery-aggregate-differential-" + name
+	case native_create_directory(workspace)
+	when Result::Ok(_unit)
+	when Result::Err(_error)
+	end
+	snapshot_process := case Process.run(
+			reference_trb,
+			["compiler", "bootstrap-snapshot", "--snapshot-version", "3", "--config", config],
+		)
+	when Result::Ok(process)
+		process
+	when Result::Err(error)
+		return Result<RecoveryAggregateDifferentialPair, String>::Err("snapshot: " + error.operation + ": " + error.message)
+	end
+	if !snapshot_process.success
+		return Result<RecoveryAggregateDifferentialPair, String>::Err("snapshot: " + snapshot_process.stderr)
+	end
+	native_module := case decode_recovery_aggregate_snapshot(snapshot_process.stdout)
+	when Result::Ok(value)
+		value
+	when Result::Err(diagnostic)
+		return Result<RecoveryAggregateDifferentialPair, String>::Err(
+			"decode: " + diagnostic.code + " " + diagnostic.path + ": " + diagnostic.message
+		)
+	end
+	native_output := workspace + "/native"
+	case build_recovery_aggregate_executable(native_module, qbe, "/usr/bin/cc", workspace, native_output)
+	when Result::Ok(_report)
+	when Result::Err(error)
+		return Result<RecoveryAggregateDifferentialPair, String>::Err(
+			"native-build: " + error.phase + ": " + error.message + "\n" + error.stderr
+		)
+	end
+	reference_output := workspace + "/reference"
+	reference_build := case Process.run(
+			reference_trb,
+			["build", "--compile", "--config", config, "--outfile", reference_output],
+		)
+	when Result::Ok(process)
+		process
+	when Result::Err(error)
+		return Result<RecoveryAggregateDifferentialPair, String>::Err("reference-build: " + error.operation + ": " + error.message)
+	end
+	if !reference_build.success
+		return Result<RecoveryAggregateDifferentialPair, String>::Err("reference-build: " + reference_build.stderr)
+	end
+	reference_observation := try _recovery_aggregate_observe(reference_output)
+	native_observation := try _recovery_aggregate_observe(native_output)
+	return Result<RecoveryAggregateDifferentialPair, String>::Ok(
+		RecoveryAggregateDifferentialPair.new(reference: reference_observation, native: native_observation)
+	)
+end
+
+describe("Aggregate recovery source-connected differential corpus") do
+	test("matches optimized Go records, tagged values, Result, and try behavior") do
+		if Process.environment("TYPE_RB_NATIVE_REFERENCE_TRB") == nil || Process.environment("TYPE_RB_NATIVE_QBE") == nil
+			expect(true).to_be_true()
+		else
+			expectations: Array<RecoveryAggregateDifferentialExpectation> := [
+				RecoveryAggregateDifferentialExpectation.new(
+					name: "aggregate-values",
+					stdout: "recovery-aggregate-aggregate-values\n",
+					stderr: "",
+					status: 0,
+				),
+				RecoveryAggregateDifferentialExpectation.new(
+					name: "result-control-flow",
+					stdout: "recovery-aggregate-result-control-flow\n",
+					stderr: "",
+					status: 0,
+				),
+				RecoveryAggregateDifferentialExpectation.new(
+					name: "aggregate-kernel",
+					stdout: "recovery-aggregate-aggregate-kernel\n",
+					stderr: "",
+					status: 0,
+				),
+				RecoveryAggregateDifferentialExpectation.new(
+					name: "aggregate-swap",
+					stdout: "recovery-aggregate-aggregate-swap\n",
+					stderr: "",
+					status: 0,
+				),
+			]
+			mut index := 0
+			while index < expectations.size()
+				expected := expectations[index]
+				case _recovery_aggregate_differential_case(expected.name)
+				when Result::Ok(pair)
+					expect(pair.reference).to_equal(pair.native)
+					expect(pair.native.status).to_equal(expected.status)
+					expect(pair.native.stdout).to_equal(expected.stdout)
+					expect(pair.native.stderr).to_equal(expected.stderr)
+				when Result::Err(error)
+					puts(error)
+					expect(false).to_be_true()
+				end
+				index += 1
+			end
+		end
+	end
+
+	test("reproduces source snapshots, decoded MIR output, assembly, and executables") do
+		root := Process.environment("TYPE_RB_NATIVE_ROOT")
+		reference_trb := Process.environment("TYPE_RB_NATIVE_REFERENCE_TRB")
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if root == nil
+			expect(true).to_be_true()
+		else
+			if reference_trb == nil || qbe == nil
+				expect(true).to_be_true()
+			else
+				case_names := ["aggregate-values", "result-control-flow", "aggregate-kernel", "aggregate-swap"]
+				mut index := 0
+				while index < case_names.size()
+					case _recovery_aggregate_reproducibility_case(case_names[index])
+					when Result::Ok(value)
+						expect(value).to_be_true()
+					when Result::Err(error)
+						puts(error)
+						expect(false).to_be_true()
+					end
+					index += 1
+				end
+			end
+		end
+	end
+
+	test("rejects dynamic aggregate storage at the producer boundary") do
+		root := Process.environment("TYPE_RB_NATIVE_ROOT")
+		reference_trb := Process.environment("TYPE_RB_NATIVE_REFERENCE_TRB")
+		if root == nil
+			expect(true).to_be_true()
+		else
+			if reference_trb == nil
+				expect(true).to_be_true()
+			else
+				config := root + "/corpus/recovery-aggregate/unsupported-dynamic-record/trbconfig.jsonc"
+				case Process.run(
+						reference_trb,
+						["compiler", "bootstrap-snapshot", "--snapshot-version", "3", "--config", config],
+					)
+				when Result::Ok(process)
+					expect(process.success).to_be_false()
+					expect(
+						process.stderr.include?("bootstrap snapshot v3 does not support value type String")
+					).to_be_true()
+				when Result::Err(_error)
+					expect(false).to_be_true()
+				end
+			end
+		end
+	end
+end

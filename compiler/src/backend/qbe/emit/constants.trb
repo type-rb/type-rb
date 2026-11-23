@@ -1,0 +1,342 @@
+import { qbe_runtime_static_strings_slot } from backend/qbe/runtime_slots
+import { mir_op_range_new, mir_op_singleton_literal, mir_op_string_literal } from mir/model/instructions
+import { emit_literal_split_runtime, emit_string_split_runtime } from backend/qbe/runtime/string_transforms
+import { emit_object_descriptors } from backend/qbe/emit/objects
+import { mir_string_literal_data } from mir/analysis/literal_data
+import { MirLiteralData, MirModule } from mir/model/module
+import { emit_union_descriptors } from backend/qbe/emit/unions
+import { emit_enum_descriptors } from backend/qbe/emit/enums
+import { emit_nullable_descriptors } from backend/qbe/emit/nullable
+import { mir_managed_type } from mir/model/types
+import { integer_string } from support/literals
+import { QbeOutput, qbe_output_line } from backend/qbe/output
+import { CompilerState, diagnostic, has_diagnostic } from state/state
+
+def static_string_bytes(value: String): Array<Integer>
+	return mir_string_literal_data(value).bytes
+end
+
+def static_string_data(native_module: MirModule, payload: Integer, value: String): MirLiteralData
+	if payload >= 0
+		return native_module.literal_data[payload]
+	end
+	# Declaration metadata still has no ordinary MIR instruction. Its portable
+	# data uses the same owner; symbol selection and target packing stay here.
+	return mir_string_literal_data(value)
+end
+
+def static_bytes_hash(bytes: Array<Integer>, index: Integer): Integer
+	return ((bytes[index] * 257 + bytes[index + 1]) * 257 + bytes[index + 2]) % 512
+end
+
+def encode_static_bytes(bytes: Array<Integer>): Array<Integer>
+	bytes.each do |byte|
+		if byte >= 128
+			return []
+		end
+	end
+	mut positions: Array<Integer> := []
+	while positions.size() < 512
+		positions.push(-1)
+	end
+	mut encoded: Array<Integer> := []
+	mut index := 0
+	while index < bytes.size()
+		mut match_length := 0
+		mut match_distance := 0
+		if index + 2 < bytes.size()
+			hash := static_bytes_hash(bytes, index)
+			previous := positions[hash]
+			if previous >= 0
+				distance := index - previous
+				if distance <= 65535
+					mut limit := bytes.size() - index
+					if limit > 130
+						limit = 130
+					end
+					mut length := 0
+					mut matching := true
+					while matching
+						if length >= limit
+							matching = false
+						else
+							if bytes[previous + length] == bytes[index + length]
+								length += 1
+							else
+								matching = false
+							end
+						end
+					end
+					if length >= 4
+						match_length = length
+						match_distance = distance
+					end
+				end
+			end
+		end
+
+		mut consumed := 1
+		if match_length >= 4
+			encoded.push(128 + match_length - 3)
+			encoded.push(match_distance / 256)
+			encoded.push(match_distance % 256)
+			consumed = match_length
+		else
+			encoded.push(bytes[index])
+		end
+
+		mut update := index
+		while update < index + consumed
+			if update + 2 < bytes.size()
+				positions[static_bytes_hash(bytes, update)] = update
+			end
+			update += 1
+		end
+		index += consumed
+	end
+	return encoded
+end
+
+def encode_static_string(value: String): Array<Integer>
+	return encode_static_bytes(static_string_bytes(value))
+end
+
+def emit_static_byte_data(
+		mut output: QbeOutput,
+		symbol: String,
+		bytes: Array<Integer>,
+	)
+	qbe_output_line(output, "data $" + symbol + " = {")
+	mut line := "\tb"
+	mut line_bytes := 0
+	mut index := 0
+	while index < bytes.size()
+		line += " " + integer_string(bytes[index])
+		line_bytes += 1
+		if line_bytes == 16
+			qbe_output_line(output, line + ",")
+			line = "\tb"
+			line_bytes = 0
+		end
+		index += 1
+	end
+	if line_bytes > 0
+		qbe_output_line(output, line + ",")
+	end
+	qbe_output_line(output, "\tb 0 }")
+	return
+end
+
+def emit_static_string_decoder(
+		mut output: QbeOutput,
+		compressed_tokens: Array<Integer>,
+		compressed_sizes: Array<Integer>,
+		decoded_sizes: Array<Integer>,
+	)
+	qbe_output_line(
+		output,
+		"function $trbn_static_string_decode(l %target, l %encoded, l %encoded_length, l %decoded_length) {\n@start\n\tstorel 0, %target\n\t%length_address =l add %target, 8\n\tstorel %decoded_length, %length_address\n\t%points_address =l add %target, 16\n\tstorel %decoded_length, %points_address\n\t%output =l add %target, 24\n\tjmp @loop\n@loop\n\t%input_index =l phi @start 0, @literal %literal_next_input, @match_done %match_next_input\n\t%output_index =l phi @start 0, @literal %literal_next_output, @match_done %match_next_output\n\t%done =w cslel %encoded_length, %input_index\n\tjnz %done, @terminate, @read\n@read\n\t%encoded_address =l add %encoded, %input_index\n\t%header =w loadub %encoded_address\n\t%is_match =w csgtw %header, 127\n\tjnz %is_match, @match, @literal\n@literal\n\t%literal_address =l add %output, %output_index\n\tstoreb %header, %literal_address\n\t%literal_next_input =l add %input_index, 1\n\t%literal_next_output =l add %output_index, 1\n\tjmp @loop\n@match\n\t%high_address =l add %encoded_address, 1\n\t%low_address =l add %encoded_address, 2\n\t%high =w loadub %high_address\n\t%low =w loadub %low_address\n\t%high_long =l extuw %high\n\t%low_long =l extuw %low\n\t%high_shifted =l shl %high_long, 8\n\t%distance =l or %high_shifted, %low_long\n\t%match_length_word =w sub %header, 125\n\t%match_length =l extuw %match_length_word\n\tjmp @copy\n@copy\n\t%copy_index =l phi @match 0, @copy_byte %copy_next\n\t%copy_done =w cslel %match_length, %copy_index\n\tjnz %copy_done, @match_done, @copy_byte\n@copy_byte\n\t%source_base =l sub %output_index, %distance\n\t%source_index =l add %source_base, %copy_index\n\t%source_address =l add %output, %source_index\n\t%value =w loadub %source_address\n\t%destination_index =l add %output_index, %copy_index\n\t%destination_address =l add %output, %destination_index\n\tstoreb %value, %destination_address\n\t%copy_next =l add %copy_index, 1\n\tjmp @copy\n@match_done\n\t%match_next_input =l add %input_index, 3\n\t%match_next_output =l add %output_index, %match_length\n\tjmp @loop\n@terminate\n\t%terminator =l add %output, %decoded_length\n\tstoreb 0, %terminator\n\tret\n}",
+	)
+	qbe_output_line(output, "\nfunction $trbn_static_strings_initialize() {\n@start")
+	mut index := 0
+	while index < compressed_tokens.size()
+		token := integer_string(compressed_tokens[index])
+		qbe_output_line(
+			output,
+			"\tcall $trbn_static_string_decode(l $trbns" + token + ", l $trbnc" + token +
+			", l " + integer_string(compressed_sizes[index]) +
+			", l " + integer_string(decoded_sizes[index]) + ")",
+		)
+		index += 1
+	end
+	qbe_output_line(output, "\tret\n}")
+	return
+end
+
+def emit_static_strings(
+		mut state: CompilerState,
+		mut output: QbeOutput,
+	): Boolean
+	mut canonical_values: Array<String> := []
+	mut canonical_tokens: Array<Integer> := []
+	mut compressed_tokens: Array<Integer> := []
+	mut compressed_sizes: Array<Integer> := []
+	mut decoded_sizes: Array<Integer> := []
+	mut values: Array<String> := []
+	mut tokens: Array<Integer> := []
+	mut literals: Array<Integer> := []
+	mut origins: Array<Integer> := []
+	state.scalar_mir.literal_texts.each do |_text|
+		output.mir_literal_symbols.push("")
+	end
+	state.scalar_mir.instructions.each do |instruction|
+		mut string_literal := instruction.kind == mir_op_string_literal()
+		if instruction.kind == mir_op_singleton_literal() && instruction.first == 8
+			string_literal = true
+		end
+		if string_literal
+			values.push(state.scalar_mir.literal_texts[instruction.payload])
+			tokens.push(instruction.payload)
+			literals.push(instruction.payload)
+			origins.push(instruction.line)
+		end
+	end
+	mut string_index := 0
+	while string_index < values.size()
+		token_index := tokens[string_index]
+		value := values[string_index]
+		mut canonical := token_index
+		mut value_index := 0
+		mut found := false
+		if literals[string_index] >= 0
+			while value_index < canonical_values.size()
+				if canonical_values[value_index] == value
+					canonical = canonical_tokens[value_index]
+					found = true
+					value_index = canonical_values.size()
+				else
+					value_index += 1
+				end
+			end
+		end
+		if !found
+			canonical_values.push(value)
+			canonical_tokens.push(token_index)
+			data := static_string_data(state.scalar_mir, literals[string_index], value)
+			bytes := data.bytes
+			if bytes.size() == 0 && data.points > 0
+				diagnostic(state, "TRBN4005", origins[string_index], "bootstrap String byte access does not support this literal")
+				return false
+			end
+			mut compressed: Array<Integer> := []
+			if data.points >= 256
+				if bytes.size() == data.points
+					compressed = encode_static_bytes(bytes)
+				end
+			end
+			mut use_compressed := false
+			if compressed.size() > 0
+				if compressed.size() < data.points
+					use_compressed = true
+				end
+			end
+			if use_compressed
+				qbe_output_line(
+					output,
+					"data $trbns" + integer_string(token_index) + " = align 8 { z " +
+					integer_string(data.points + 25) + " }",
+				)
+				emit_static_byte_data(output, "trbnc" + integer_string(token_index), compressed)
+				compressed_tokens.push(token_index)
+				compressed_sizes.push(compressed.size())
+				decoded_sizes.push(data.points)
+				output.runtime_flags[qbe_runtime_static_strings_slot()] = 1
+			else
+				emit_flat_string_data("trbns" + integer_string(token_index), data, output)
+			end
+		end
+		if literals[string_index] >= 0
+			output.mir_literal_symbols[literals[string_index]] = "$trbns" + integer_string(canonical)
+		end
+		string_index += 1
+	end
+	emit_split_support(state.scalar_mir, output)
+	if compressed_tokens.size() > 0
+		emit_static_string_decoder(output, compressed_tokens, compressed_sizes, decoded_sizes)
+	end
+	qbe_output_line(output, "")
+	return !has_diagnostic(state)
+end
+
+def emit_record_descriptors(state: CompilerState, mut output: QbeOutput)
+	emit_object_descriptors(state, output)
+	emit_nullable_descriptors(state, output)
+	emit_union_descriptors(state, output)
+	emit_enum_descriptors(state, output)
+	mut range_descriptor := false
+	state.scalar_mir.instructions.each do |instruction|
+		if instruction.kind == mir_op_range_new()
+			range_descriptor = true
+		end
+	end
+	if range_descriptor
+		qbe_output_line(output, "data $trbn_desc_range = align 8 { l 1, l 0, l 24 }")
+	end
+	mut record_index := 0
+	while record_index < state.scalar_mir.records.size()
+		definition := state.scalar_mir.records[record_index]
+		field_start := definition.field_start
+		field_count := definition.field_count
+		mut managed_count := 0
+		mut entries := ""
+		mut field_offset := 0
+		while field_offset < field_count
+			if mir_managed_type(state.scalar_mir, state.scalar_mir.fields[field_start + field_offset].type_id)
+				entries += ", l " + integer_string(8 + field_offset * 8)
+				managed_count += 1
+			end
+			field_offset += 1
+		end
+		qbe_output_line(
+			output,
+			"data $trbn_desc_record" + integer_string(record_index) +
+			" = align 8 { l 1, l " + integer_string(managed_count) + ", l " +
+			integer_string(field_count * 8) + entries + " }",
+		)
+		record_index += 1
+	end
+	qbe_output_line(output, "")
+	return
+end
+
+# Immortal fragments share the ordinary literal representation. Tables contain
+# only immutable String pointers; the runtime constructs each Array afresh.
+def emit_flat_string_data(name: String, data: MirLiteralData, mut output: QbeOutput)
+	qbe_output_line(output, "data $" + name + " = align 8 { l 0, l " + integer_string(data.bytes.size()) + ", l " + integer_string(data.points) + ",")
+	mut line := "\tb"
+	mut line_bytes := 0
+	data.bytes.each do |byte|
+		line += " " + integer_string(byte)
+		line_bytes += 1
+		if line_bytes == 16
+			qbe_output_line(output, line + ",")
+			line = "\tb"
+			line_bytes = 0
+		end
+	end
+	if line_bytes > 0
+		qbe_output_line(output, line + ",")
+	end
+	qbe_output_line(output, "\tb 0 }")
+end
+
+def emit_split_support(native_module: MirModule, mut output: QbeOutput)
+	mut used := false
+	mut selected_fields := false
+	native_module.string_splits.each.with_index do |plans, function|
+		plans.each do |plan|
+			if plan.first_field >= 0
+				selected_fields = true
+				next
+			end
+			used = true
+			name := "trbn_split_" + integer_string(native_module.functions[function].id) + "_" + integer_string(plan.instruction)
+			mut table := "data $" + name + " = align 8 {"
+			plan.fragments.each.with_index do |fragment, index|
+				part := name + "_" + integer_string(index)
+				emit_flat_string_data(part, fragment, output)
+				if index > 0
+					table += ","
+				end
+				table += " l $" + part
+			end
+			qbe_output_line(output, table + " }")
+		end
+	end
+	if used
+		emit_literal_split_runtime(output)
+	end
+	if selected_fields
+		emit_string_split_runtime(output, true)
+	end
+end

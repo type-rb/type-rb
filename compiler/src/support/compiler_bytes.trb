@@ -1,0 +1,18 @@
+import { ascii_code } from support/literals
+
+# Typed compiler-runtime byte access. The ASCII body keeps the preceding seed's
+# first generation reproducible; current compiler calls use the resolved runtime
+# adapter, just like file input and source slicing. It is not a public String API.
+def compiler_string_bytes(value: String): Array<Integer>
+	mut bytes: Array<Integer> := []
+	mut index := 0
+	while index < value.size()
+		code := ascii_code(value[index])
+		if code < 0
+			return []
+		end
+		bytes.push(code)
+		index += 1
+	end
+	return bytes
+end

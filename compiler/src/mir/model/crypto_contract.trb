@@ -1,0 +1,56 @@
+import { standard_source_internal_hash, standard_source_internal_hmac, standard_source_secure_compare } from state/standard_source_kinds
+
+# Operation identity and parameter contracts are shared by checking and MIR.
+def crypto_adapter_start(): Integer
+	return 35
+end
+
+def crypto_names(): Array<String>
+	return ["md5", "sha1", "sha256", "sha512", "hmac_sha256", "hmac_sha512", "hmac_equal", "secure_equal"]
+end
+
+def crypto_declaration(kind: Integer): String
+	return ["md5", "sha1", "sha256", "sha512", "sha256", "sha512", "equal", "equal"][kind]
+end
+
+def crypto_source(kind: Integer): Integer
+	if kind < 4
+		return standard_source_internal_hash()
+	elsif kind < 7
+		return standard_source_internal_hmac()
+	end
+	return standard_source_secure_compare()
+end
+
+def crypto_signature_name(kind: Integer): String
+	mut owner := "trb/internal/hash."
+	if kind >= 4 && kind < 7
+		owner = "trb/internal/hmac."
+	elsif kind == 7
+		owner = "trb/std/secure_compare."
+	end
+	return owner + crypto_declaration(kind)
+end
+
+def crypto_parameters(kind: Integer): Array<String>
+	if kind < 4
+		return ["Bytes"]
+	end
+	return ["Bytes", "Bytes"]
+end
+
+def crypto_parameter_names(kind: Integer): Array<String>
+	if kind < 4
+		return ["value"]
+	elsif kind < 6
+		return ["key", "message"]
+	end
+	return ["left", "right"]
+end
+
+def crypto_result(kind: Integer): String
+	if kind < 6
+		return "Bytes"
+	end
+	return "Boolean"
+end

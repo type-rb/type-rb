@@ -1,0 +1,81 @@
+import { CompilerProjectSources, check, load_project_sources } from compiler
+import { resolve } from frontend/checking/program/resolution
+import { lex } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { official_source_kind, official_source_name, official_source_supported, official_source_text } from project/official_catalog
+import { load_standard_source } from project/standard_library
+import { compiler_new, has_diagnostic } from state/state
+import { load_integer, load_string, sparse_integer_at } from support/storage
+import { describe, expect, test } from trb/std/test
+
+describe("Bundled official source imports") do
+	test("loads the complete HTTP source through project declaration identity") do
+		mut state := load_project_sources("/project/trbconfig.jsonc", "/project/src",
+			CompilerProjectSources.new(paths: ["/project/src/main.trb"],
+				sources: ["import { Headers, Body, HttpMethod } from trb/http\ndef main()\nputs(Headers.new().size())\nputs(HttpMethod.get().to_s())\nputs(Body.new(\"A😀\".to_bytes()).size())\nend\n"], error: ""))
+		expect(has_diagnostic(state)).to_be_false()
+		target := load_integer(state.module_graph.import_targets, 0)
+		expect(load_string(state.module_graph.module_names, target)).to_equal("trb/http/index")
+		expect(sparse_integer_at(state.standard_modules, target)).to_equal(official_source_kind("trb/http"))
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_true()
+	end
+
+	test("reuses one owned module and preserves the caller context") do
+		mut state := compiler_new(1048576)
+		state.module_graph.active_module[0] = 7
+		kind := official_source_kind("trb/http")
+		first := load_standard_source(state, kind, 1)
+		expect(has_diagnostic(state)).to_be_false()
+		expect(load_standard_source(state, kind, 1)).to_equal(first)
+		expect(state.module_graph.module_count[0]).to_equal(1)
+		expect(state.module_graph.active_module[0]).to_equal(7)
+	end
+
+	test("keeps aliases canonical and provider packages unsupported") do
+		expect(official_source_kind("trb/platform/go/cli")).to_equal(official_source_kind("trb/cli"))
+		expect(official_source_name(official_source_kind("trb/platform/go/cli"))).to_equal("trb/cli/index")
+		expect(official_source_supported(official_source_kind("trb/cli"))).to_be_false()
+		expect(official_source_supported(official_source_kind("trb/platform/typescript/browser"))).to_be_false()
+		expect(official_source_kind("trb/not_a_package")).to_equal(0)
+		expect(official_source_kind("trb/internal/runtime")).to_equal(0)
+		expect(official_source_text(official_source_kind("trb/web")).include?("import trb/internal/runtime")).to_be_true()
+		mut state := compiler_new(1024)
+		expect(load_standard_source(state, official_source_kind("trb/cli"), 9)).to_equal(-1)
+		expect(has_diagnostic(state)).to_be_true()
+		expect(load_integer(state.diagnostics.lines, 0)).to_equal(9)
+		expect(state.module_graph.module_count[0]).to_equal(0)
+	end
+
+	test("checks transitive imports instead of omitting unsupported package bodies") do
+		mut state := load_project_sources("/project/trbconfig.jsonc", "/project/src",
+			CompilerProjectSources.new(paths: ["/project/src/main.trb", "/project/src/bridge.trb"],
+				sources: ["import bridge\ndef main()\nreturn\nend\n", "import trb/cli\n"], error: ""))
+		expect(has_diagnostic(state)).to_be_true()
+		expect(load_string(state.diagnostics.messages, 0)).to_equal("official package requires an unimplemented platform or semantic provider: trb/cli/index")
+		owner := load_integer(state.diagnostics.modules, 0)
+		expect(load_string(state.module_graph.module_names, owner)).to_equal("bridge")
+	end
+
+	# Reference-hosted unit tests use the recovery byte constructor. Ordinary
+	# Native CLI tests exercise the byte-preserving adapter and complete Web
+	# imports; this boundary must still report its transitive JSON limitation.
+	test("reports recovery byte construction limits in transitive Web imports") do
+		mut state := load_project_sources("/project/trbconfig.jsonc", "/project/src",
+			CompilerProjectSources.new(paths: ["/project/src/main.trb"],
+				sources: ["import trb/web/middleware\ndef main()\nreturn\nend\n"], error: ""))
+		expect(has_diagnostic(state)).to_be_true()
+		expect(load_string(state.diagnostics.messages, 0)).to_equal("bootstrap String byte construction does not support this escape")
+	end
+
+	test("retains the imported source origin during semantic resolution") do
+		mut state := compiler_new(1048576)
+		lex(state, "import trb/web/middleware\ndef main()\nreturn\nend\n")
+		parse_module(state, 0, 0)
+		expect(resolve(state)).to_be_false()
+		owner := load_integer(state.diagnostics.modules, 0)
+		expect(load_string(state.module_graph.module_names, owner)).to_equal("trb/internal/json/index")
+		expect(load_integer(state.diagnostics.lines, 0) > 0).to_be_true()
+		expect(state.module_graph.active_module[0]).to_equal(0)
+	end
+end

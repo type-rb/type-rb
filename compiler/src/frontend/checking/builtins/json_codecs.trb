@@ -1,0 +1,69 @@
+import { json_provider_encode, json_provider_kind, json_provider_response } from frontend/providers/json_declarations
+import { check_expression } from frontend/checking/body/expressions
+import { CheckedValue, checked_mir_value, checked_value } from frontend/checking/body/values
+import { type_diagnostic } from frontend/checking/body/types
+import { checked_category_value } from frontend/types/value_categories
+import { next_generic_depth } from frontend/types/generic_bindings
+import { instantiate_method_signature } from frontend/resolution/generic_functions
+import { declare_default_functions } from frontend/resolution/default_arguments
+import { argument_binding_slot, function_argument_bindings } from frontend/resolution/argument_binding
+import { mir_checked_call, mir_complete_arguments } from mir/lowering/calls
+import { parse_argument_label } from frontend/syntax/syntax_forms
+import { advance, expect, skip_newlines, token_is } from frontend/syntax/syntax_tokens
+import { CompilerState, has_diagnostic } from state/state
+import { CheckedLocals } from state/local_state
+import { load_integer, load_string, store_integer } from support/storage
+
+# These registry signatures infer their one schema argument from the first
+# positional value. Check and emit that authored expression exactly once, then
+# bind the remaining fixed parameters and ordinary defaults in source order.
+def check_inferred_json_encoding(mut state: CompilerState, mut position: Array<Integer>, mut locals: CheckedLocals, definition: Integer): CheckedValue
+	origin := position[0]
+	line := load_integer(state.source_tokens.token_lines, origin)
+	kind := json_provider_kind(state, definition)
+	if kind != json_provider_encode() && kind != json_provider_response()
+		return type_diagnostic(state, line, "JSON encoding requires a canonical provider declaration")
+	end
+	advance(position)
+	skip_newlines(state, position)
+	if token_is(state, position[0], ")")
+		return type_diagnostic(state, line, "JSON encoding requires a value")
+	end
+	if parse_argument_label(state, position) != ""
+		return type_diagnostic(state, line, "JSON encoding value is positional-only")
+	end
+	value := check_expression(state, position, locals, 1, "")
+	if has_diagnostic(state)
+		return value
+	end
+	function := instantiate_method_signature(state, definition, [value.type_name], next_generic_depth(state), "", origin)
+	if function < 0 || has_diagnostic(state)
+		return checked_value("Invalid", checked_category_value(), origin, 0)
+	end
+	declare_default_functions(state)
+	store_integer(state.callables.checked[0].generic_calls, origin, function + 1)
+	mut bindings := function_argument_bindings(state, function)
+	first := argument_binding_slot(bindings, "")
+	bindings.values[first] = checked_mir_value(value)
+	start := load_integer(state.declarations.function_parameter_starts, function)
+	skip_newlines(state, position)
+	while token_is(state, position[0], ",") && !has_diagnostic(state)
+		advance(position)
+		skip_newlines(state, position)
+		if token_is(state, position[0], ")")
+			break
+		end
+		label := parse_argument_label(state, position)
+		slot := argument_binding_slot(bindings, label)
+		if slot < 0
+			return type_diagnostic(state, line, bindings.error[0])
+		end
+		argument := check_expression(state, position, locals, 1, load_string(state.declarations.parameter_types, start + slot))
+		bindings.values[slot] = checked_mir_value(argument)
+		skip_newlines(state, position)
+	end
+	if !expect(state, position, ")") || !mir_complete_arguments(state, locals, bindings, origin)
+		return type_diagnostic(state, line, "invalid JSON encoding arguments")
+	end
+	return mir_checked_call(state, locals, function, bindings.values, load_string(state.declarations.function_result_types, function), origin)
+end

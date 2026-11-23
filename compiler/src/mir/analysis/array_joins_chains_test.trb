@@ -1,0 +1,111 @@
+import { emit_qbe } from compiler
+import { MirArrayJoin, mir_function_index } from mir/model/module
+import { optimize_verified_mir } from mir/passes/optimize
+import { verify_mir } from mir/verify/module
+import { array_loop_mir_check } from testing/mir/array_loops
+import { control_test_output } from testing/mir/control
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { logical_run_qbe } from testing/qbe_runner
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+def join_chain_run(output: String, expected: String, failure: Boolean)
+	qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+	if qbe != nil
+		mut expected_status := 0
+		if failure
+			expected_status = 2
+		end
+		case logical_run_qbe(qbe, output, expected_status)
+		when Result::Ok(actual)
+			expect(failure).to_be_false()
+			expect(actual).to_equal(expected)
+		when Result::Err(error)
+			if !failure
+				puts(error)
+			end
+			expect(failure).to_be_true()
+			expect(error).to_equal(expected)
+		end
+	end
+end
+
+describe("MIR joined size producer chains") do
+	test("captures a fused producer before later calls and preserves observable work") do
+		state := array_loop_mir_check("def measure(value: Integer): Integer\nfirst := \"<\" + value.to_s() + \">\"\nputs(\"between\")\nlabel := first + (value + 1).to_s()\nreturn [label, \"x\", label].join(\"/\").size()\nend\ndef main()\nputs(measure(100))\nend\n")
+		index := mir_function_index(state.scalar_mir, 0)
+		expect(state.scalar_mir.array_joins[index][0].size_concats.size()).to_equal(3)
+		join_chain_run(control_test_output(emit_qbe(state)), "between\n19\n", false)
+	end
+
+	test("keeps escaping producers and unknown fused boundaries materialized") do
+		escaped := array_loop_mir_check("def measure(text: String): Integer\nfirst := \"!\" + text\nputs(first)\nlabel := first + \"?\"\nreturn [label, label].join(\"/\").size()\nend\ndef main()\nputs(measure(\"xy\"))\nend\n")
+		index := mir_function_index(escaped.scalar_mir, 0)
+		expect(escaped.scalar_mir.array_joins[index][0].size_concats.size()).to_equal(1)
+		join_chain_run(control_test_output(emit_qbe(escaped)), "!xy\n9\n", false)
+		unknown := array_loop_mir_check("def measure(first: String, second: String): Integer\nlabel := first + second + \"!\"\nreturn [label, label].join(\"/\").size()\nend\ndef main()\nputs(measure(\"a\", \"b\"))\nend\n")
+		expect(unknown.scalar_mir.array_joins[mir_function_index(unknown.scalar_mir, 0)][0].size_concats.size()).to_equal(0)
+		join_chain_run(control_test_output(emit_qbe(unknown)), "7\n", false)
+	end
+
+	test("retains dynamic leaves across forced collection while dropping scalar producers") do
+		state := array_loop_mir_check("def measure(value: Integer): Integer\nkeep := (value + 1).to_s()\nfirst := \"!\" + value.to_s() + \"?\"\nlast := (value + 2).to_s()\nlabel := first + last\nputs(keep)\nreturn [label, label].join(\"/\").size()\nend\ndef main()\nmut value := 100\nwhile value < 110\nputs(measure(value))\nvalue += 1\nend\nend\n")
+		index := mir_function_index(state.scalar_mir, 0)
+		plan := state.scalar_mir.array_joins[index][0]
+		expect(plan.size_concats.size()).to_equal(3)
+		expect(state.scalar_mir.root_plans[index].capacity > 0).to_be_true()
+		plan.size_concats.each do |site|
+			value := state.scalar_mir.instructions[site].result
+			state.scalar_mir.root_plans[index].roots.each do |roots|
+				expect(roots.include?(value)).to_be_false()
+			end
+		end
+		output := control_test_output(emit_qbe(state))
+		marker := " %string =l call $trbn_string_alloc(l %size)"
+		parts := output.split(marker)
+		expect(parts.size()).to_equal(2)
+		forced := parts[0] + "\tcall $trbn_gc_collect(w 0)\n" + marker + parts[1]
+		mut expected := ""
+		mut value := 101
+		while value < 111
+			expected += value.to_s() + "\n17\n"
+			value += 1
+		end
+		join_chain_run(forced, expected, false)
+	end
+
+	test("checks producer size before a later checked failure") do
+		state := array_loop_mir_check("def measure(text: String): Integer\nlabel := text + \"x\"\nempty: Array<Integer> := []\nputs(empty[0])\nreturn [label, label].join(\"/\").size()\nend\ndef main()\nend\n")
+		index := mir_function_index(state.scalar_mir, 0)
+		expect(state.scalar_mir.array_joins[index][0].size_concats.size()).to_equal(1)
+		base := control_test_output(emit_qbe(state)).split("export function w $main(").join("function w $unused_chain_main(")
+		output := base + "data $too_long = align 8 { l 0, l 9007199254740991, l 0, b 0 }\nexport function w $main() {\n@start\n %ignored =l call $trbnf0(l $too_long)\n ret 0\n}\n"
+		join_chain_run(output, "panic: allocation failed\n", true)
+	end
+
+	test("rederives ordered producers after source erasure and rejects forged identities") do
+		mut state := array_loop_mir_check("def measure(value: Integer): Integer\nfirst := \"<\" + value.to_s() + \">\"\nlabel := first + (value + 1).to_s()\nreturn [label, label].join(\"/\").size()\nend\ndef main()\nputs(measure(100))\nend\n")
+		index := mir_function_index(state.scalar_mir, 0)
+		before := control_test_output(emit_qbe(state))
+		intrinsic_mir_erase(state)
+		optimize_verified_mir(state.scalar_mir)
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+		function := state.scalar_mir.functions[index]
+		mut left := function.block_start
+		mut right := left + function.block_count - 1
+		while left < right
+			block := state.scalar_mir.blocks[left]
+			state.scalar_mir.blocks[left] = state.scalar_mir.blocks[right]
+			state.scalar_mir.blocks[right] = block
+			left += 1
+			right -= 1
+		end
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		join_chain_run(control_test_output(emit_qbe(state)), "17\n", false)
+		plan := state.scalar_mir.array_joins[index][0]
+		state.scalar_mir.array_joins[index][0] = MirArrayJoin.new(construction: plan.construction, array: plan.array, join: plan.join, size: plan.size, separator_literal: plan.separator_literal, size_concats: [999999999999], appends: plan.appends, elements: plan.elements, element_literals: plan.element_literals)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR Array join plan differs")
+	end
+end

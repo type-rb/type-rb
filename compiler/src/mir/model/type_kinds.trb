@@ -1,0 +1,78 @@
+# Composite row categories differ from value type IDs and instruction kinds.
+# The absent category is a query result only; no stored type row has that kind.
+
+def mir_type_kind_none(): Integer
+	return 0
+end
+
+def mir_type_kind_array(): Integer
+	return 1
+end
+
+def mir_type_kind_record(): Integer
+	return 2
+end
+
+def mir_type_kind_hash(): Integer
+	return 3
+end
+
+def mir_type_kind_range(): Integer
+	return 4
+end
+
+def mir_type_kind_empty_hash(): Integer
+	return 5
+end
+
+def mir_type_kind_nullable(): Integer
+	return 6
+end
+
+def mir_type_kind_nil(): Integer
+	return 7
+end
+
+def mir_type_kind_enum(): Integer
+	return 8
+end
+
+def mir_type_kind_callable(): Integer
+	return 9
+end
+
+def mir_type_kind_union(): Integer
+	return 10
+end
+
+def mir_type_kind_newtype(): Integer
+	return 11
+end
+
+def mir_type_kind_literal(): Integer
+	return 12
+end
+
+def mir_type_kind_class(): Integer
+	return 13
+end
+
+def mir_type_kind_interface(): Integer
+	return 14
+end
+
+def mir_type_kind_empty_array(): Integer
+	return 15
+end
+
+def mir_type_kind_any(): Integer
+	return 16
+end
+
+def mir_type_kind_bytes(): Integer
+	return 17
+end
+
+def mir_type_kind_string_builder(): Integer
+	return 18
+end

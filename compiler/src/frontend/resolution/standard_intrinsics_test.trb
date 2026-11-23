@@ -1,0 +1,206 @@
+import { standard_runtime_fail, standard_runtime_recover } from frontend/resolution/standard_intrinsics
+import { expect_compiler_phase, logical_checked_source } from testing/pipeline
+import { check, emit_qbe } from compiler
+import { CompilerState, compiler_new } from state/state
+import { official_source_kind } from project/official_catalog
+import { store_integer } from support/storage
+import { lex } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { MirCall, MirSignature, mir_function_index } from mir/model/module
+import { verify_mir } from mir/verify/module
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { control_test_output } from testing/mir/control
+import { describe, expect, test } from trb/std/test
+import { standard_source_web_dispatch } from state/standard_source_kinds
+import { callable_forced_collection } from testing/mir/callables
+import { logical_run_qbe } from testing/qbe_runner
+import trb/std/process
+import trb/std/result
+
+# A loader-owned fixture isolates the generic intrinsic from the reference-hosted
+# bootstrap byte decoder. Ordinary CLI cases load all unchanged Web/JSON bodies.
+def runtime_failure_test_state(): CompilerState
+	source := "import trb/internal/runtime\ndef message(): String\nputs(\"before\")\nreturn \"dynamic \" + \"failure\"\nend\ndef main()\nRuntime.fail<Float>(message())\nputs(\"after\")\nend\n"
+	mut state := compiler_new(1048576)
+	expect_compiler_phase(state, "lex", lex(state, source))
+	store_integer(state.standard_modules, state.module_graph.entry_module[0], official_source_kind("trb/web"))
+	expect_compiler_phase(state, "parse", parse_module(state, 0, state.module_graph.entry_module[0]))
+	expect_compiler_phase(state, "resolve", resolve(state))
+	expect_compiler_phase(state, "check", check(state))
+	return state
+end
+
+describe("Trusted standard runtime failure") do
+	test("owns a typed terminal call with evaluated arguments and preserved effects") do
+		mut state := runtime_failure_test_state()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		mut failures := 0
+		state.scalar_mir.signatures.each do |signature|
+			if standard_runtime_fail(state, signature.id)
+				failures += 1
+				expect(signature.name).to_equal("trb/internal/runtime.fail")
+				expect(signature.kind).to_equal(3)
+				expect(signature.adapter).to_equal(13)
+				expect(signature.parameter_types).to_equal(["String"])
+				expect(mir_function_index(state.scalar_mir, signature.id)).to_equal(-1)
+			end
+		end
+		expect(failures > 0).to_be_true()
+		mut calls := 0
+		state.scalar_mir.calls.each do |call|
+			if state.scalar_mir.signatures[call.callee].adapter == 13
+				calls += 1
+				# A test recovery boundary can allocate while recording this failure.
+				expect(call.effects).to_equal(13)
+			end
+		end
+		expect(calls > 0).to_be_true()
+		before := control_test_output(emit_qbe(state))
+		intrinsic_mir_erase(state)
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+	end
+
+	test("does not treat authored Runtime names as an intrinsic declaration") do
+		source := "module Runtime\ndef self.fail(message: String): String\nreturn message\nend\nend\ndef main()\nputs(Runtime.fail(\"authored\"))\nend\n"
+		mut state := logical_checked_source(source)
+		expect_compiler_phase(state, "check", check(state))
+		state.scalar_mir.signatures.each do |signature|
+			expect(standard_runtime_fail(state, signature.id)).to_be_false()
+		end
+	end
+	test("rejects malformed runtime signatures and erased failure effects") do
+		["adapter", "name", "parameter", "result", "effects"].each do |damage|
+			mut state := runtime_failure_test_state()
+			mut index := 0
+			while index < state.scalar_mir.signatures.size()
+				row := state.scalar_mir.signatures[index]
+				if row.adapter == 13 && damage != "effects"
+					mut adapter := row.adapter
+					mut name := row.name
+					mut parameters := row.parameter_types
+					mut result := row.result_type
+					if damage == "adapter"
+						adapter = 99
+					elsif damage == "name"
+						name = "authored.fail"
+					elsif damage == "parameter"
+						parameters = ["Integer"]
+					elsif damage == "result"
+						result = "Unknown"
+					end
+					state.scalar_mir.signatures[index] = MirSignature.new(id: row.id, kind: row.kind, name: name, adapter: adapter, source_id: row.source_id, line: row.line, parameter_types: parameters, parameter_mutable: row.parameter_mutable, result_type: result)
+				end
+				index += 1
+			end
+			if damage == "effects"
+				index = 0
+				while index < state.scalar_mir.calls.size()
+					row := state.scalar_mir.calls[index]
+					if state.scalar_mir.signatures[row.callee].adapter == 13
+						state.scalar_mir.calls[index] = MirCall.new(callee: row.callee, argument_start: row.argument_start, argument_count: row.argument_count, effects: 0)
+					end
+					index += 1
+				end
+			end
+			expect(verify_mir(state.scalar_mir, true) != "").to_be_true()
+		end
+	end
+
+end
+
+def runtime_recovery_test_state(): CompilerState
+	source := "import trb/internal/runtime\n\ndef descend(depth: Integer): String\nheld := \"depth:\" + depth.to_s()\nif depth == 0\nreturn Runtime.fail<String>(\"deep failure\")\nend\nchild := descend(depth - 1)\nreturn held + child\nend\n\ndef main()\nmut count := 0\nmut saved: Array<String> := []\nkept := [\"live\" + \" value\"]\nouter := fn(): String\ninner := fn(): String\ncount += 1\nsaved.push(\"side:\" + count.to_s())\nreturn descend(80)\nend\nrecovered := Runtime.recover<String>(inner, \"fallback\")\nreturn kept[0] + \":\" + recovered\nend\nputs(Runtime.recover<String>(outer, \"wrong\"))\nputs(count)\ngood := fn(): Float\nreturn 2.5\nend\nbad := fn(): Float\nreturn Runtime.fail<Float>(\"hidden float\")\nend\nputs(Runtime.recover<Float>(good, 9.5))\nputs(Runtime.recover<Float>(bad, 9.5))\nputs(kept[0])\nputs(saved[0])\nend\n"
+	mut state := compiler_new(1048576)
+	expect_compiler_phase(state, "lex", lex(state, source))
+	store_integer(state.standard_modules, state.module_graph.entry_module[0], standard_source_web_dispatch())
+	expect_compiler_phase(state, "parse", parse_module(state, 0, state.module_graph.entry_module[0]))
+	expect_compiler_phase(state, "resolve", resolve(state))
+	expect_compiler_phase(state, "check", check(state))
+	return state
+end
+
+describe("Owned runtime failure recovery") do
+	test("does not grant recovery from a declaration name after loader ownership is removed") do
+		mut state := runtime_recovery_test_state()
+		mut found := false
+		state.scalar_mir.signatures.each do |signature|
+			if standard_runtime_recover(state, signature.id)
+				found = true
+				store_integer(state.standard_modules, signature.source_id, 0)
+				expect(standard_runtime_recover(state, signature.id)).to_be_false()
+			end
+		end
+		expect(found).to_be_true()
+	end
+
+	test("preserves nested continuations, captures and Float results after source erasure and forced GC") do
+		mut state := runtime_recovery_test_state()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		mut found := 0
+		state.scalar_mir.signatures.each do |signature|
+			if standard_runtime_recover(state, signature.id)
+				found += 1
+				expect(signature.adapter).to_equal(17)
+				expect(signature.name).to_equal("trb/internal/runtime.recover")
+			end
+		end
+		expect(found > 0).to_be_true()
+		before := control_test_output(emit_qbe(state))
+		intrinsic_mir_erase(state)
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, callable_forced_collection(before))
+			when Result::Ok(actual)
+				expect(actual).to_equal("live value:fallback\n1\n2.5\n9.5\nlive value\nside:1\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("rejects forged recovery callback, fallback, result and effects") do
+		["adapter", "name", "callback", "fallback", "result", "mutable", "effects"].each do |damage|
+			mut state := runtime_recovery_test_state()
+			mut index := 0
+			while index < state.scalar_mir.signatures.size()
+				row := state.scalar_mir.signatures[index]
+				if row.kind == 3 && row.adapter == 17 && damage != "effects"
+					mut adapter := row.adapter
+					mut name := row.name
+					mut parameters := row.parameter_types
+					mut result := row.result_type
+					mut mutable := row.parameter_mutable
+					if damage == "adapter"
+						adapter = 99
+					elsif damage == "name"
+						name = "authored.recover"
+					elsif damage == "callback"
+						parameters = ["String", row.result_type]
+					elsif damage == "fallback"
+						parameters = [row.parameter_types[0], "Integer"]
+					elsif damage == "result"
+						result = "Address"
+					elsif damage == "mutable"
+						mutable = [1, 0]
+					end
+					state.scalar_mir.signatures[index] = MirSignature.new(id: row.id, kind: row.kind, name: name, adapter: adapter, source_id: row.source_id, line: row.line, parameter_types: parameters, parameter_mutable: mutable, result_type: result)
+				end
+				index += 1
+			end
+			if damage == "effects"
+				index = 0
+				while index < state.scalar_mir.calls.size()
+					row := state.scalar_mir.calls[index]
+					if state.scalar_mir.signatures[row.callee].adapter == 17
+						state.scalar_mir.calls[index] = MirCall.new(callee: row.callee, argument_start: row.argument_start, argument_count: row.argument_count, effects: 0)
+					end
+					index += 1
+				end
+			end
+			expect(verify_mir(state.scalar_mir, true) != "").to_be_true()
+		end
+	end
+end

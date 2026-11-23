@@ -1,0 +1,22 @@
+def probe()
+	mut text := "original"
+	receiver := fn(): String
+		puts("receiver")
+		return text
+	end
+	begin_at := fn(): Integer
+		puts("start")
+		text = "short"
+		return 1
+	end
+	end_at := fn(): Integer
+		puts("end")
+		return 4
+	end
+	puts(receiver().slice(begin_at()...end_at()))
+	puts(text)
+end
+
+def main()
+	probe()
+end

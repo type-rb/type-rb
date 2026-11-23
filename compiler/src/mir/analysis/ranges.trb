@@ -1,0 +1,524 @@
+import { mir_local_integer_arrays } from mir/analysis/array_local
+import { mir_scalar_inline_add, mir_scalar_inline_multiply } from mir/model/scalar_operators
+import { binary_add, binary_divide, binary_greater, binary_greater_equal, binary_less, binary_less_equal, binary_multiply, binary_subtract } from frontend/types/operators
+import { mir_type_boolean, mir_type_integer } from mir/model/type_ids
+import { mir_terminator_branch, mir_terminator_return } from mir/model/control
+import { mir_op_array_size, mir_op_integer_to_float, mir_op_scalar_binary, mir_op_scalar_literal, mir_op_string_size } from mir/model/instructions
+import { ascii_code, integer_string } from support/literals
+import { MirFunction, MirInstruction, MirModule, mir_block_index, mir_value_type } from mir/model/module
+import { MirFlow, MirFlowAliases, mir_flow_alias, mir_flow_aliases, mir_flow_block_index, mir_flow_definition_block, mir_flow_dominates, mir_flow_position, mir_flow_type } from mir/analysis/flow
+
+def mir_exact_integer_literal(
+		native_module: MirModule,
+		instruction: MirInstruction,
+		text: String,
+	): Boolean
+	if instruction.kind != mir_op_scalar_literal()
+		return false
+	end
+	literal := instruction.payload
+	if literal < 0
+		return false
+	end
+	if literal >= native_module.literal_texts.size()
+		return false
+	end
+	return native_module.literal_texts[literal] == text
+end
+
+record MirScalarRange
+	low: Integer
+	high: Integer
+end
+
+# Parse only a nonnegative portable decimal; malformed MIR must not make
+# range analysis itself fail or overflow. Underscores carry no value.
+def mir_scalar_literal(text: String): Integer
+	mut digits := 0
+	mut value := 0
+	mut index := 0
+	while index < text.size()
+		character := text[index]
+		if character != "_"
+			digit := ascii_code(character) - 48
+			if digit < 0 || digit > 9
+				return -1
+			end
+			if value > (9007199254740991 - digit) / 10
+				return -1
+			end
+			digits += 1
+			value = value * 10 + digit
+		end
+		index += 1
+	end
+	if digits == 0
+		return -1
+	end
+	return value
+end
+
+# A true entry is a portable Integer known to be nonnegative on every reachable
+# path. Start optimistically and remove unsupported entries until loop-carried
+# parameters settle; checked additions preserve nonnegativity or terminate.
+record MirNonnegative
+	dense: Array<Integer>
+	sparse: Hash<String, Integer>
+end
+
+def mir_nonnegative_value(values: MirNonnegative, value: Integer): Boolean
+	if values.dense.size() > 0
+		if value >= 0 && value < values.dense.size()
+			return values.dense[value] == 1
+		end
+		return false
+	end
+	key := integer_string(value)
+	if !values.sparse.key?(key)
+		return false
+	end
+	return values.sparse[key] == 1
+end
+
+def mir_nonnegative_instruction(native_module: MirModule, instruction: MirInstruction, values: MirNonnegative): Boolean
+	# Verified collection lengths cannot be negative, even when receivers change.
+	if instruction.kind == mir_op_array_size() || (instruction.kind == mir_op_string_size() && instruction.payload == 0)
+		return true
+	end
+	if instruction.kind == mir_op_scalar_literal()
+		if instruction.payload >= 0 && instruction.payload < native_module.literal_texts.size()
+			return mir_scalar_literal(native_module.literal_texts[instruction.payload]) >= 0
+		end
+	end
+	if instruction.kind == mir_op_scalar_binary() && (instruction.payload == binary_add() || instruction.payload == mir_scalar_inline_add()) && instruction.failure >= 0
+		if mir_nonnegative_value(values, instruction.first)
+			return mir_nonnegative_value(values, instruction.second)
+		end
+	end
+	return false
+end
+
+def mir_nonnegative_block_parameter(native_module: MirModule, function: MirFunction, flow: MirFlow, value: Integer, values: MirNonnegative): Boolean
+	owner := mir_flow_definition_block(flow, value)
+	if owner < 0 || owner >= function.block_count || flow.ranks[owner] < 0 || flow.predecessors[owner].size() == 0
+		return false
+	end
+	block := native_module.blocks[function.block_start + owner]
+	mut slot := 0
+	while slot < block.parameter_count && native_module.arguments[block.parameter_start + slot] != value
+		slot += 1
+	end
+	if slot == block.parameter_count
+		return false
+	end
+	mut edge := 0
+	while edge < flow.incoming_starts[owner].size()
+		incoming := native_module.arguments[flow.incoming_starts[owner][edge] + slot]
+		if !mir_nonnegative_value(values, incoming)
+			return false
+		end
+		edge += 1
+	end
+	return true
+end
+
+def mir_nonnegative_values(native_module: MirModule, function: MirFunction, flow: MirFlow): MirNonnegative
+	mut dense: Array<Integer> := []
+	mut sparse: Hash<String, Integer> := {}
+	mut integers: Array<Integer> := []
+	if flow.dense_types.size() > 0
+		mut value := 0
+		while value < flow.dense_types.size()
+			mut proven := 0
+			if flow.dense_types[value] == 1
+				proven = 1
+				integers.push(value)
+			end
+			dense.push(proven)
+			value += 1
+		end
+	else
+		native_module.values.each do |value|
+			if value.function_id == function.id && value.type_id == mir_type_integer()
+				sparse[integer_string(value.id)] = 1
+				integers.push(value.id)
+			end
+		end
+	end
+	mut values := MirNonnegative.new(dense: dense, sparse: sparse)
+	# Fresh Arrays begin empty. Closed load/store cycles preserve nonnegative
+	# contents inductively, provided every external writer has the same proof.
+	# Remove unsupported Array and scalar facts together; a later negative
+	# writer invalidates even earlier loads. Bounds/failure checks are separate.
+	arrays := mir_local_integer_arrays(native_module, function, flow)
+	mut valid: Array<Integer> := []
+	mut loads: Hash<String, Integer> := {}
+	mut array_index := 0
+	while array_index < arrays.size()
+		valid.push(1)
+		arrays[array_index].loads.each do |value|
+			loads[integer_string(value)] = array_index
+		end
+		array_index += 1
+	end
+	mut changed := true
+	while changed
+		changed = false
+		array_index = 0
+		while array_index < arrays.size()
+			if valid[array_index] == 1
+				arrays[array_index].writes.each do |value|
+					if !mir_nonnegative_value(values, value)
+						valid[array_index] = 0
+						changed = true
+					end
+				end
+			end
+			array_index += 1
+		end
+		integers.each do |value|
+			if mir_nonnegative_value(values, value)
+				position := mir_flow_position(flow, value)
+				mut proven := false
+				if position >= 0
+					proven = mir_nonnegative_instruction(native_module, native_module.instructions[position], values)
+					if arrays.size() > 0
+						key := integer_string(value)
+						if loads.key?(key)
+							proven = valid[loads[key]] == 1
+						end
+					end
+				else
+					proven = mir_nonnegative_block_parameter(native_module, function, flow, value, values)
+				end
+				if !proven
+					if values.dense.size() > 0
+						values.dense[value] = 0
+					else
+						values.sparse[integer_string(value)] = 0
+					end
+					changed = true
+				end
+			end
+		end
+	end
+	return values
+end
+
+# A nonzero guard is an exclusive power-of-two bound on every Integer
+# parameter. All intermediate Integer ranges must fit the portable domain.
+# This bounded proof accepts only a complete straight-line scalar entry.
+def mir_scalar_guard_proves(native_module: MirModule, function: MirFunction, limit: Integer): Integer
+	if function.block_count != 2 || function.parameter_count < 1 || function.parameter_count > 4
+		return -1
+	end
+	entry := mir_block_index(native_module, function, function.entry_block)
+	if entry < 0
+		return -1
+	end
+	block := native_module.blocks[entry]
+	if block.terminator != mir_terminator_return() || block.instruction_count > 32
+		return -1
+	end
+	mut ranges: Array<MirScalarRange> := []
+	mut index := 0
+	while index < function.parameter_count
+		value := native_module.arguments[function.parameter_start + index]
+		if value != index || mir_value_type(native_module, function.id, value) != mir_type_integer()
+			return -1
+		end
+		ranges.push(MirScalarRange.new(low: 0, high: limit - 1))
+		index += 1
+	end
+	mut checked := 0
+	index = block.instruction_start
+	finish := index + block.instruction_count
+	while index < finish
+		instruction := native_module.instructions[index]
+		if instruction.result != ranges.size()
+			return -1
+		end
+		mut low := 0
+		mut high := 0
+		result_type := mir_value_type(native_module, function.id, instruction.result)
+		if instruction.kind == mir_op_scalar_literal()
+			if result_type == mir_type_integer()
+				low = mir_scalar_literal(native_module.literal_texts[instruction.payload])
+				if low < 0
+					return -1
+				end
+				high = low
+			end
+		elsif instruction.kind == mir_op_scalar_binary()
+			if result_type == mir_type_integer()
+				left := instruction.first
+				right := instruction.second
+				if left < 0 || right < 0 || left >= ranges.size() || right >= ranges.size()
+					return -1
+				end
+				left_range := ranges[left]
+				right_range := ranges[right]
+				operator := instruction.payload
+				if operator == binary_add() || operator == mir_scalar_inline_add()
+					if left_range.high > 9007199254740991 - right_range.high
+						return 0
+					end
+					low = left_range.low + right_range.low
+					high = left_range.high + right_range.high
+				elsif operator == binary_multiply() || operator == mir_scalar_inline_multiply()
+					if right_range.high > 0
+						if left_range.high > 9007199254740991 / right_range.high
+							return 0
+						end
+					end
+					low = left_range.low * right_range.low
+					high = left_range.high * right_range.high
+				elsif operator == binary_divide()
+					if right_range.low == 0
+						return -1
+					end
+					low = left_range.low / right_range.high
+					high = left_range.high / right_range.low
+				else
+					return -1
+				end
+				checked += 1
+			end
+		elsif instruction.kind != mir_op_integer_to_float()
+			return -1
+		end
+		ranges.push(MirScalarRange.new(low: low, high: high))
+		index += 1
+	end
+	if checked < 3
+		return -1
+	end
+	return 1
+end
+
+def mir_scalar_guard(native_module: MirModule, function: MirFunction): Integer
+	if native_module.functions.size() > 32
+		return 0
+	end
+	if function.block_count != 2 || function.parameter_count < 1 || function.parameter_count > 4
+		return 0
+	end
+	# Begin with the existing multiplication fast-path operand domain and
+	# shrink the common input domain until the entire region is safe.
+	mut limit := 67108864
+	while limit >= 2
+		proof := mir_scalar_guard_proves(native_module, function, limit)
+		if proof < 0
+			return 0
+		elsif proof > 0
+			return limit
+		end
+		limit = limit / 2
+	end
+	return 0
+end
+
+# Normalize a comparison of the exact parameter and a portable nonnegative
+# literal. Unsupported polarity and strict maximum bounds remain unknown.
+def mir_comparison_lower_bound(native_module: MirModule, flow: MirFlow, aliases: MirFlowAliases, comparison: MirInstruction, parameter: Integer, taken: Boolean): Integer
+	if comparison.kind != mir_op_scalar_binary() || comparison.failure != -1 || mir_flow_type(flow, comparison.result) != mir_type_boolean()
+		return -1
+	end
+	mut operator := comparison.payload
+	mut literal := comparison.second
+	if mir_flow_alias(aliases, comparison.first) != parameter
+		if mir_flow_alias(aliases, comparison.second) != parameter
+			return -1
+		end
+		literal = comparison.first
+		if operator == binary_less()
+			operator = binary_greater()
+		elsif operator == binary_less_equal()
+			operator = binary_greater_equal()
+		elsif operator == binary_greater()
+			operator = binary_less()
+		elsif operator == binary_greater_equal()
+			operator = binary_less_equal()
+		end
+	end
+	if mir_flow_type(flow, literal) != mir_type_integer()
+		return -1
+	end
+	position := mir_flow_position(flow, literal)
+	if position < 0
+		return -1
+	end
+	instruction := native_module.instructions[position]
+	if instruction.kind != mir_op_scalar_literal()
+		return -1
+	end
+	bound := mir_scalar_literal(native_module.literal_texts[instruction.payload])
+	if bound < 0
+		return -1
+	end
+	mut strict := false
+	if taken
+		if operator == binary_greater()
+			strict = true
+		elsif operator != binary_greater_equal()
+			return -1
+		end
+	else
+		if operator == binary_less_equal()
+			strict = true
+		elsif operator != binary_less()
+			return -1
+		end
+	end
+	if strict
+		if bound == 9007199254740991
+			return -1
+		end
+		return bound + 1
+	end
+	return bound
+end
+
+# A function parameter has one immutable scalar identity throughout a call.
+# A sole incoming edge to a dominating successor makes its predicate hold at
+# this use. Unanimous aliases transport identity, never a changed value.
+def mir_parameter_subtraction_proven(native_module: MirModule, function: MirFunction, flow: MirFlow, aliases: MirFlowAliases, block: Integer, instruction: MirInstruction): Boolean
+	if instruction.kind != mir_op_scalar_binary() || instruction.payload != binary_subtract() || instruction.failure < 0
+		return false
+	end
+	if mir_flow_type(flow, instruction.first) != mir_type_integer() || mir_flow_type(flow, instruction.second) != mir_type_integer() || mir_flow_type(flow, instruction.result) != mir_type_integer()
+		return false
+	end
+	parameter := mir_flow_alias(aliases, instruction.first)
+	if parameter < 0 || mir_flow_definition_block(flow, parameter) != -1 || flow.ranks[block] < 0
+		return false
+	end
+	position := mir_flow_position(flow, instruction.second)
+	if position < 0
+		return false
+	end
+	right := native_module.instructions[position]
+	if right.kind != mir_op_scalar_literal()
+		return false
+	end
+	amount := mir_scalar_literal(native_module.literal_texts[right.payload])
+	if amount < 0
+		return false
+	end
+	mut index := 0
+	while index < function.block_count
+		guard := native_module.blocks[function.block_start + index]
+		if flow.ranks[index] >= 0 && guard.terminator == mir_terminator_branch() && guard.first_target != guard.second_target
+			condition := mir_flow_position(flow, guard.condition)
+			if condition >= guard.instruction_start && condition < guard.instruction_start + guard.instruction_count
+				comparison := native_module.instructions[condition]
+				mut arm := 0
+				while arm < 2
+					mut target := guard.first_target
+					if arm == 1
+						target = guard.second_target
+					end
+					successor := mir_flow_block_index(flow, target)
+					if successor != flow.entry && flow.predecessors[successor].size() == 1 && flow.predecessors[successor][0] == index
+						if mir_flow_dominates(flow, successor, block)
+							lower := mir_comparison_lower_bound(native_module, flow, aliases, comparison, parameter, arm == 0)
+							# 0 <= amount <= lower <= parameter <= portable maximum.
+							if lower >= amount
+								return true
+							end
+						end
+					end
+					arm += 1
+				end
+			end
+		end
+		index += 1
+	end
+	return false
+end
+
+# Return the unchanged operand of an Integer increment, with no inferred facts
+# about transformed values. Both addend orders retain the same checked meaning.
+def mir_increment_operand(native_module: MirModule, flow: MirFlow, instruction: MirInstruction): Integer
+	if instruction.kind != mir_op_scalar_binary() || (instruction.payload != binary_add() && instruction.payload != mir_scalar_inline_add()) || instruction.failure < 0
+		return -1
+	end
+	if mir_flow_type(flow, instruction.first) != mir_type_integer() || mir_flow_type(flow, instruction.second) != mir_type_integer() || mir_flow_type(flow, instruction.result) != mir_type_integer()
+		return -1
+	end
+	mut position := mir_flow_position(flow, instruction.second)
+	if position >= 0 && mir_exact_integer_literal(native_module, native_module.instructions[position], "1")
+		return instruction.first
+	end
+	position = mir_flow_position(flow, instruction.first)
+	if position >= 0 && mir_exact_integer_literal(native_module, native_module.instructions[position], "1")
+		return instruction.second
+	end
+	return -1
+end
+
+# On the selected edge, return the operand strictly below another portable
+# Integer. The upper operand need not be a constant: its type supplies the cap.
+def mir_comparison_strictly_smaller(flow: MirFlow, comparison: MirInstruction, taken: Boolean): Integer
+	if comparison.kind != mir_op_scalar_binary() || comparison.failure != -1 || mir_flow_type(flow, comparison.result) != mir_type_boolean()
+		return -1
+	end
+	if mir_flow_type(flow, comparison.first) != mir_type_integer() || mir_flow_type(flow, comparison.second) != mir_type_integer()
+		return -1
+	end
+	if taken
+		if comparison.payload == binary_less()
+			return comparison.first
+		elsif comparison.payload == binary_greater()
+			return comparison.second
+		end
+	else
+		if comparison.payload == binary_less_equal()
+			return comparison.second
+		elsif comparison.payload == binary_greater_equal()
+			return comparison.first
+		end
+	end
+	return -1
+end
+
+# If value < bound <= portable maximum, value + 1 cannot overflow. Adding one
+# also cannot cross the lower bound. A unique incoming edge establishes the
+# predicate; SSA aliases anchored at that guard retain the exact loop iteration.
+def mir_guarded_increment_proven(native_module: MirModule, function: MirFunction, flow: MirFlow, block: Integer, instruction: MirInstruction): Boolean
+	value := mir_increment_operand(native_module, flow, instruction)
+	if value < 0 || flow.ranks[block] < 0
+		return false
+	end
+	mut index := 0
+	while index < function.block_count
+		guard := native_module.blocks[function.block_start + index]
+		if flow.ranks[index] >= 0 && guard.terminator == mir_terminator_branch() && guard.first_target != guard.second_target
+			condition := mir_flow_position(flow, guard.condition)
+			if condition >= guard.instruction_start && condition < guard.instruction_start + guard.instruction_count
+				comparison := native_module.instructions[condition]
+				mut arm := 0
+				while arm < 2
+					mut target := guard.first_target
+					if arm == 1
+						target = guard.second_target
+					end
+					successor := mir_flow_block_index(flow, target)
+					smaller := mir_comparison_strictly_smaller(flow, comparison, arm == 0)
+					if smaller >= 0 && successor != flow.entry && flow.predecessors[successor].size() == 1 && flow.predecessors[successor][0] == index
+						if mir_flow_dominates(flow, successor, block)
+							aliases := mir_flow_aliases(native_module, function, flow, guard)
+							identity := mir_flow_alias(aliases, value)
+							if identity >= 0 && identity == mir_flow_alias(aliases, smaller)
+								return true
+							end
+						end
+					end
+					arm += 1
+				end
+			end
+		end
+		index += 1
+	end
+	return false
+end

@@ -1,0 +1,21 @@
+# Recursive calls with small scalar arguments.
+
+def fib(n: Integer): Integer
+	if n < 2
+		return n
+	end
+	return fib(n - 1) + fib(n - 2)
+end
+
+def tak(x: Integer, y: Integer, z: Integer): Integer
+	if y < x
+		return tak(tak(x - 1, y, z), tak(y - 1, z, x), tak(z - 1, x, y))
+	end
+	return z
+end
+
+def main()
+	puts(fib(35))
+	puts(tak(24, 16, 8))
+	return
+end

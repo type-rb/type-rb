@@ -1,0 +1,98 @@
+import { token_kind_attribute, token_kind_newline, token_kind_number, token_kind_string } from state/token_kinds
+import { RawEnumValue } from frontend/types/enum_model
+import { raw_enum_value } from frontend/types/raw_enum_types
+import { expand_quoted_token } from frontend/syntax/literal_syntax
+import { ascii_code, integer_literal_in_range, integer_string, number_is_float, number_without_underscores } from support/literals
+import { CompilerState, diagnostic, has_diagnostic, terminal_token } from state/state
+import { load_integer, load_string, sparse_integer_at } from support/storage
+import { advance, token_is } from frontend/syntax/syntax_tokens
+
+def parse_raw_enum_value(mut state: CompilerState, mut position: Array<Integer>, variant: Integer): Boolean
+	advance(position)
+	origin := position[0]
+	line := load_integer(state.source_tokens.token_lines, origin)
+	mut negative := false
+	if token_is(state, position[0], "-")
+		negative = true
+		advance(position)
+	end
+	if !expand_quoted_token(state, position[0], true)
+		return false
+	end
+	kind := load_integer(state.source_tokens.token_kinds, position[0])
+	mut text := load_string(state.source_tokens.token_texts, position[0])
+	mut type_name := ""
+	if kind == token_kind_string() && !negative && sparse_integer_at(state.source_tokens.token_fused_literals, position[0]) == 0
+		type_name = "String"
+	elsif kind == token_kind_number() && !number_is_float(text)
+		if !integer_literal_in_range(text)
+			diagnostic(state, "TRBN4004", line, "Integer literal is outside the portable range")
+			return false
+		end
+		digits := number_without_underscores(text)
+		mut number := 0
+		mut digit := 0
+		while digit < digits.size()
+			value := ascii_code(digits[digit]) - 48
+			number = number * 10 + value
+			digit += 1
+		end
+		if negative
+			number = -number
+		end
+		text = integer_string(number)
+		type_name = "Integer"
+	end
+	advance(position)
+	if type_name == "" || (load_integer(state.source_tokens.token_kinds, position[0]) != token_kind_newline() && load_integer(state.source_tokens.token_kinds, position[0]) != token_kind_attribute() && !terminal_token(state, position[0]))
+		diagnostic(state, "TRBN4002", line, "raw enum values must be explicit String or Integer literals")
+		return false
+	end
+	state.nominal.raw_enum_values.push(RawEnumValue.new(variant: variant, type_name: type_name, text: text, origin: origin))
+	return true
+end
+
+def validate_raw_enum(mut state: CompilerState, owner: Integer): Boolean
+	definition := state.nominal.enums[owner]
+	mut raw_type := ""
+	mut count := 0
+	mut index := definition.variant_start
+	finish := index + definition.variant_count
+	while index < finish
+		value := raw_enum_value(state, index)
+		if value.variant >= 0
+			count += 1
+			if raw_type == ""
+				raw_type = value.type_name
+			elsif raw_type != value.type_name
+				diagnostic(state, "TRBN4004", state.nominal.enum_variants[index].line, "raw enum value has type " + value.type_name + ", expected " + raw_type)
+				return false
+			end
+			mut previous := definition.variant_start
+			while previous < index
+				other := raw_enum_value(state, previous)
+				if other.variant >= 0 && other.type_name == value.type_name && other.text == value.text
+					diagnostic(state, "TRBN4004", state.nominal.enum_variants[index].line, "raw enum value duplicates " + state.nominal.enum_variants[previous].name)
+					return false
+				end
+				previous += 1
+			end
+		end
+		index += 1
+	end
+	if count == 0
+		return true
+	end
+	index = definition.variant_start
+	while index < finish
+		if state.nominal.enum_variants[index].field_count > 0
+			diagnostic(state, "TRBN4004", state.nominal.enum_variants[index].line, "raw-value enum members cannot declare payload fields")
+			return false
+		end
+		index += 1
+	end
+	if count != definition.variant_count
+		diagnostic(state, "TRBN4004", definition.line, "every member of a raw-value enum must declare a raw value")
+	end
+	return !has_diagnostic(state)
+end

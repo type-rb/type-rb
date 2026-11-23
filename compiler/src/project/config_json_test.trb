@@ -1,0 +1,56 @@
+import { project_json_skip_ignored } from project/config_json
+import { describe, expect, test } from trb/std/test
+
+describe("Project JSONC comments") do
+	test("consumes adjacent whitespace and comments without consuming the next value") do
+		source := " \t\r\n// line comment\n/* block\ncomment * */ /**/\"value\""
+		mut position := [0]
+		mut line := [1]
+		mut error := [""]
+		mut error_line := [0]
+		expect(project_json_skip_ignored(source, position, line, error, error_line)).to_be_true()
+		expect(source.slice(position[0]...source.size())).to_equal("\"value\"")
+		expect(line[0]).to_equal(4)
+		expect(error[0]).to_equal("")
+	end
+
+	test("accepts a line comment ending at EOF and leaves a plain slash untouched") do
+		mut position := [0]
+		mut line := [1]
+		mut error := [""]
+		mut error_line := [0]
+		source := "// EOF"
+		expect(project_json_skip_ignored(source, position, line, error, error_line)).to_be_true()
+		expect(position[0]).to_equal(source.size())
+		expect(line[0]).to_equal(1)
+		["/", "/x"].each do |value|
+			position[0] = 0
+			expect(project_json_skip_ignored(value, position, line, error, error_line)).to_be_true()
+			expect(position[0]).to_equal(0)
+		end
+	end
+
+	test("reports an unterminated block at its opening line even when EOF follows a star") do
+		mut position := [0]
+		mut line := [1]
+		mut error := [""]
+		mut error_line := [0]
+		source := "\n/* unfinished\n*"
+		expect(project_json_skip_ignored(source, position, line, error, error_line)).to_be_false()
+		expect(position[0]).to_equal(source.size())
+		expect(line[0]).to_equal(3)
+		expect(error[0]).to_equal("unterminated JSONC block comment")
+		expect(error_line[0]).to_equal(2)
+	end
+
+	test("preserves an earlier error while advancing through a later comment") do
+		mut position := [0]
+		mut line := [1]
+		mut error := ["earlier syntax error"]
+		mut error_line := [7]
+		expect(project_json_skip_ignored("/*", position, line, error, error_line)).to_be_false()
+		expect(position[0]).to_equal(2)
+		expect(error[0]).to_equal("earlier syntax error")
+		expect(error_line[0]).to_equal(7)
+	end
+end

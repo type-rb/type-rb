@@ -1,0 +1,34 @@
+def optional(value: Float?): String?
+	return value&.to_s()
+end
+
+def mark(mut calls: Array<Integer>, value: Float): Float
+	calls[0] += 1
+	return value
+end
+
+def main()
+	mut calls := [0]
+	convert := fn(value: Float): String
+		return "held:" + value.to_s()
+	end
+	mut values := [convert(0.1)]
+	precise := convert(0.12345678901234568)
+	mut index := 0
+	while index < 1000
+		values.push(convert(mark(calls, 1.25)))
+		index += 1
+	end
+	puts(values.first())
+	puts(values.last())
+	puts(calls[0])
+	puts(optional(nil) == nil)
+	present := optional(-2.5)
+	if present != nil
+		puts(present)
+	end
+	table := { true.to_s() => false.to_s() }
+	puts(table["true"])
+	puts(precise)
+	puts(convert(-0.8765432109876543))
+end

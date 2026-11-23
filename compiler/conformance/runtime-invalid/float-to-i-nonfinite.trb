@@ -1,0 +1,7 @@
+def reciprocal(value: Float): Float
+	return 1.0 / value
+end
+def main()
+	value := reciprocal(0.0)
+	puts(value.to_i())
+end

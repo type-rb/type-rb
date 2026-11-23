@@ -1,0 +1,34 @@
+import { QbeOutput, qbe_output_line } from backend/qbe/output
+import { integer_string } from support/literals
+import { emit_decimal_digits, emit_decimal_pair_table } from backend/qbe/runtime/decimal_digits
+
+def emit_integer_string_tables(mut output: QbeOutput)
+	# A zero descriptor makes these immutable 32-byte String slots GC-exempt.
+	qbe_output_line(output, "data $trbn_small_integer_strings = align 8 {")
+	mut value := 0
+	while value < 100
+		decimal := integer_string(value)
+		length := integer_string(decimal.size())
+		padding := integer_string(8 - decimal.size())
+		qbe_output_line(output, "l 0, l " + length + ", l " + length + ", b \"" + decimal + "\", z " + padding + ",")
+		value += 1
+	end
+	qbe_output_line(output, "}\n")
+	emit_decimal_pair_table(output)
+end
+
+def emit_integer_to_string_runtime(mut output: QbeOutput)
+	emit_integer_string_tables(output)
+	qbe_output_line(output, "function l $trbn_integer_to_string(l %value) {\n@start\n %buffer =l alloc8 32\n %end =l add %buffer, 32\n %cached =w cultl %value, 100\n jnz %cached, @cached, @format\n")
+	qbe_output_line(output, "@cached\n %cache_offset =l shl %value, 5\n %cache_entry =l add $trbn_small_integer_strings, %cache_offset\n ret %cache_entry\n")
+	qbe_output_line(output, "@format\n %negative =w csltl %value, 0\n jnz %negative, @negative_value, @positive_value\n")
+	qbe_output_line(output, "@negative_value\n %negative_magnitude =l sub 0, %value\n jmp @magnitude\n")
+	qbe_output_line(output, "@positive_value\n jmp @magnitude\n")
+	qbe_output_line(output, "@magnitude\n %decimal_value =l phi @negative_value %negative_magnitude, @positive_value %value\n %decimal_end =l copy %end\n jmp @decimal_begin\n")
+	emit_decimal_digits(output)
+	qbe_output_line(output, " jnz %negative, @negative_sign, @finish\n")
+	qbe_output_line(output, "@negative_sign\n %sign_start =l sub %decimal_start, 1\n storeb 45, %sign_start\n jmp @finish\n")
+	# Portable Integer magnitudes fit in 16 decimal digits. The 32-byte stack
+	# buffer also has room for the sign. ASCII byte and codepoint lengths agree.
+	qbe_output_line(output, "@finish\n %start =l phi @decimal_digits_done %decimal_start, @negative_sign %sign_start\n %length =l sub %end, %start\n %size =l add %length, 17\n %string =l call $trbn_string_alloc(l %size)\n %length_address =l add %string, 8\n storel %length, %length_address\n %data =l add %string, 24\n call $memcpy(l %data, l %start, l %length)\n %terminator =l add %data, %length\n storeb 0, %terminator\n %points_address =l add %string, 16\n storel %length, %points_address\n ret %string\n}\n")
+end

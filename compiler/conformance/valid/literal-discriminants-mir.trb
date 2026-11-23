@@ -1,0 +1,47 @@
+record Created
+	kind: "created"
+	body: String
+end
+
+record Queued
+	kind: "created"
+	body: String
+end
+
+record Missing
+	kind: "missing"
+	code: Integer
+end
+
+alias Response = Created | Queued | Missing
+
+def describe_response(response: Response): String
+	return case response.kind
+	when "created"
+		response.body
+	else
+		response.code.to_s()
+	end
+end
+
+def retain(response: Response): () -> String
+	return fn(): String
+		return describe_response(response)
+	end
+end
+
+def later(value: String): String
+	return value + "!"
+end
+
+def main()
+	first: Response := Created.new(kind: "created", body: later("held"))
+	second: Response := Queued.new(kind: "created", body: later("queued"))
+	third: Response := Missing.new(kind: "missing", code: 404)
+	read := retain(first)
+	noise := later("other")
+	puts(read())
+	puts(describe_response(second))
+	puts(describe_response(third))
+	puts(noise)
+end

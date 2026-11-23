@@ -1,0 +1,41 @@
+newtype Count = Integer
+newtype Ratio = Float
+newtype Wrapped = Ratio
+
+FIRST := Count.new(7)
+
+record Sample
+	value: Ratio
+end
+
+def default_count(value: Count = Count.new(3)): Count
+	return value
+end
+
+def keep(value: Wrapped): Wrapped
+	return value
+end
+
+def capture(value: Ratio): () -> Ratio
+	return fn(): Ratio
+		return value
+	end
+end
+
+def main()
+	puts(FIRST.value() + default_count().value())
+	mut values := [Ratio.new(1.5), Ratio.new(2.5)]
+	values.push(Ratio.new(3.5))
+	values[0] = Ratio.new(4.5)
+	lookup := { "held" => values[1] }
+	puts(lookup["held"].value())
+	puts(Sample.new(value: values[0]).value.value())
+	puts(keep(Wrapped.new(values[2])).value().value())
+	read := capture(Ratio.new(5.5))
+	puts(read().value())
+	present: Ratio? := Ratio.new(6.5)
+	if present != nil
+		puts(present.value())
+	end
+	puts(Count.new(3) == default_count())
+end

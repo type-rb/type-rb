@@ -1,0 +1,3 @@
+import { mark } from shared
+import b/y
+X := mark("x") + Y

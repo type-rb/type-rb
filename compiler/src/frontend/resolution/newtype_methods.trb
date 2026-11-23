@@ -1,0 +1,40 @@
+import { find_newtype_type } from frontend/types/newtype_types
+import { find_function_in_module, find_generic_function_in_module } from frontend/resolution/declaration_lookup
+import { declare_default_functions } from frontend/resolution/default_arguments
+import { instantiate_generic_function } from frontend/resolution/generic_functions
+import { next_generic_depth } from frontend/types/generic_bindings
+import { CompilerState } from state/state
+import { sparse_string_at } from support/storage
+
+def newtype_method_function(mut state: CompilerState, type_name: String, member: String, class_method: Boolean, method_arguments: Array<String>): Integer
+	owner := find_newtype_type(state, type_name)
+	if owner < 0
+		return -1
+	end
+	definition := state.nominal.newtypes[owner]
+	generic := find_generic_function_in_module(state, definition.source_id, definition.name + "::" + member)
+	if generic >= 0
+		if class_method || state.type_resolution.generic_functions[generic].receiver_type != type_name
+			return -1
+		end
+		function := instantiate_generic_function(state, generic, method_arguments, next_generic_depth(state))
+		declare_default_functions(state)
+		return function
+	end
+	if method_arguments.size() > 0
+		return -1
+	end
+	function := find_function_in_module(state, definition.source_id, definition.name + "::" + member)
+	if function < 0
+		return -1
+	end
+	receiver := sparse_string_at(state.nominal.function_receivers, function)
+	if class_method
+		if receiver != ""
+			return -1
+		end
+	elsif receiver != type_name
+		return -1
+	end
+	return function
+end

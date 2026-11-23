@@ -1,0 +1,8 @@
+def read(input: Array<Integer>): Integer
+	mut copy: Array<Integer> := input
+	return copy.size()
+end
+
+def main()
+	return
+end

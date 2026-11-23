@@ -1,0 +1,13 @@
+class Label
+	@text: String
+	def initialize(text: String)
+		@text = text
+	end
+end
+def main()
+	label := Label.new("held")
+	read := fn(): String
+		return label.text
+	end
+	puts(read())
+end

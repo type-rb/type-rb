@@ -1,0 +1,118 @@
+def builder_append_bytes(): Integer
+	return 8
+end
+
+# Operation IDs belong to the checked StringBuilder contract, not source names.
+def builder_new(): Integer
+	return 0
+end
+
+def builder_from_string(): Integer
+	return 1
+end
+
+def builder_append(): Integer
+	return 2
+end
+
+def builder_append_codepoint(): Integer
+	return 3
+end
+
+def builder_length(): Integer
+	return 4
+end
+
+def builder_empty(): Integer
+	return 5
+end
+
+def builder_to_string(): Integer
+	return 6
+end
+
+def builder_clear(): Integer
+	return 7
+end
+
+def builder_adapter_start(): Integer
+	return 25
+end
+
+def builder_names(): Array<String>
+	return ["new", "from_string", "append", "append_codepoint", "length", "empty", "to_string", "clear", "append_bytes"]
+end
+
+def builder_parameters(kind: Integer): Array<String>
+	if kind == builder_append_bytes()
+		return ["StringBuilder", "Bytes", "Integer", "Integer"]
+	end
+	if kind == builder_new()
+		return []
+	elsif kind == builder_from_string()
+		return ["String"]
+	elsif kind == builder_append()
+		return ["StringBuilder", "String"]
+	elsif kind == builder_append_codepoint()
+		return ["StringBuilder", "Integer"]
+	end
+	return ["StringBuilder"]
+end
+
+def builder_result(kind: Integer): String
+	if kind == builder_new() || kind == builder_from_string()
+		return "StringBuilder"
+	elsif kind == builder_length()
+		return "Integer"
+	elsif kind == builder_empty()
+		return "Boolean"
+	elsif kind == builder_to_string()
+		return "String"
+	end
+	return "Void"
+end
+
+def builder_mutates(kind: Integer): Boolean
+	if kind == builder_append() || kind == builder_append_codepoint() || kind == builder_clear() || kind == builder_append_bytes()
+		return true
+	end
+	return false
+end
+
+def builder_method(name: String): Integer
+	if name == "append"
+		return builder_append()
+	elsif name == "append_codepoint"
+		return builder_append_codepoint()
+	elsif name == "size"
+		return builder_length()
+	elsif name == "empty?"
+		return builder_empty()
+	elsif name == "to_s"
+		return builder_to_string()
+	elsif name == "clear"
+		return builder_clear()
+	end
+	return -1
+end
+
+def builder_signature_name(kind: Integer): String
+	if kind == builder_append_bytes()
+		return "trb/internal/string_builder_storage.append_bytes"
+	end
+	if kind <= builder_from_string()
+		return "trb/std/string_builder." + builder_names()[kind]
+	end
+	return "trb/internal/string_builder." + builder_names()[kind]
+end
+
+def builder_parameter_names(kind: Integer): Array<String>
+	if kind == builder_new()
+		return []
+	elsif kind == builder_from_string()
+		return ["value"]
+	elsif kind == builder_append_bytes()
+		return ["builder", "bytes", "start", "finish"]
+	end
+	return []
+end

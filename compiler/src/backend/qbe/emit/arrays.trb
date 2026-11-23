@@ -1,0 +1,419 @@
+import { mir_array_copy_slice, mir_array_mutate_unshift } from mir/model/operation_modes
+import { qbe_runtime_float_array_slot } from backend/qbe/runtime_slots
+import { mir_op_array_copy, mir_op_array_load, mir_op_array_mutate, mir_op_array_new, mir_op_array_position, mir_op_array_push, mir_op_array_size, mir_op_array_store } from mir/model/instructions
+import { integer_string } from support/literals
+import { MirArrayLoop, MirArrayReadGuard, MirInstruction } from mir/model/module
+import { mir_element_type, mir_managed_type, mir_operand_type, mir_storage_type_name } from mir/model/types
+import { QbeEmitContext, QbeValue, emit_label, emit_temporary, emit_typed_load, emit_typed_store, emitted_value } from backend/qbe/context
+import { QbeOutput, qbe_output_branch, qbe_output_line } from backend/qbe/output
+import { emit_mir_roots } from backend/qbe/emit/roots
+import { qbe_array_cache_name } from backend/qbe/emit/array_caches
+import { CompilerState } from state/state
+
+def array_read_guard_source(guards: Array<MirArrayReadGuard>, instruction: Integer): Integer
+	guards.each do |guard|
+		if guard.instruction == instruction
+			return guard.source
+		end
+	end
+	return -1
+end
+
+def array_read_guard_used(guards: Array<MirArrayReadGuard>, instruction: Integer): Boolean
+	guards.each do |guard|
+		if guard.source == instruction
+			return true
+		end
+	end
+	return false
+end
+
+def array_check_reusable(indexes: Array<Integer>, index: Integer): Boolean
+	mut first := 0
+	mut last := indexes.size()
+	while first < last
+		middle := first + (last - first) / 2
+		if indexes[middle] == index
+			return true
+		end
+		if indexes[middle] < index
+			first = middle + 1
+		else
+			last = middle
+		end
+	end
+	return false
+end
+
+# Keep the common nonnegative access at one unsigned comparison. If that
+# misses, adding the current length accepts exactly the in-range negative
+# indexes; all other values reach a terminal failure. The verifier owns the
+# Array operation; hot-path values are not live across the failure call.
+# A captured assignment target needs only its checked logical index before RHS.
+def emit_checked_array_access(owner: String, requested: String, capture_index: Boolean, nonnegative: Boolean, cached_length: String, cached_data: String, checked_name: String, mut context: QbeEmitContext, mut output: QbeOutput): String
+	mut length := cached_length
+	if length == ""
+		length_slot := emit_temporary(context)
+		length = emit_temporary(context)
+		qbe_output_line(output, "\t" + length_slot + " =l add " + owner + ", 8")
+		qbe_output_line(output, "\t" + length + " =l loadl " + length_slot)
+	end
+	mut index := requested
+	if nonnegative
+		valid := emit_temporary(context)
+		accepted := emit_label(context)
+		rejected := emit_label(context)
+		qbe_output_line(output, "\t" + valid + " =w cultl " + requested + ", " + length)
+		qbe_output_branch(output, valid, accepted, rejected)
+		qbe_output_line(output, rejected)
+		qbe_output_line(output, "\tcall $trbn_array_bounds_fail()")
+		qbe_output_line(output, "\thlt")
+		qbe_output_line(output, accepted)
+	else
+		positive_valid := emit_temporary(context)
+		positive := emit_label(context)
+		negative := emit_label(context)
+		negative_valid := emit_temporary(context)
+		negative_accepted := emit_label(context)
+		accepted := emit_label(context)
+		rejected := emit_label(context)
+		qbe_output_line(output, "\t" + positive_valid + " =w cultl " + requested + ", " + length)
+		qbe_output_branch(output, positive_valid, positive, negative)
+		qbe_output_line(output, positive)
+		positive_index := emit_temporary(context)
+		qbe_output_line(output, "\t" + positive_index + " =l copy " + requested)
+		qbe_output_line(output, "\tjmp " + accepted)
+		qbe_output_line(output, negative)
+		adjusted := emit_temporary(context)
+		qbe_output_line(output, "\t" + adjusted + " =l add " + requested + ", " + length)
+		qbe_output_line(output, "\t" + negative_valid + " =w cultl " + adjusted + ", " + length)
+		qbe_output_branch(output, negative_valid, negative_accepted, rejected)
+		qbe_output_line(output, negative_accepted)
+		negative_index := emit_temporary(context)
+		qbe_output_line(output, "\t" + negative_index + " =l copy " + adjusted)
+		qbe_output_line(output, "\tjmp " + accepted)
+		qbe_output_line(output, rejected)
+		qbe_output_line(output, "\tcall $trbn_array_bounds_fail()")
+		qbe_output_line(output, "\thlt")
+		qbe_output_line(output, accepted)
+		index = emit_temporary(context)
+		qbe_output_line(output, "\t" + index + " =l phi " + positive + " " + positive_index + ", " + negative_accepted + " " + negative_index)
+	end
+	if checked_name != ""
+		qbe_output_line(output, "\t" + checked_name + " =l copy " + index)
+	end
+	if capture_index
+		return index
+	end
+	mut data := cached_data
+	if data == ""
+		data_slot := emit_temporary(context)
+		data = emit_temporary(context)
+		qbe_output_line(output, "\t" + data_slot + " =l add " + owner + ", 24")
+		qbe_output_line(output, "\t" + data + " =l loadl " + data_slot)
+	end
+	offset := emit_temporary(context)
+	result := emit_temporary(context)
+	qbe_output_line(output, "\t" + offset + " =l shl " + index + ", 3")
+	qbe_output_line(output, "\t" + result + " =l add " + data + ", " + offset)
+	return result
+end
+
+# The direct store cannot collect. Publish the verified live-before roots only
+# on growth, before the existing slow path performs GC and backing accounting.
+def emit_integer_array_push(owner: String, value: String, reserved: Boolean, roots: Array<Integer>, root_prefix: Integer, root_capacity: Integer, operands: Array<String>, mut context: QbeEmitContext, mut output: QbeOutput)
+	length_slot := emit_temporary(context)
+	length := emit_temporary(context)
+	mut finish := ""
+	qbe_output_line(output, "\t" + length_slot + " =l add " + owner + ", 8")
+	qbe_output_line(output, "\t" + length + " =l loadl " + length_slot)
+	if !reserved
+		capacity_slot := emit_temporary(context)
+		capacity := emit_temporary(context)
+		full := emit_temporary(context)
+		grow := emit_label(context)
+		store := emit_label(context)
+		finish = emit_label(context)
+		qbe_output_line(output, "\t" + capacity_slot + " =l add " + owner + ", 16")
+		qbe_output_line(output, "\t" + capacity + " =l loadl " + capacity_slot)
+		qbe_output_line(output, "\t" + full + " =w ceql " + length + ", " + capacity)
+		qbe_output_branch(output, full, grow, store)
+		qbe_output_line(output, grow)
+		emit_mir_roots(roots, root_prefix, root_capacity, operands, context, output)
+		qbe_output_line(output, "\tcall $trbn_array_grow_paced(l " + owner + ", l " + value + ", l " + length + ", l " + capacity + ")")
+		qbe_output_line(output, "\tjmp " + finish)
+		qbe_output_line(output, store)
+	end
+	new_length := emit_temporary(context)
+	data_slot := emit_temporary(context)
+	data := emit_temporary(context)
+	offset := emit_temporary(context)
+	target := emit_temporary(context)
+	qbe_output_line(output, "\t" + new_length + " =l add " + length + ", 1")
+	qbe_output_line(output, "\tstorel " + new_length + ", " + length_slot)
+	qbe_output_line(output, "\t" + data_slot + " =l add " + owner + ", 24")
+	qbe_output_line(output, "\t" + data + " =l loadl " + data_slot)
+	qbe_output_line(output, "\t" + offset + " =l shl " + length + ", 3")
+	qbe_output_line(output, "\t" + target + " =l add " + data + ", " + offset)
+	qbe_output_line(output, "\tstorel " + value + ", " + target)
+	if !reserved
+		qbe_output_line(output, "\tjmp " + finish)
+		qbe_output_line(output, finish)
+	end
+	return
+end
+
+# No source analysis or implicit roots: each allocation/push has its own MIR
+# safe point. Verified loop plans retain only stable input storage, including
+# across disjoint output growth; other accesses obtain a fresh address.
+def emit_mir_array_instruction(state: CompilerState, value_types: Array<Integer>, instruction: MirInstruction, instruction_index: Integer, plans: Array<MirArrayLoop>, check_reuse: Array<Integer>, read_guards: Array<MirArrayReadGuard>, operands: Array<String>, mut context: QbeEmitContext, mut output: QbeOutput): QbeValue
+	kind := instruction.kind
+	type_id := mir_operand_type(value_types, instruction.result)
+	type_name := mir_storage_type_name(state.scalar_mir, type_id)
+	if kind == mir_op_array_load() || kind == mir_op_array_store()
+		plans.each do |plan|
+			mut slot := 0
+			while slot < plan.cached_values.size()
+				cache := plan.cached_values[slot]
+				name := qbe_array_cache_name(plan.header, slot)
+				if kind == mir_op_array_load() && array_check_reusable(cache.loads, instruction_index)
+					if array_read_guard_used(read_guards, instruction_index)
+						qbe_output_line(output, "\t%mir_array_checked_index" + integer_string(instruction_index) + " =l copy " + operands[instruction.second])
+					end
+					# Capture this SSA read before a later store changes the cache.
+					captured := emit_temporary(context)
+					mut width := "l"
+					if type_name == "Float"
+						width = "d"
+					end
+					qbe_output_line(output, "\t" + captured + " =" + width + " copy " + name)
+					return emitted_value(captured, type_name)
+				end
+				if kind == mir_op_array_store() && array_check_reusable(cache.stores, instruction_index)
+					mut width := "l"
+					if mir_storage_type_name(state.scalar_mir, cache.type_id) == "Float"
+						width = "d"
+					end
+					qbe_output_line(output, "\t" + name + " =" + width + " copy " + operands[instruction.payload])
+					return emitted_value("", "Void")
+				end
+				slot += 1
+			end
+		end
+	end
+	if kind == mir_op_array_load()
+		read_guards.each do |guard|
+			if guard.instruction == instruction_index && guard.loaded_value >= 0
+				return emitted_value(operands[guard.loaded_value], type_name)
+			end
+		end
+	end
+	result := emit_temporary(context)
+	if kind == mir_op_array_new()
+		mut descriptor := "$trbn_desc_array_scalar"
+		if mir_managed_type(state.scalar_mir, mir_element_type(state.scalar_mir, type_id))
+			descriptor = "$trbn_desc_array_managed"
+		end
+		if instruction.first >= 0
+			length_slot := emit_temporary(context)
+			length := emit_temporary(context)
+			qbe_output_line(output, "\t" + length_slot + " =l add " + operands[instruction.first] + ", 8")
+			qbe_output_line(output, "\t" + length + " =l loadl " + length_slot)
+			mut capacity := length
+			if instruction.payload > 0
+				capacity = emit_temporary(context)
+				limited := emit_temporary(context)
+				limit := integer_string(instruction.payload)
+				capped := emit_label(context)
+				exact := emit_label(context)
+				allocate := emit_label(context)
+				qbe_output_line(output, "\t" + limited + " =w csgtl " + length + ", " + limit)
+				qbe_output_branch(output, limited, capped, exact)
+				qbe_output_line(output, capped + "\n\tjmp " + allocate)
+				qbe_output_line(output, exact + "\n\tjmp " + allocate)
+				qbe_output_line(output, allocate)
+				qbe_output_line(output, "\t" + capacity + " =l phi " + capped + " " + limit + ", " + exact + " " + length)
+			end
+			qbe_output_line(output, "\t" + result + " =l call $trbn_array_new_reserved(l " + descriptor + ", l " + capacity + ")")
+		else
+			qbe_output_line(output, "\t" + result + " =l call $trbn_array_new(l " + descriptor + ")")
+		end
+		return emitted_value(result, type_name)
+	end
+	owner := operands[instruction.first]
+	if kind == mir_op_array_mutate()
+		if instruction.payload == mir_array_mutate_unshift()
+			mut value := operands[instruction.second]
+			if mir_storage_type_name(state.scalar_mir, mir_operand_type(value_types, instruction.second)) == "Float"
+				value = emit_temporary(context)
+				qbe_output_line(output, "\t" + value + " =l cast " + operands[instruction.second])
+			end
+			qbe_output_line(output, "\tcall $trbn_array_unshift(l " + owner + ", l " + value + ")")
+			return emitted_value("", "Void")
+		else
+			mut raw := result
+			if type_name == "Float"
+				raw = emit_temporary(context)
+			end
+			qbe_output_line(output, "\t" + raw + " =l call $trbn_array_remove(l " + owner + ", w " + integer_string(instruction.payload) + ")")
+			if type_name == "Float"
+				qbe_output_line(output, "\t" + result + " =d cast " + raw)
+			end
+		end
+		return emitted_value(result, type_name)
+	end
+	if kind == mir_op_array_copy()
+		mut descriptor := "$trbn_desc_array_scalar"
+		if mir_managed_type(state.scalar_mir, mir_element_type(state.scalar_mir, type_id))
+			descriptor = "$trbn_desc_array_managed"
+		end
+		mut bounds := "0"
+		if instruction.payload == mir_array_copy_slice()
+			bounds = operands[instruction.second]
+		end
+		qbe_output_line(output, "\t" + result + " =l call $trbn_array_copy(l " + owner + ", l " + bounds + ", w " + integer_string(instruction.payload) + ", l " + descriptor + ")")
+		return emitted_value(result, type_name)
+	end
+	mut selected := -1
+	mut cached_length := ""
+	mut cached_data := ""
+	mut nonnegative := false
+	mut bounded := false
+	plans.each do |plan|
+		if kind == mir_op_array_size() && plan.length == instruction_index
+			selected = plan.header
+		end
+		plan.accesses.each do |access|
+			if (kind == mir_op_array_position() || kind == mir_op_array_load() || kind == mir_op_array_store()) && access == instruction_index
+				selected = plan.header
+			end
+		end
+		plan.headers.each do |header|
+			header.accesses.each do |access|
+				if access == instruction_index
+					name := integer_string(plan.header) + "_" + integer_string(header.identity)
+					cached_length = "%mir_array_length" + name
+					cached_data = "%mir_array_data" + name
+					nonnegative = array_check_reusable(header.nonnegative_accesses, instruction_index)
+					bounded = array_check_reusable(header.bounded_accesses, instruction_index)
+				end
+			end
+		end
+	end
+	if kind == mir_op_array_size() && selected >= 0
+		return emitted_value("%mir_array_length" + integer_string(selected), "Integer")
+	end
+	if kind == mir_op_array_size() && cached_length != ""
+		return emitted_value(cached_length, "Integer")
+	end
+	if kind == mir_op_array_size()
+		address := emit_temporary(context)
+		qbe_output_line(output, "\t" + address + " =l add " + owner + ", 8")
+		qbe_output_line(output, "\t" + result + " =l loadl " + address)
+		return emitted_value(result, "Integer")
+	end
+	mut second := operands[instruction.second]
+	mut checked_name := ""
+	if kind == mir_op_array_load() && array_read_guard_used(read_guards, instruction_index)
+		checked_name = "%mir_array_checked_index" + integer_string(instruction_index)
+	end
+	guard_source := array_read_guard_source(read_guards, instruction_index)
+	if guard_source >= 0
+		guard := state.scalar_mir.instructions[guard_source]
+		if guard.kind == mir_op_array_position()
+			second = operands[guard.result]
+		else
+			second = "%mir_array_checked_index" + integer_string(guard_source)
+		end
+		if kind == mir_op_array_position()
+			return emitted_value(second, "Integer")
+		end
+	end
+	if kind == mir_op_array_push()
+		element := mir_element_type(state.scalar_mir, mir_operand_type(value_types, instruction.first))
+		if mir_storage_type_name(state.scalar_mir, element) == "Float"
+			output.runtime_flags[qbe_runtime_float_array_slot()] = 1
+			qbe_output_line(output, "\tcall $trbn_array_push_d(l " + owner + ", d " + second + ")")
+		else
+			qbe_output_line(output, "\tcall $trbn_array_push_paced(l " + owner + ", l " + second + ")")
+		end
+		return emitted_value("", "Void")
+	end
+	if (kind == mir_op_array_load() || kind == mir_op_array_store()) && selected >= 0
+		if checked_name != ""
+			qbe_output_line(output, "\t" + checked_name + " =l copy " + second)
+		end
+		offset := emit_temporary(context)
+		address := emit_temporary(context)
+		qbe_output_line(output, "\t" + offset + " =l shl " + second + ", 3")
+		qbe_output_line(output, "\t" + address + " =l add %mir_array_data" + integer_string(selected) + ", " + offset)
+		if kind == mir_op_array_load()
+			emit_typed_load(output, result, type_name, address)
+			return emitted_value(result, type_name)
+		end
+		element := mir_element_type(state.scalar_mir, mir_operand_type(value_types, instruction.first))
+		emit_typed_store(output, mir_storage_type_name(state.scalar_mir, element), operands[instruction.payload], address)
+		return emitted_value("", "Void")
+	end
+	if kind == mir_op_array_position() && (selected >= 0 || bounded || array_check_reusable(check_reuse, instruction_index))
+		# The verified plan proves a nonnegative logical position for this owner.
+		return emitted_value(second, "Integer")
+	end
+	mut address := ""
+	if (kind == mir_op_array_load() || kind == mir_op_array_store()) && (guard_source >= 0 || bounded || array_check_reusable(check_reuse, instruction_index))
+		# The verified plan proves `second` is a checked logical index for this
+		# exact owner with no intervening length change. Reload storage after RHS.
+		if checked_name != ""
+			qbe_output_line(output, "\t" + checked_name + " =l copy " + second)
+		end
+		mut data := cached_data
+		if data == ""
+			data_slot := emit_temporary(context)
+			data = emit_temporary(context)
+			qbe_output_line(output, "\t" + data_slot + " =l add " + owner + ", 24")
+			qbe_output_line(output, "\t" + data + " =l loadl " + data_slot)
+		end
+		offset := emit_temporary(context)
+		address = emit_temporary(context)
+		qbe_output_line(output, "\t" + offset + " =l shl " + second + ", 3")
+		qbe_output_line(output, "\t" + address + " =l add " + data + ", " + offset)
+	else
+		address = emit_checked_array_access(owner, second, kind == mir_op_array_position(), nonnegative, cached_length, cached_data, checked_name, context, output)
+	end
+	if kind == mir_op_array_position()
+		return emitted_value(address, type_name)
+	elsif kind == mir_op_array_load()
+		emit_typed_load(output, result, type_name, address)
+	else
+		element := mir_element_type(state.scalar_mir, mir_operand_type(value_types, instruction.first))
+		emit_typed_store(output, mir_storage_type_name(state.scalar_mir, element), operands[instruction.payload], address)
+		return emitted_value("", "Void")
+	end
+	return emitted_value(result, type_name)
+end
+
+def emit_mir_array_headers(plans: Array<MirArrayLoop>, block: Integer, operands: Array<String>, mut context: QbeEmitContext, mut output: QbeOutput)
+	plans.each do |plan|
+		if plan.preheader == block
+			if plan.owner >= 0
+				owner := operands[plan.owner]
+				length := emit_temporary(context)
+				data := emit_temporary(context)
+				qbe_output_line(output, "\t" + length + " =l add " + owner + ", 8")
+				qbe_output_line(output, "\t%mir_array_length" + integer_string(plan.header) + " =l loadl " + length)
+				qbe_output_line(output, "\t" + data + " =l add " + owner + ", 24")
+				qbe_output_line(output, "\t%mir_array_data" + integer_string(plan.header) + " =l loadl " + data)
+			end
+			plan.headers.each do |header|
+				extra_owner := operands[header.owner]
+				name := integer_string(plan.header) + "_" + integer_string(header.identity)
+				extra_length := emit_temporary(context)
+				extra_data := emit_temporary(context)
+				qbe_output_line(output, "\t" + extra_length + " =l add " + extra_owner + ", 8")
+				qbe_output_line(output, "\t%mir_array_length" + name + " =l loadl " + extra_length)
+				qbe_output_line(output, "\t" + extra_data + " =l add " + extra_owner + ", 24")
+				qbe_output_line(output, "\t%mir_array_data" + name + " =l loadl " + extra_data)
+			end
+		end
+	end
+end

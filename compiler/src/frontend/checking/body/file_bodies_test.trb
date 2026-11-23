@@ -1,0 +1,130 @@
+import { captured_body_locals, lambda_captures } from frontend/checking/body/lambdas
+import { analyze_file_body } from frontend/checking/body/file_bodies
+import { check_function_body, checked_function_locals } from frontend/checking/program/functions
+import { find_function_in_module } from frontend/resolution/declaration_lookup
+import { resolve_type_name } from frontend/resolution/type_resolution
+import { standard_result_instance } from frontend/checking/nominal/results
+import { mir_declare_signatures } from mir/lowering/calls
+import { mir_declare_types } from mir/model/types
+import { checking_discovery, checking_lowering } from state/checking_phases
+import { checked_body_lowering, checked_body_new } from state/checked_body
+import { CompilerState, has_diagnostic, select_checked_body } from state/state
+import { load_string } from support/storage
+import { expect_compiler_phase, logical_checked_source } from testing/pipeline
+import { describe, expect, test } from trb/std/test
+
+def file_body_analysis(body: String, parameters: String = "file"): CompilerState
+	source := "import trb/std/file\nimport trb/std/result\nimport { FileSystemError } from trb/std/errors\ndef accept(_file: File): Integer\nreturn 3\nend\ndef acquire(): Integer\nreturn 1\nend\ndef outer(mut counter: Integer, label: String, other: File)\n_result := acquire() do |" + parameters + "|\n" + body + "\nend\nend\ndef main()\nend\n"
+	mut state := logical_checked_source(source)
+	state.callables.lambda_phase[0] = checking_discovery()
+	outer := find_function_in_module(state, state.module_graph.entry_module[0], "outer")
+	mut locals := checked_function_locals(state, outer)
+	file_type := resolve_type_name(state, state.module_graph.entry_module[0], "File", false)
+	analyze_file_body(state, locals, state.callables.call_blocks[0], file_type, "")
+	return state
+end
+
+describe("Structured File body checking") do
+	test("infers a yielded value and retains only referenced mutable and borrowed captures") do
+		mut state := file_body_analysis("counter += accept(file) + accept(other)\nputs(label)\ncounter")
+		expect_compiler_phase(state, "file body", !has_diagnostic(state))
+		expect(state.callables.lambdas.size()).to_equal(0)
+		expect(state.callables.checked_lambdas.size()).to_equal(0)
+		expect(state.callables.file_bodies.size()).to_equal(1)
+		body := state.callables.file_bodies[0]
+		expect(body.yield_type).to_equal("Integer")
+		instance := standard_result_instance(state, body.result_type)
+		expect(instance >= 0).to_be_true()
+		expect(state.type_resolution.generic_instances[instance].arguments[0]).to_equal("Integer")
+		expect(body.captures.size()).to_equal(3)
+		expect(body.captures[0].name).to_equal("counter")
+		expect(body.captures[0].mutable).to_equal(1)
+		expect(body.captures[1].name).to_equal("label")
+		expect(body.captures[2].name).to_equal("other")
+		expect(body.captures[2].mutable).to_equal(0)
+		expect(state.callables.checked[0].shared_bindings).to_equal([0])
+		# Replay the known body into independently checked ordinary MIR. The
+		# fixture's acquisition call is deliberately not granted public semantics.
+		previous := state.callables.checked_bodies[body.body]
+		state.callables.checked_bodies[body.body] = checked_body_lowering(previous, body.function[0], previous.resolved_names.origin, previous.resolved_names.limit[0])
+		state.callables.lambda_phase[0] = checking_lowering()
+		mir_declare_types(state)
+		mir_declare_signatures(state)
+		mut locals := checked_function_locals(state, body.function[0])
+		expect_compiler_phase(state, "file body MIR", check_function_body(state, body.function[0], locals))
+		expect(state.scalar_mir.functions.size()).to_equal(1)
+		expect(state.scalar_mir.functions[0].result_type).to_equal(body.result_type)
+	end
+
+	test("keeps yielded Result values nested and respects explicit collection declarations") do
+		mut nested := file_body_analysis("accept(file)\nResult<Integer, FileSystemError>::Ok(1)")
+		expect_compiler_phase(nested, "nested result", !has_diagnostic(nested))
+		body := nested.callables.file_bodies[0]
+		inner := standard_result_instance(nested, body.yield_type)
+		expect(inner >= 0).to_be_true()
+		outer := standard_result_instance(nested, body.result_type)
+		expect(nested.type_resolution.generic_instances[outer].arguments[0]).to_equal(body.yield_type)
+		mut empty := file_body_analysis("accept(file)\nvalues: Array<String> := []\nvalues")
+		expect_compiler_phase(empty, "explicit collection", !has_diagnostic(empty))
+		expect(empty.callables.file_bodies[0].yield_type).to_equal("Array<String>")
+	end
+
+	test("requires a terminal value expression after all preceding statements") do
+		["accept(file)\nwhile false\nputs(label)\nend", "accept(file)\n_value := 2", "accept(file)\ncounter = 2", "accept(file)\nputs(label)"].each do |source|
+			state := file_body_analysis(source)
+			expect(has_diagnostic(state)).to_be_true()
+			expect(load_string(state.diagnostics.messages, 0)).to_equal("File.open block must end with a result expression")
+		end
+	end
+
+	test("confines try and loop transfers while allowing creation of callbacks without resource captures") do
+		[
+			"value := try Result<Integer, FileSystemError>::Ok(1)\naccept(file) + value",
+			"while true\naccept(file)\nbreak\nend\n1",
+			"_callback := fn(): Integer; return 2; end\naccept(file)",
+		].each do |source|
+			mut state := file_body_analysis(source)
+			expect_compiler_phase(state, "scoped control", !has_diagnostic(state))
+		end
+	end
+
+	test("rejects escaping resources explicit returns outer transfers and callback capture") do
+		bodies := ["return accept(file)", "accept(file)\nbreak", "file", "callback := fn(): Integer; return accept(file); end\ncallback()", "try Result<Integer, String>::Err(\"wrong error\")\naccept(file)"]
+		errors := ["return is unavailable inside a scoped File block", "break is only valid inside a loop", "scoped resource", "scoped resource", "try cannot propagate"]
+		mut index := 0
+		while index < bodies.size()
+			state := file_body_analysis(bodies[index])
+			expect(has_diagnostic(state)).to_be_true()
+			expect(load_string(state.diagnostics.messages, 0).include?(errors[index])).to_be_true()
+			index += 1
+		end
+	end
+
+	test("rejects transitive callback retention through a nested synchronous File body") do
+		mut state := file_body_analysis("accept(file) + accept(other)")
+		expect_compiler_phase(state, "synchronous capture", !has_diagnostic(state))
+		outer := find_function_in_module(state, state.module_graph.entry_module[0], "outer")
+		mut parent := checked_function_locals(state, outer)
+		mut callback := captured_body_locals(state, parent)
+		syntax := state.callables.call_blocks[0]
+		previous := state.callables.checked[0]
+		state.callables.checked[0] = checked_body_new(-1, syntax.body_start, syntax.body_finish + 1)
+		file_type := resolve_type_name(state, state.module_graph.entry_module[0], "File", false)
+		expect(analyze_file_body(state, callback, syntax, file_type, "") >= 0).to_be_true()
+		state.callables.checked[0] = previous
+		lambda_captures(state, parent, callback, syntax.origin, false)
+		expect(load_string(state.diagnostics.messages, 0)).to_equal("scoped resource cannot be captured by a callback")
+	end
+
+	test("does not authorize a lookalike resource or a second block parameter") do
+		two := file_body_analysis("accept(file)", "file, other")
+		expect(load_string(two.diagnostics.messages, 0)).to_equal("File.open requires one immutable File block parameter")
+		mut state := file_body_analysis("accept(file)")
+		expect_compiler_phase(state, "initial body", !has_diagnostic(state))
+		outer := find_function_in_module(state, state.module_graph.entry_module[0], "outer")
+		select_checked_body(state, outer)
+		mut locals := checked_function_locals(state, outer)
+		expect(analyze_file_body(state, locals, state.callables.call_blocks[0], "Integer", "")).to_equal(-1)
+		expect(load_string(state.diagnostics.messages, 0)).to_equal("File.open requires one immutable File block parameter")
+	end
+end

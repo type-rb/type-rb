@@ -1,0 +1,7 @@
+def change(mut values: Array<Boolean>)
+values.push(true)
+end
+def main()
+mut values: Array<Integer> := [1]
+change(values)
+end

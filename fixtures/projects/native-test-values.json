@@ -1,0 +1,1737 @@
+{
+  "schemaVersion": 1,
+  "typeRBRevision": "cc8c734f73f5149464838825cdbb2165058ed26d",
+  "scope": "Portable assertion value and origin observations; unresolved authored Nil Result forms are tracked separately in #1297. No source or expected observation is inferred from Native output.",
+  "groups": {
+    "values": {
+      "code": 0,
+      "events": [
+        {
+          "column": 5,
+          "file": "<project>/src/sample_test.trb",
+          "line": 20,
+          "name": "Equality / scalar NaN is unequal to itself",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 5,
+          "file": "<project>/src/sample_test.trb",
+          "line": 20,
+          "name": "Equality / scalar NaN is unequal to itself",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_passed"
+        },
+        {
+          "column": 5,
+          "file": "<project>/src/sample_test.trb",
+          "line": 24,
+          "name": "Equality / signed zero compares by value",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 5,
+          "file": "<project>/src/sample_test.trb",
+          "line": 24,
+          "name": "Equality / signed zero compares by value",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_passed"
+        },
+        {
+          "column": 5,
+          "file": "<project>/src/sample_test.trb",
+          "line": 27,
+          "name": "Equality / same array identity retains the reference shortcut",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 5,
+          "file": "<project>/src/sample_test.trb",
+          "line": 27,
+          "name": "Equality / same array identity retains the reference shortcut",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_passed"
+        },
+        {
+          "column": 5,
+          "file": "<project>/src/sample_test.trb",
+          "line": 32,
+          "name": "Equality / same hash identity retains the reference shortcut",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 5,
+          "file": "<project>/src/sample_test.trb",
+          "line": 32,
+          "name": "Equality / same hash identity retains the reference shortcut",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_passed"
+        },
+        {
+          "column": 5,
+          "file": "<project>/src/sample_test.trb",
+          "line": 37,
+          "name": "Equality / record storage identity does not bypass field equality",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 5,
+          "file": "<project>/src/sample_test.trb",
+          "line": 37,
+          "name": "Equality / record storage identity does not bypass field equality",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_passed"
+        },
+        {
+          "column": 5,
+          "file": "<project>/src/sample_test.trb",
+          "line": 41,
+          "name": "Equality / class identity and class fields have distinct roles",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 5,
+          "file": "<project>/src/sample_test.trb",
+          "line": 41,
+          "name": "Equality / class identity and class fields have distinct roles",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_passed"
+        },
+        {
+          "column": 5,
+          "file": "<project>/src/sample_test.trb",
+          "line": 47,
+          "name": "Equality / cycles compare without recurring forever",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 5,
+          "file": "<project>/src/sample_test.trb",
+          "line": 47,
+          "name": "Equality / cycles compare without recurring forever",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_passed"
+        },
+        {
+          "column": 5,
+          "file": "<project>/src/sample_test.trb",
+          "line": 57,
+          "name": "Equality / non-nil functions never compare deeply equal",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 5,
+          "file": "<project>/src/sample_test.trb",
+          "line": 57,
+          "name": "Equality / non-nil functions never compare deeply equal",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_passed"
+        },
+        {
+          "column": 5,
+          "file": "<project>/src/sample_test.trb",
+          "line": 63,
+          "name": "Equality / nullable absence is different from an empty array",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 5,
+          "file": "<project>/src/sample_test.trb",
+          "line": 63,
+          "name": "Equality / nullable absence is different from an empty array",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_passed"
+        },
+        {
+          "failed": 0,
+          "total": 9,
+          "type": "test_summary"
+        }
+      ],
+      "stderr": "",
+      "sourceSha256": "f8efeffd3c1b6d76bfc5f63014f59dfde5e10fe656d6f56df55f14f08583a677"
+    },
+    "origins": {
+      "code": 1,
+      "events": [
+        {
+          "column": 5,
+          "file": "<project>/src/sample_test.trb",
+          "line": 9,
+          "name": "Origins / first same-type origin",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 9,
+          "file": "<project>/src/sample_test.trb",
+          "line": 10,
+          "message": "expected 1 to equal 2",
+          "name": "Origins / first same-type origin",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 5,
+          "file": "<project>/src/sample_test.trb",
+          "line": 12,
+          "name": "Origins / second same-type origin",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 9,
+          "file": "<project>/src/sample_test.trb",
+          "line": 13,
+          "message": "expected 3 to equal 4",
+          "name": "Origins / second same-type origin",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 5,
+          "file": "<project>/src/sample_test.trb",
+          "line": 15,
+          "name": "Origins / helper assertion origin",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 5,
+          "file": "<project>/src/sample_test.trb",
+          "line": 5,
+          "message": "expected 10 to equal 11",
+          "name": "Origins / helper assertion origin",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 5,
+          "file": "<project>/src/sample_test.trb",
+          "line": 18,
+          "name": "Origins / quoted unicode byte column",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 29,
+          "file": "<project>/src/sample_test.trb",
+          "line": 19,
+          "message": "expected \"値😀\" to equal \"other\"",
+          "name": "Origins / quoted unicode byte column",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 5,
+          "file": "<project>/src/sample_test.trb",
+          "line": 21,
+          "name": "Origins / unicode interpolation retains the inner assertion origin",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 28,
+          "file": "<project>/src/sample_test.trb",
+          "line": 22,
+          "message": "expected Ok, got Err(\"bad\")",
+          "name": "Origins / unicode interpolation retains the inner assertion origin",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 5,
+          "file": "<project>/src/sample_test.trb",
+          "line": 25,
+          "name": "Origins / non-Boolean is an assertion failure",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 9,
+          "file": "<project>/src/sample_test.trb",
+          "line": 26,
+          "message": "expected 1 to be true",
+          "name": "Origins / non-Boolean is an assertion failure",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 5,
+          "file": "<project>/src/sample_test.trb",
+          "line": 28,
+          "name": "Origins / wrong Result variant retains the call origin",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 19,
+          "file": "<project>/src/sample_test.trb",
+          "line": 29,
+          "message": "expected Ok, got Err(\"bad\")",
+          "name": "Origins / wrong Result variant retains the call origin",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 5,
+          "file": "<project>/src/sample_test.trb",
+          "line": 31,
+          "name": "Origins / another Result variant call origin",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 19,
+          "file": "<project>/src/sample_test.trb",
+          "line": 32,
+          "message": "expected Err, got Ok(1)",
+          "name": "Origins / another Result variant call origin",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 5,
+          "file": "<project>/src/sample_test.trb",
+          "line": 34,
+          "name": "Origins / runtime trap uses the case origin",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 5,
+          "file": "<project>/src/sample_test.trb",
+          "line": 34,
+          "message": "Array index is out of bounds",
+          "name": "Origins / runtime trap uses the case origin",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 5,
+          "file": "<project>/src/sample_test.trb",
+          "line": 38,
+          "name": "Origins / later case still runs",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 5,
+          "file": "<project>/src/sample_test.trb",
+          "line": 38,
+          "name": "Origins / later case still runs",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_passed"
+        },
+        {
+          "failed": 9,
+          "total": 10,
+          "type": "test_summary"
+        }
+      ],
+      "stderr": "exit status 1\n",
+      "sourceSha256": "03652a9b65816ac6ac1196c2f4b7b5426531bf64739575438e72adf24a1ab6b5"
+    },
+    "dynamic": {
+      "code": 0,
+      "events": [
+        {
+          "column": 5,
+          "file": "<project>/src/sample_test.trb",
+          "line": 24,
+          "name": "Dynamic equality / nominal labels and union alternatives",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 5,
+          "file": "<project>/src/sample_test.trb",
+          "line": 24,
+          "name": "Dynamic equality / nominal labels and union alternatives",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_passed"
+        },
+        {
+          "column": 5,
+          "file": "<project>/src/sample_test.trb",
+          "line": 34,
+          "name": "Dynamic equality / dynamic payloads retain type identity",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 5,
+          "file": "<project>/src/sample_test.trb",
+          "line": 34,
+          "name": "Dynamic equality / dynamic payloads retain type identity",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_passed"
+        },
+        {
+          "column": 5,
+          "file": "<project>/src/sample_test.trb",
+          "line": 45,
+          "name": "Dynamic equality / ranges include endpoint exclusivity",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 5,
+          "file": "<project>/src/sample_test.trb",
+          "line": 45,
+          "name": "Dynamic equality / ranges include endpoint exclusivity",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_passed"
+        },
+        {
+          "column": 5,
+          "file": "<project>/src/sample_test.trb",
+          "line": 49,
+          "name": "Dynamic equality / interfaces retain dynamic class fields",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 5,
+          "file": "<project>/src/sample_test.trb",
+          "line": 49,
+          "name": "Dynamic equality / interfaces retain dynamic class fields",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_passed"
+        },
+        {
+          "column": 5,
+          "file": "<project>/src/sample_test.trb",
+          "line": 55,
+          "name": "Dynamic equality / nullable values compare their present payload",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 5,
+          "file": "<project>/src/sample_test.trb",
+          "line": 55,
+          "name": "Dynamic equality / nullable values compare their present payload",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_passed"
+        },
+        {
+          "failed": 0,
+          "total": 5,
+          "type": "test_summary"
+        }
+      ],
+      "stderr": "",
+      "sourceSha256": "9dff063ad3ca2b4f2fb3626298840a332f73680becf9d428162548f3047ab0b3"
+    },
+    "scalars": {
+      "code": 1,
+      "events": [
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 6,
+          "name": "Scalars / success",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 6,
+          "name": "Scalars / success",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_passed"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 13,
+          "name": "Scalars / equality",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 3,
+          "file": "<project>/src/sample_test.trb",
+          "line": 14,
+          "message": "expected 1 to equal 2",
+          "name": "Scalars / equality",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 16,
+          "name": "Scalars / inequality",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 3,
+          "file": "<project>/src/sample_test.trb",
+          "line": 17,
+          "message": "expected 3 not to equal 3",
+          "name": "Scalars / inequality",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 19,
+          "name": "Scalars / Boolean",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 3,
+          "file": "<project>/src/sample_test.trb",
+          "line": 20,
+          "message": "expected true to be false",
+          "name": "Scalars / Boolean",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 22,
+          "name": "Scalars / type",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 3,
+          "file": "<project>/src/sample_test.trb",
+          "line": 23,
+          "message": "expected 1 to be true",
+          "name": "Scalars / type",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 25,
+          "name": "Scalars / nil",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 3,
+          "file": "<project>/src/sample_test.trb",
+          "line": 26,
+          "message": "expected 5 to be nil",
+          "name": "Scalars / nil",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 28,
+          "name": "Scalars / helper",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 3,
+          "message": "expected 10 to equal 11",
+          "name": "Scalars / helper",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 31,
+          "name": "Scalars / continued",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 31,
+          "name": "Scalars / continued",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_passed"
+        },
+        {
+          "failed": 6,
+          "total": 8,
+          "type": "test_summary"
+        }
+      ],
+      "stderr": "exit status 1\n",
+      "sourceSha256": "f9b685ed9425a6b6a1d22a5323ca7527bbae5b7b99e3c1ca5a59f8d556dfd6c4"
+    },
+    "traps": {
+      "code": 1,
+      "events": [
+        {
+          "column": 5,
+          "file": "<project>/src/sample_test.trb",
+          "line": 3,
+          "name": "Bounds / array",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 5,
+          "file": "<project>/src/sample_test.trb",
+          "line": 3,
+          "message": "Array index is out of bounds",
+          "name": "Bounds / array",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 5,
+          "file": "<project>/src/sample_test.trb",
+          "line": 7,
+          "name": "Bounds / string",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 5,
+          "file": "<project>/src/sample_test.trb",
+          "line": 7,
+          "message": "String index is out of bounds",
+          "name": "Bounds / string",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 5,
+          "file": "<project>/src/sample_test.trb",
+          "line": 11,
+          "name": "Bounds / continued",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 5,
+          "file": "<project>/src/sample_test.trb",
+          "line": 11,
+          "name": "Bounds / continued",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_passed"
+        },
+        {
+          "failed": 2,
+          "total": 3,
+          "type": "test_summary"
+        }
+      ],
+      "stderr": "exit status 1\n",
+      "sourceSha256": "efdabca82f48dfd4988b029048be1cfbb783b88023f9a82cd080e5f69f9d4620"
+    },
+    "results": {
+      "code": 1,
+      "events": [
+        {
+          "column": 5,
+          "file": "<project>/src/sample_test.trb",
+          "line": 5,
+          "name": "Results / managed Ok payload",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 5,
+          "file": "<project>/src/sample_test.trb",
+          "line": 5,
+          "name": "Results / managed Ok payload",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_passed"
+        },
+        {
+          "column": 5,
+          "file": "<project>/src/sample_test.trb",
+          "line": 10,
+          "name": "Results / managed Err payload",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 5,
+          "file": "<project>/src/sample_test.trb",
+          "line": 10,
+          "name": "Results / managed Err payload",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_passed"
+        },
+        {
+          "column": 5,
+          "file": "<project>/src/sample_test.trb",
+          "line": 15,
+          "name": "Results / scalar payloads",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 5,
+          "file": "<project>/src/sample_test.trb",
+          "line": 15,
+          "name": "Results / scalar payloads",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_passed"
+        },
+        {
+          "column": 5,
+          "file": "<project>/src/sample_test.trb",
+          "line": 23,
+          "name": "Results / unexpected Err",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 19,
+          "file": "<project>/src/sample_test.trb",
+          "line": 24,
+          "message": "expected Ok, got Err(false)",
+          "name": "Results / unexpected Err",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 5,
+          "file": "<project>/src/sample_test.trb",
+          "line": 26,
+          "name": "Results / unexpected Ok",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 19,
+          "file": "<project>/src/sample_test.trb",
+          "line": 27,
+          "message": "expected Err, got Ok(9)",
+          "name": "Results / unexpected Ok",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 5,
+          "file": "<project>/src/sample_test.trb",
+          "line": 29,
+          "name": "Results / continued",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 5,
+          "file": "<project>/src/sample_test.trb",
+          "line": 29,
+          "name": "Results / continued",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_passed"
+        },
+        {
+          "failed": 2,
+          "total": 6,
+          "type": "test_summary"
+        }
+      ],
+      "stderr": "exit status 1\n",
+      "sourceSha256": "3f1ea017396faba117644fa6351090f47c7288b9c942b94ea11257ba49547d10"
+    },
+    "portable": {
+      "code": 1,
+      "events": [
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 53,
+          "name": "Values / record",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 3,
+          "file": "<project>/src/sample_test.trb",
+          "line": 54,
+          "message": "expected Point(x: 1, y: 2) to equal Point(x: 1, y: 3)",
+          "name": "Values / record",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 56,
+          "name": "Values / generic record",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 3,
+          "file": "<project>/src/sample_test.trb",
+          "line": 57,
+          "message": "expected Box(value: \"text\") to be nil",
+          "name": "Values / generic record",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 59,
+          "name": "Values / nested array",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 3,
+          "file": "<project>/src/sample_test.trb",
+          "line": 60,
+          "message": "expected [Point(x: 1, y: 2)] to be nil",
+          "name": "Values / nested array",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 62,
+          "name": "Values / hash",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 3,
+          "file": "<project>/src/sample_test.trb",
+          "line": 63,
+          "message": "expected {\"a\" => 1, \"b\" => 2} to be nil",
+          "name": "Values / hash",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 65,
+          "name": "Values / optional",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 3,
+          "file": "<project>/src/sample_test.trb",
+          "line": 67,
+          "message": "expected \"present\" to be nil",
+          "name": "Values / optional",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 69,
+          "name": "Values / nil",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 3,
+          "file": "<project>/src/sample_test.trb",
+          "line": 70,
+          "message": "expected nil to be true",
+          "name": "Values / nil",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 72,
+          "name": "Values / enum",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 3,
+          "file": "<project>/src/sample_test.trb",
+          "line": 73,
+          "message": "expected Shape::Circle(2) to equal Shape::Circle(3)",
+          "name": "Values / enum",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 75,
+          "name": "Values / empty variant",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 3,
+          "file": "<project>/src/sample_test.trb",
+          "line": 76,
+          "message": "expected Shape::Empty to be nil",
+          "name": "Values / empty variant",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 78,
+          "name": "Values / result payload",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 12,
+          "file": "<project>/src/sample_test.trb",
+          "line": 79,
+          "message": "expected Ok, got Err(Point(x: 1, y: 2))",
+          "name": "Values / result payload",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 82,
+          "name": "Values / cycle",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 3,
+          "file": "<project>/src/sample_test.trb",
+          "line": 85,
+          "message": "expected Node(value: 7, next: <cycle>) to be nil",
+          "name": "Values / cycle",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 87,
+          "name": "Values / bytes",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 3,
+          "file": "<project>/src/sample_test.trb",
+          "line": 88,
+          "message": "expected Bytes[65, 66] to be nil",
+          "name": "Values / bytes",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 90,
+          "name": "Values / quote",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 3,
+          "file": "<project>/src/sample_test.trb",
+          "line": 91,
+          "message": "expected \"quote\\\"\\\\\\n値😀\" to be nil",
+          "name": "Values / quote",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 93,
+          "name": "Values / integer hash",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 3,
+          "file": "<project>/src/sample_test.trb",
+          "line": 94,
+          "message": "expected {2 => \"two\", 10 => \"ten\"} to be nil",
+          "name": "Values / integer hash",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 96,
+          "name": "Values / decoded record",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 3,
+          "file": "<project>/src/sample_test.trb",
+          "line": 98,
+          "message": "expected Point(x: 4, y: 5) to be nil",
+          "name": "Values / decoded record",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 100,
+          "name": "Values / decoded result",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 3,
+          "file": "<project>/src/sample_test.trb",
+          "line": 101,
+          "message": "expected Result::Ok(Point(x: 4, y: 5)) to be nil",
+          "name": "Values / decoded result",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 103,
+          "name": "Values / nested generic record",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 3,
+          "file": "<project>/src/sample_test.trb",
+          "line": 104,
+          "message": "expected Box(value: Point(x: 1, y: 2)) to be nil",
+          "name": "Values / nested generic record",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 106,
+          "name": "Values / long array",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 3,
+          "file": "<project>/src/sample_test.trb",
+          "line": 107,
+          "message": "expected [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, ...] to be nil",
+          "name": "Values / long array",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 109,
+          "name": "Values / plain enum",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 35,
+          "message": "expected \"North\" to be nil",
+          "name": "Values / plain enum",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 112,
+          "name": "Values / raw enum",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 35,
+          "message": "expected \"READY\" to be nil",
+          "name": "Values / raw enum",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 115,
+          "name": "Values / integer raw enum",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 35,
+          "message": "expected -1 to be nil",
+          "name": "Values / integer raw enum",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 118,
+          "name": "Values / inherited class",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 3,
+          "file": "<project>/src/sample_test.trb",
+          "line": 119,
+          "message": "expected Child(child: \"child\") to be nil",
+          "name": "Values / inherited class",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 121,
+          "name": "Values / generic helper",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 35,
+          "message": "expected Point(x: 8, y: 9) to be nil",
+          "name": "Values / generic helper",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 124,
+          "name": "Values / shared value",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 3,
+          "file": "<project>/src/sample_test.trb",
+          "line": 126,
+          "message": "expected [Point(x: 1, y: 2), Point(x: 1, y: 2)] to be nil",
+          "name": "Values / shared value",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 128,
+          "name": "Values / unicode hash order",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 3,
+          "file": "<project>/src/sample_test.trb",
+          "line": 129,
+          "message": "expected {\"\" => 1, \"😀\" => 2} to be nil",
+          "name": "Values / unicode hash order",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 131,
+          "name": "Values / long string",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 3,
+          "file": "<project>/src/sample_test.trb",
+          "line": 132,
+          "message": "expected \"値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値値\"... to be nil",
+          "name": "Values / long string",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 134,
+          "name": "Values / depth limit",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 3,
+          "file": "<project>/src/sample_test.trb",
+          "line": 144,
+          "message": "expected Node(value: 0, next: Node(value: 1, next: Node(value: 2, next: Node(value: 3, next: Node(value: 4, next: Node(value: 5, next: Node(value: 6, next: Node(value: ..., next: ...)))))))) to be nil",
+          "name": "Values / depth limit",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 146,
+          "name": "Values / range",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 3,
+          "file": "<project>/src/sample_test.trb",
+          "line": 147,
+          "message": "expected 2..5 to be nil",
+          "name": "Values / range",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 149,
+          "name": "Values / exclusive range",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 3,
+          "file": "<project>/src/sample_test.trb",
+          "line": 150,
+          "message": "expected 2...5 to be nil",
+          "name": "Values / exclusive range",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 152,
+          "name": "Values / small float",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 3,
+          "file": "<project>/src/sample_test.trb",
+          "line": 153,
+          "message": "expected 0.0000001 to be nil",
+          "name": "Values / small float",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 155,
+          "name": "Values / large float",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 3,
+          "file": "<project>/src/sample_test.trb",
+          "line": 156,
+          "message": "expected 100000000000000000000 to be nil",
+          "name": "Values / large float",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 158,
+          "name": "Values / negative zero",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 3,
+          "file": "<project>/src/sample_test.trb",
+          "line": 159,
+          "message": "expected -0 to be nil",
+          "name": "Values / negative zero",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 161,
+          "name": "Values / function",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 3,
+          "file": "<project>/src/sample_test.trb",
+          "line": 162,
+          "message": "expected <function> to be nil",
+          "name": "Values / function",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 164,
+          "name": "Values / imported names",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 3,
+          "file": "<project>/src/sample_test.trb",
+          "line": 165,
+          "message": "expected left/model::Labelled(value: 1) to be nil",
+          "name": "Values / imported names",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 167,
+          "name": "Values / other imported name",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 3,
+          "file": "<project>/src/sample_test.trb",
+          "line": 168,
+          "message": "expected right/model::Labelled(value: 2) to be nil",
+          "name": "Values / other imported name",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 170,
+          "name": "Values / node budget",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 3,
+          "file": "<project>/src/sample_test.trb",
+          "line": 172,
+          "message": "expected [[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], ...] to be nil",
+          "name": "Values / node budget",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 174,
+          "name": "Values / cycle budget",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 3,
+          "file": "<project>/src/sample_test.trb",
+          "line": 178,
+          "message": "expected [[Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>)], [Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>)], [Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>)], [Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>)], [Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>)], [Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), Node(value: 1, next: <cycle>), ..., ..., ..., ..., ..., ..., ..., ..., ..., ..., ..., ..., ...], ..., ..., ..., ..., ..., ..., ..., ..., ..., ...] to be nil",
+          "name": "Values / cycle budget",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 180,
+          "name": "Values / continued",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 180,
+          "name": "Values / continued",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_passed"
+        },
+        {
+          "failed": 36,
+          "total": 37,
+          "type": "test_summary"
+        }
+      ],
+      "stderr": "exit status 1\n",
+      "sourceSha256": "cbef6ef5bebc2e2f174884229b5b21aec6c77f75a178707a3ee4a16a58c3f746",
+      "supportSha256": {
+        "left/model.trb": "41f4e1e66e18aecbfd05e7ca8d876329c096a14643db87e7a969c07d64b364bb",
+        "right/model.trb": "41f4e1e66e18aecbfd05e7ca8d876329c096a14643db87e7a969c07d64b364bb"
+      }
+    },
+    "predicates": {
+      "code": 1,
+      "events": [
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 7,
+          "name": "Predicates / plain scalars",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 7,
+          "name": "Predicates / plain scalars",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_passed"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 12,
+          "name": "Predicates / optional absence",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 12,
+          "name": "Predicates / optional absence",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_passed"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 16,
+          "name": "Predicates / optional presence",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 3,
+          "file": "<project>/src/sample_test.trb",
+          "line": 18,
+          "message": "expected 7 to be nil",
+          "name": "Predicates / optional presence",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 20,
+          "name": "Predicates / dynamic scalar identity",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 20,
+          "name": "Predicates / dynamic scalar identity",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_passed"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 28,
+          "name": "Predicates / dynamic integer is not Boolean",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 3,
+          "file": "<project>/src/sample_test.trb",
+          "line": 30,
+          "message": "expected 1 to be true",
+          "name": "Predicates / dynamic integer is not Boolean",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 32,
+          "name": "Predicates / union scalar identity",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 32,
+          "name": "Predicates / union scalar identity",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_passed"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 38,
+          "name": "Predicates / optional Boolean retains its wrapper",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 3,
+          "file": "<project>/src/sample_test.trb",
+          "line": 40,
+          "message": "expected true to be true",
+          "name": "Predicates / optional Boolean retains its wrapper",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 42,
+          "name": "Predicates / newtype uses its scalar representation",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 42,
+          "name": "Predicates / newtype uses its scalar representation",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_passed"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 45,
+          "name": "Predicates / dynamic optional retains its wrapper",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 3,
+          "file": "<project>/src/sample_test.trb",
+          "line": 48,
+          "message": "expected true to be true",
+          "name": "Predicates / dynamic optional retains its wrapper",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 50,
+          "name": "Predicates / dynamic newtype uses its scalar representation",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 50,
+          "name": "Predicates / dynamic newtype uses its scalar representation",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_passed"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 54,
+          "name": "Predicates / continued",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 54,
+          "name": "Predicates / continued",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_passed"
+        },
+        {
+          "failed": 4,
+          "total": 11,
+          "type": "test_summary"
+        }
+      ],
+      "stderr": "exit status 1\n",
+      "sourceSha256": "e059ed25675e11f549067834b2ebdf7cf249d283a1a32afb07490994a44adce6"
+    },
+    "boundaries": {
+      "code": 1,
+      "events": [
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 27,
+          "name": "Boundaries / integer hash limit",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 3,
+          "file": "<project>/src/sample_test.trb",
+          "line": 28,
+          "message": "expected {0 => \"v\", 1 => \"v\", 2 => \"v\", 3 => \"v\", 4 => \"v\", 5 => \"v\", 6 => \"v\", 7 => \"v\", 8 => \"v\", 9 => \"v\", 10 => \"v\", 11 => \"v\", 12 => \"v\", 13 => \"v\", 14 => \"v\", 15 => \"v\", ...} to be nil",
+          "name": "Boundaries / integer hash limit",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 30,
+          "name": "Boundaries / string hash limit",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 3,
+          "file": "<project>/src/sample_test.trb",
+          "line": 31,
+          "message": "expected {\"a\" => 0, \"b\" => 1, \"c\" => 2, \"d\" => 3, \"e\" => 4, \"f\" => 5, \"g\" => 6, \"h\" => 7, \"i\" => 8, \"j\" => 9, \"k\" => 10, \"l\" => 11, \"m\" => 12, \"n\" => 13, \"o\" => 14, \"p\" => 15, ...} to be nil",
+          "name": "Boundaries / string hash limit",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 33,
+          "name": "Boundaries / field limit",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 3,
+          "file": "<project>/src/sample_test.trb",
+          "line": 34,
+          "message": "expected Wide(field0: 0, field1: 1, field2: 2, field3: 3, field4: 4, field5: 5, field6: 6, field7: 7, field8: 8, field9: 9, field10: 10, field11: 11, field12: 12, field13: 13, field14: 14, field15: 15, ...) to be nil",
+          "name": "Boundaries / field limit",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 36,
+          "name": "Boundaries / raw enum embedded NUL",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 3,
+          "file": "<project>/src/sample_test.trb",
+          "line": 37,
+          "message": "expected \"a\\u0000b\" to be nil",
+          "name": "Boundaries / raw enum embedded NUL",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 39,
+          "name": "Boundaries / exceptional floats",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 3,
+          "file": "<project>/src/sample_test.trb",
+          "line": 40,
+          "message": "expected [NaN, Infinity, -Infinity, -0] to be nil",
+          "name": "Boundaries / exceptional floats",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 42,
+          "name": "Boundaries / transparent newtype",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 3,
+          "file": "<project>/src/sample_test.trb",
+          "line": 43,
+          "message": "expected \"text\" to be nil",
+          "name": "Boundaries / transparent newtype",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 45,
+          "name": "Boundaries / opaque provider value",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 3,
+          "file": "<project>/src/sample_test.trb",
+          "line": 48,
+          "message": "expected <value> to be nil",
+          "name": "Boundaries / opaque provider value",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_failed"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 50,
+          "name": "Boundaries / continued",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_started"
+        },
+        {
+          "column": 2,
+          "file": "<project>/src/sample_test.trb",
+          "line": 50,
+          "name": "Boundaries / continued",
+          "test_file": "<project>/src/sample_test.trb",
+          "type": "test_passed"
+        },
+        {
+          "failed": 7,
+          "total": 8,
+          "type": "test_summary"
+        }
+      ],
+      "stderr": "exit status 1\n",
+      "sourceSha256": "d2c259d73eabbedabe7be7668d9b736fee46858cfaf8ba85af07dc76177e4100"
+    }
+  }
+}

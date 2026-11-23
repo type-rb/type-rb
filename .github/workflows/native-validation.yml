@@ -1,0 +1,207 @@
+name: Native validation
+
+on:
+  workflow_call:
+    inputs:
+      cost_mode:
+        description: Strict cost qualification or MIR migration observations
+        type: string
+        default: strict
+      recovery_modules:
+        description: Comma-separated changed compiler modules, none, or all
+        type: string
+        default: all
+
+permissions:
+  contents: read
+
+env:
+  NATIVE_MIR_COST_MODE: ${{ inputs.cost_mode || 'strict' }}
+
+jobs:
+  verify:
+    runs-on: macos-15
+    steps:
+      - name: Check out TypeRB Native
+        uses: actions/checkout@v5
+
+      - name: Check out the pinned TypeRB compiler
+        uses: actions/checkout@v5
+        with:
+          repository: type-rb/type-rb
+          ref: cc8c734f73f5149464838825cdbb2165058ed26d
+          path: .type-rb
+
+      - name: Set up Go for the bootstrap compiler
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: .type-rb/go.mod
+          cache-dependency-path: .type-rb/go.sum
+
+      - name: Verify the compiler revision pin
+        run: test "$(cat TYPE_RB_REVISION)" = "$(git -C .type-rb rev-parse HEAD)"
+
+      - name: Verify bundled official sources against the pinned reference
+        run: python3 tools/official-sources.py --reference-checkout .type-rb --check
+
+      - name: Build the pinned TypeRB compiler
+        run: python3 tools/build-reference.py .type-rb "$RUNNER_TEMP/trb"
+
+      - name: Verify Native version and compatibility metadata
+        run: |
+          python3 tools/qbe_toolchain_test.py
+          python3 -m unittest tools/compatibility_manifest_test.py
+          python3 tools/compatibility_manifest.py --reference-trb "$RUNNER_TEMP/trb"
+
+      - name: Build the pinned Native QBE variant
+        run: |
+          python3 tools/qbe_toolchain.py "$RUNNER_TEMP/qbe-1.3"
+          python3 tools/qbe_sqrt_test.py --qbe "$RUNNER_TEMP/qbe-1.3/qbe"
+          python3 tools/qbe_integer_test.py --qbe "$RUNNER_TEMP/qbe-1.3/qbe"
+          python3 tools/qbe_memory_test.py --qbe "$RUNNER_TEMP/qbe-1.3/qbe"
+          python3 tools/qbe_gcm_test.py --qbe "$RUNNER_TEMP/qbe-1.3/qbe"
+          python3 tools/qbe_fma_test.py --qbe "$RUNNER_TEMP/qbe-1.3/qbe"
+
+      - name: Verify formatting
+        run: |
+          "$RUNNER_TEMP/trb" fmt --check recovery compiler corpus tools benchmarks
+
+      - name: Check TypeRB sources
+        run: |
+          "$RUNNER_TEMP/trb" check --config recovery/trbconfig.jsonc
+          "$RUNNER_TEMP/trb" check --config compiler/trbconfig.jsonc
+          for config in corpus/recovery-scalar/*/trbconfig.jsonc; do
+            "$RUNNER_TEMP/trb" check --config "$config"
+          done
+          for config in corpus/recovery-aggregate/*/trbconfig.jsonc; do
+            "$RUNNER_TEMP/trb" check --config "$config"
+          done
+          for config in corpus/recovery-managed/*/trbconfig.jsonc; do
+            "$RUNNER_TEMP/trb" check --config "$config"
+          done
+          for config in corpus/float-scalar/*/trbconfig.jsonc; do
+            "$RUNNER_TEMP/trb" check --config "$config"
+          done
+          for config in corpus/float-array/*/trbconfig.jsonc; do
+            "$RUNNER_TEMP/trb" check --config "$config"
+          done
+          for config in corpus/configured-project/*/trbconfig.jsonc; do
+            "$RUNNER_TEMP/trb" check --config "$config"
+          done
+          for config in corpus/portable-entry/*/trbconfig.jsonc; do
+            "$RUNNER_TEMP/trb" check --config "$config"
+          done
+          for config in benchmarks/benchmarksgame/*/trbconfig.jsonc benchmarks/features/*/trbconfig.jsonc; do
+            "$RUNNER_TEMP/trb" check --config "$config"
+          done
+
+      - name: Verify the Native compiler closure fits snapshot v4
+        run: |
+          tools/check-bootstrap-snapshot.sh "$RUNNER_TEMP/trb" "$RUNNER_TEMP/compiler-snapshot.json"
+
+      - name: Run independent recovery-enabled root and compiler suites
+        id: native_suites
+        env:
+          TYPE_RB_NATIVE_ROOT: ${{ github.workspace }}
+          TYPE_RB_NATIVE_REFERENCE_TRB: ${{ runner.temp }}/trb
+          TYPE_RB_NATIVE_QBE: ${{ runner.temp }}/qbe-1.3/qbe
+          TYPE_RB_NATIVE_RECOVERY_JOBS: '4'
+          TYPE_RB_NATIVE_RECOVERY_MODULES: ${{ inputs.recovery_modules || 'all' }}
+          TYPE_RB_NATIVE_RECOVERY_RECEIPT: ${{ runner.temp }}/native-suite-evidence/recovery-workspace.txt
+        run: |
+          node tools/ci-run-suites.mjs "$RUNNER_TEMP/trb" "$RUNNER_TEMP/native-suite-evidence"
+
+      - name: Run the self-hosted managed-runtime allocation smoke
+        id: allocation_smoke
+        run: |
+          recovery_workspace=$(node tools/recovery-workspace.mjs read "$RUNNER_TEMP/native-suite-evidence/recovery-workspace.txt")
+          /bin/sh tools/runtime-memory-soak/runtime-memory-soak.sh \
+            smoke \
+            "$recovery_workspace/native-chain-b4/compiler" \
+            "$RUNNER_TEMP/qbe-1.3/qbe" \
+            /usr/bin/cc \
+            darwin-arm64-v0 \
+            "$RUNNER_TEMP/runtime-memory-smoke-workspace" \
+            "$RUNNER_TEMP/runtime-memory-smoke-evidence"
+
+      - name: Upload managed-runtime smoke evidence
+        if: always() && steps.allocation_smoke.outcome != 'skipped'
+        uses: actions/upload-artifact@v6
+        with:
+          name: runtime-memory-smoke-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/runtime-memory-smoke-evidence
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Run the persistent-worker memory smoke
+        id: worker_smoke
+        run: |
+          recovery_workspace=$(node tools/recovery-workspace.mjs read "$RUNNER_TEMP/native-suite-evidence/recovery-workspace.txt")
+          /bin/sh tools/runtime-worker-soak/runtime-worker-soak.sh \
+            smoke \
+            "$recovery_workspace/native-chain-b4/compiler" \
+            "$RUNNER_TEMP/qbe-1.3/qbe" \
+            /usr/bin/cc \
+            "$RUNNER_TEMP/trb" \
+            darwin-arm64-v0 \
+            "$RUNNER_TEMP/runtime-worker-smoke-workspace" \
+            "$RUNNER_TEMP/runtime-worker-smoke-evidence"
+
+      - name: Upload persistent-worker smoke evidence
+        if: always() && steps.worker_smoke.outcome != 'skipped'
+        uses: actions/upload-artifact@v6
+        with:
+          name: runtime-worker-smoke-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/runtime-worker-smoke-evidence
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Verify the identical-source language benchmark corpus
+        id: benchmark_corpus
+        run: |
+          recovery_workspace=$(node tools/recovery-workspace.mjs read "$RUNNER_TEMP/native-suite-evidence/recovery-workspace.txt")
+          /bin/sh tools/benchmarksgame-verify.sh \
+            --native-compiler "$recovery_workspace/native-chain-b4/compiler" \
+            --reference-trb "$RUNNER_TEMP/trb" \
+            --qbe "$RUNNER_TEMP/qbe-1.3/qbe" \
+            --cc /usr/bin/cc \
+            --target darwin-arm64-v0 \
+            --workspace "$RUNNER_TEMP/benchmarksgame-verify"
+
+      - name: Upload language benchmark verification evidence
+        if: always() && steps.benchmark_corpus.outcome != 'skipped'
+        uses: actions/upload-artifact@v6
+        with:
+          name: benchmarksgame-verify-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/benchmarksgame-verify
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Verify the Go-free Native bootstrap harness
+        run: |
+          recovery_workspace=$(node tools/recovery-workspace.mjs read "$RUNNER_TEMP/native-suite-evidence/recovery-workspace.txt")
+          /bin/sh tools/recovery-bootstrap.sh \
+            "$recovery_workspace/b1" \
+            "$recovery_workspace/compiler-recovery.trb" \
+            "$RUNNER_TEMP/qbe-1.3/qbe" \
+            /usr/bin/cc \
+            "$RUNNER_TEMP/recovery-shell-bootstrap" \
+            b2
+          cmp "$recovery_workspace/b2.ssa" "$RUNNER_TEMP/recovery-shell-bootstrap/b2.ssa"
+
+      - name: Clean only the invocation-owned recovery workspace
+        if: always() && steps.native_suites.outcome != 'skipped'
+        run: |
+          mkdir -p "$RUNNER_TEMP/native-suite-evidence"
+          node tools/recovery-workspace.mjs cleanup \
+            "$RUNNER_TEMP/native-suite-evidence/recovery-workspace.txt" \
+            "$RUNNER_TEMP/native-suite-evidence/recovery-cleanup.json"
+
+      - name: Upload joined suite logs, ownership receipt and cleanup outcome
+        if: always() && steps.native_suites.outcome != 'skipped'
+        uses: actions/upload-artifact@v6
+        with:
+          name: native-suite-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/native-suite-evidence
+          if-no-files-found: error
+          retention-days: 30

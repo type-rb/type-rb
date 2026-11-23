@@ -1,0 +1,16 @@
+import { lex } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { CompilerState, compiler_new } from state/state
+import { load_string } from support/storage
+import { expect } from trb/std/test
+
+def object_syntax_state(source: String): CompilerState
+	mut state := compiler_new(source.size() + 1)
+	expect(lex(state, source)).to_be_true()
+	parsed := parse_module(state, 0, state.module_graph.entry_module[0])
+	if !parsed
+		puts(load_string(state.diagnostics.messages, 0))
+	end
+	expect(parsed).to_be_true()
+	return state
+end

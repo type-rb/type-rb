@@ -1,0 +1,19 @@
+class Values
+	@items: Array<Integer>
+	def initialize()
+		@items = [1, 2]
+	end
+	def add(value: Integer)
+		@items.push(value)
+	end
+	def sum(): Integer
+		mut result := 0
+		@items.each { |value| result += value }
+		return result
+	end
+end
+def main()
+	mut values := Values.new()
+	values.add(4)
+	puts(values.sum())
+end

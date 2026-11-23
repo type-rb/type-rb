@@ -1,0 +1,49 @@
+import { string_starts_with } from support/path
+import { check, emit_qbe } from compiler
+import { control_test_output } from testing/mir/control
+import { logical_checked_source } from testing/pipeline
+import { logical_run_qbe } from testing/qbe_runner
+import { verify_mir } from mir/verify/module
+import { CompilerState } from state/state
+import { load_string } from support/storage
+import { expect } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+def object_execution_state(source: String): CompilerState
+	mut state := logical_checked_source(source)
+	checked := check(state)
+	if !checked
+		puts(load_string(state.diagnostics.messages, 0))
+	end
+	expect(checked).to_be_true()
+	expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	return state
+end
+
+def object_execution_run(mut state: CompilerState, expected: String)
+	qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+	if qbe != nil
+		mut forced := ""
+		mut ordinary := false
+		control_test_output(emit_qbe(state)).split("\n").each do |line|
+			if string_starts_with(line, "function ")
+				ordinary = line.include?("$trbnf")
+			end
+			if line == "}"
+				ordinary = false
+			end
+			if ordinary && (line.include?("call $trbn_gc_alloc(") || line.include?("call $trbn_array_new(") || line.include?("call $trbn_array_push_") || line.include?("call $trbn_string_concat(") || line.include?("call $trbn_hash_") || line.include?("call $trbnf"))
+				forced += "\tcall $trbn_gc_collect(w 0)\n"
+			end
+			forced += line + "\n"
+		end
+		case logical_run_qbe(qbe, forced)
+		when Result::Ok(output)
+			expect(output).to_equal(expected)
+		when Result::Err(error)
+			puts(error)
+			expect(false).to_be_true()
+		end
+	end
+end

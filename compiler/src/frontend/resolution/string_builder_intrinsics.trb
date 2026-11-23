@@ -1,0 +1,47 @@
+import { standard_source_string_builder, standard_source_string_builder_storage } from state/standard_source_kinds
+import { builder_append_bytes, builder_from_string, builder_mutates, builder_new, builder_parameter_names, builder_parameters, builder_result } from mir/model/string_builder_contract
+import { CompilerState } from state/state
+import { load_integer, load_string, sparse_integer_at } from support/storage
+
+# Only complete loader-owned declarations grant these adapters. The private
+# byte-span operation cannot be imported by authored application modules.
+def standard_string_builder(state: CompilerState, function: Integer): Integer
+	if function < 0 || function >= state.declarations.function_count[0]
+		return -1
+	end
+	owner := load_integer(state.declarations.function_modules, function)
+	source := sparse_integer_at(state.standard_modules, owner)
+	name := load_string(state.declarations.function_names, function)
+	mut kind := -1
+	if source == standard_source_string_builder()
+		if name == "new"
+			kind = builder_new()
+		elsif name == "from_string"
+			kind = builder_from_string()
+		end
+	elsif source == standard_source_string_builder_storage() && name == "append_bytes"
+		kind = builder_append_bytes()
+	end
+	if kind < 0
+		return -1
+	end
+	parameters := builder_parameters(kind)
+	names := builder_parameter_names(kind)
+	if load_integer(state.declarations.function_parameter_counts, function) != parameters.size() || load_string(state.declarations.function_result_types, function) != builder_result(kind) || load_integer(state.declarations.function_body_starts, function) != load_integer(state.declarations.function_body_ends, function) || sparse_integer_at(state.parsed.function_expression_bodies, function) != 0
+		return -1
+	end
+	start := load_integer(state.declarations.function_parameter_starts, function)
+	mut index := 0
+	while index < parameters.size()
+		parameter := start + index
+		mut mutable := 0
+		if index == 0 && builder_mutates(kind)
+			mutable = 1
+		end
+		if load_string(state.declarations.parameter_names, parameter) != names[index] || load_string(state.declarations.parameter_types, parameter) != parameters[index] || load_integer(state.declarations.parameter_mutable, parameter) != mutable || load_integer(state.declarations.parameter_named_only, parameter) != 0 || sparse_integer_at(state.parsed.parameter_defaults, parameter) != 0
+			return -1
+		end
+		index += 1
+	end
+	return kind
+end

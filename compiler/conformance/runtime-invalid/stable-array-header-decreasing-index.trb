@@ -1,0 +1,14 @@
+def decreasing(input: Array<Integer>, unused: Integer): Integer
+	mut total := 0
+	mut index := 0
+	while index < input.size()
+		total += input[index]
+		index -= 1
+	end
+	return total
+end
+
+def main()
+	puts(decreasing([7], 0).to_s())
+	return
+end

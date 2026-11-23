@@ -1,0 +1,7 @@
+import { describe, expect, test } from trb/std/test
+
+describe("Types") do
+	test("mismatch") do
+		expect(1).to_equal("one")
+	end
+end

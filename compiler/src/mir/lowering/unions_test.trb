@@ -1,0 +1,118 @@
+import { check, emit_qbe } from compiler
+import { compiler_test_instruction_with_cell } from testing/compiler
+import { control_test_output } from testing/mir/control
+import { managed_mir_test_fixture } from testing/mir/managed
+import { logical_checked_source } from testing/pipeline
+import { logical_run_qbe } from testing/qbe_runner
+import { MirRootPlan, MirUnion } from mir/model/module
+import { mir_instruction_effects } from mir/analysis/call_effects
+import { verify_mir } from mir/verify/module
+import { CompilerState } from state/state
+import { union_type } from frontend/types/union_types
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+def union_mir_test_state(): CompilerState
+	mut state := logical_checked_source("def describe_value(value: Integer | String): String\ncase value\nwhen Integer(number)\nreturn number.to_s()\nwhen String(text)\nreturn text\nend\nend\ndef main()\nputs(describe_value(1.to_s() + \" string\"))\nputs(describe_value(3))\nend\n")
+	expect(check(state)).to_be_true()
+	expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	return state
+end
+
+describe("Union value MIR") do
+	test("normalizes alternatives independently of authored order and nesting") do
+		expect(union_type(["String", "Integer", "Float", "String"])).to_equal("$Union<Float,String>")
+		expect(union_type(["$Union<Integer,String>", "Boolean", "Integer"])).to_equal("$Union<Boolean,Integer,String>")
+		expect(union_type(["Integer", "Float"])).to_equal("Float")
+		expect(union_type(["Never", "String"])).to_equal("String")
+		expect(union_type(["Void", "String"])).to_equal("")
+	end
+
+	test("executes type cases and widening after source erasure and block reordering") do
+		managed_mir_test_fixture("union-scalar-values", 1)
+	end
+
+	test("retains managed alternatives through collections closures and forced collection") do
+		managed_mir_test_fixture("union-managed-values", 1)
+	end
+
+	test("rejects forged alternative result operand and failure identities") do
+		mut state := union_mir_test_state()
+		mut seen := 0
+		state.scalar_mir.instructions.each.with_index do |instruction, index|
+			if instruction.kind >= 52 && instruction.kind <= 54
+				mut effect := 0
+				if instruction.kind == 52
+					effect = 9
+				elsif instruction.kind == 54
+					effect = 8
+				end
+				expect(mir_instruction_effects(state.scalar_mir, instruction)).to_equal(effect)
+				[1, 2, 3, 4, 5].each do |cell|
+					state.scalar_mir.instructions[index] = compiler_test_instruction_with_cell(instruction, cell, 999999)
+					expect(verify_mir(state.scalar_mir, true).empty?()).to_be_false()
+				end
+				state.scalar_mir.instructions[index] = instruction
+				seen += 1
+			end
+		end
+		# Two injections, two tests and two checked projections are all explicit.
+		expect(seen).to_equal(6)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	end
+
+	test("rejects duplicate reordered future and missing type alternatives") do
+		mut state := union_mir_test_state()
+		definition := state.scalar_mir.unions[0]
+		[[1, 1], [8, 1], [1, 999999], [1]].each do |alternatives|
+			state.scalar_mir.unions[0] = MirUnion.new(type_id: definition.type_id, alternatives: alternatives)
+			expect(verify_mir(state.scalar_mir, true).empty?()).to_be_false()
+		end
+		state.scalar_mir.unions[0] = definition
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	end
+
+	test("requires the String payload root at allocating injection") do
+		mut state := union_mir_test_state()
+		mut changed := false
+		state.scalar_mir.root_plans.each.with_index do |plan, slot|
+			mut point := 0
+			while point < plan.instructions.size()
+				instruction := state.scalar_mir.instructions[plan.instructions[point]]
+				if instruction.kind == 52 && instruction.payload == 8
+					expect(plan.roots[point].size() > 0).to_be_true()
+					mut roots := plan.roots
+					roots[point] = []
+					state.scalar_mir.root_plans[slot] = MirRootPlan.new(function_id: plan.function_id, instructions: plan.instructions, roots: roots, capacity: plan.capacity)
+					changed = true
+				end
+				point += 1
+			end
+		end
+		expect(changed).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR live root plan differs")
+	end
+
+	test("checked extraction rejects an unavailable runtime alternative") do
+		mut state := union_mir_test_state()
+		mut changed := false
+		state.scalar_mir.instructions.each.with_index do |instruction, index|
+			if instruction.kind == 53 && instruction.payload == 1 && !changed
+				state.scalar_mir.instructions[index] = compiler_test_instruction_with_cell(instruction, 4, 8)
+				changed = true
+			end
+		end
+		expect(changed).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, control_test_output(emit_qbe(state)), 2)
+			when Result::Ok(_unexpected)
+				expect(false).to_be_true()
+			when Result::Err(error)
+				expect(error).to_equal("panic: union payload is unavailable\n")
+			end
+		end
+	end
+end

@@ -1,0 +1,38 @@
+import { check } from compiler
+import { managed_mir_test_fixture } from testing/mir/managed
+import { logical_checked_source } from testing/pipeline
+import { MirRootPlan } from mir/model/module
+import { verify_mir } from mir/verify/module
+import { describe, expect, test } from trb/std/test
+
+describe("Array query MIR") do
+	test("executes scalar search uniqueness and concatenation without source or block order") do
+		managed_mir_test_fixture("array-query-mir", 4)
+	end
+	test("retains query operands and shallow managed copies across collection") do
+		managed_mir_test_fixture("array-query-managed-mir", 12)
+	end
+	test("uses only the existing typed comparison loop and Array instructions") do
+		mut state := logical_checked_source("def main()\nwords := [\"a\", \"b\", \"a\"]\nputs(words.include?(\"b\"))\nputs(words.count(\"a\"))\nputs(words.index(\"x\") == nil)\nputs(words.uniq().concat(words).size())\nend\n")
+		expect(check(state)).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		state.scalar_mir.instructions.each do |instruction|
+			expect(instruction.kind <= 43).to_be_true()
+		end
+		expect(state.scalar_mir.blocks.size() > 20).to_be_true()
+	end
+	test("rejects copy root plans that drop live managed input or output") do
+		mut state := logical_checked_source("def main()\nwords := [1.to_s(), 2.to_s()]\nputs(words.uniq().concat(words)[0])\nend\n")
+		expect(check(state)).to_be_true()
+		plan := state.scalar_mir.root_plans[0]
+		mut point := 0
+		while state.scalar_mir.instructions[plan.instructions[point]].kind != 24
+			point += 1
+		end
+		expect(plan.roots[point].size() >= 3).to_be_true()
+		mut roots := plan.roots
+		roots[point] = []
+		state.scalar_mir.root_plans[0] = MirRootPlan.new(function_id: plan.function_id, instructions: plan.instructions, roots: roots, capacity: plan.capacity)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR live root plan differs")
+	end
+end

@@ -1,0 +1,38 @@
+record Entry
+	key: String
+	value: String
+end
+
+def sorted(values: Array<Entry>): Array<Entry>
+	return values.sort_by { |entry| entry.key + "!" }
+end
+
+def main()
+	part := "ab"
+	entries := [Entry.new(key: part + "c", value: "first"), Entry.new(key: "a", value: "second"), Entry.new(key: part + "c", value: "third")]
+	mut result := sorted(entries)
+	result = sorted(result)
+	result.each { |entry| puts(entry.value) }
+	result[0] = Entry.new(key: "z", value: "changed")
+	puts(entries[1].value)
+	read := fn(): String
+		return entries.sort_by_descending { |entry| entry.key }[0].value
+	end
+	puts(read())
+	optional: Array<Entry>? := entries
+	if optional != nil
+		ordered := optional.sort_by { |entry| entry.key }
+		puts(ordered[0].value)
+	end
+	absent: Array<Entry>? := nil
+	mut calls := 0
+	if absent != nil
+		missing := absent.sort_by do |entry|
+			calls += 1
+			entry.key
+		end
+		puts(missing.size())
+	end
+	puts(absent == nil)
+	puts(calls)
+end

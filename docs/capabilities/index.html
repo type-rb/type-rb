@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <meta
+      name="description"
+      content="A broad, evidence-aware capability map for TypeRB Native, a toolchain being developed for production use."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="TypeRB Native Capability Map" />
+    <meta
+      property="og:description"
+      content="A broad, evidence-aware view of current Native coverage."
+    />
+    <meta property="og:url" content="https://type-rb.github.io/type-rb-native/" />
+    <meta
+      property="og:image"
+      content="https://type-rb.github.io/type-rb-native/og.png"
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="TypeRB Native Capability Map" />
+    <meta
+      name="twitter:description"
+      content="A broad, evidence-aware view of current Native coverage."
+    />
+    <meta
+      name="twitter:image"
+      content="https://type-rb.github.io/type-rb-native/og.png"
+    />
+    <title>TypeRB Native Capability Map</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="shell header-inner">
+        <a class="brand" href="./" aria-label="TypeRB Native capability map">
+          <span class="brand-mark" aria-hidden="true">TR</span>
+          <span>TypeRB Native</span>
+          <span class="development">Development</span>
+        </a>
+        <div class="header-actions">
+          <nav class="site-nav" aria-label="Site navigation">
+            <a class="active" href="./" aria-current="page">Capabilities</a>
+            <a href="./benchmarks/">Benchmarks</a>
+            <a href="./dependencies/">Dependencies</a>
+          </nav>
+          <span class="snapshot" id="snapshot-date"></span>
+        </div>
+      </div>
+    </header>
+
+    <main class="shell page-layout">
+      <section class="intro-panel">
+        <div>
+          <p class="eyebrow">LONG-TERM CAPABILITY CATALOG</p>
+          <h1>How much can Native build?</h1>
+          <p class="intro-copy">
+            TypeRB Native targets full language and package coverage for production use.
+            This map shows current evidence and remaining gaps. A green check means
+            reproducible public evidence exists for the stated scope; stable release
+            support requires separate qualification.
+          </p>
+        </div>
+        <div class="catalog-note">
+          <span class="note-icon" aria-hidden="true">◎</span>
+          <div>
+            <strong>The catalog comes first</strong>
+            <p>Unscheduled capabilities remain visible. Planning and task execution are intentionally outside this public view.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="ordinary-panel" id="ordinary-language" aria-labelledby="ordinary-title">
+        <div class="ordinary-heading">
+          <div>
+            <p class="eyebrow">ORDINARY NATIVE LANGUAGE</p>
+            <h2 id="ordinary-title">What works in trbn today?</h2>
+          </div>
+          <span id="ordinary-count" class="ordinary-count"></span>
+        </div>
+        <p>Check, build, execution and REPL are tested separately against the pinned TypeRB compiler.
+          These are individual probes, including rejection tests, not a percentage of language support.
+          Snapshot and recovery evidence is separate.</p>
+        <p id="ordinary-highlight" class="ordinary-highlight"></p>
+        <details class="ordinary-details">
+          <summary>Explore ordinary language cases</summary>
+          <div class="ordinary-controls">
+            <label>Family <select id="ordinary-family" aria-label="Language family"></select></label>
+            <label><input type="checkbox" id="ordinary-only-gaps" checked /> Show differences only</label>
+            <span id="ordinary-visible" aria-live="polite"></span>
+          </div>
+          <div class="ordinary-table-wrap" tabindex="0" aria-label="Scrollable ordinary language outcomes">
+            <table class="ordinary-table">
+              <thead><tr><th scope="col">Case</th><th scope="col">Check</th><th scope="col">Build</th><th scope="col">Execute</th><th scope="col">REPL</th></tr></thead>
+              <tbody id="ordinary-cases"></tbody>
+            </table>
+          </div>
+          <p id="ordinary-reference" class="ordinary-reference"></p>
+          <p>A rejection can be the correct result for invalid input. Diagnostic wording is checked for
+            each compiler separately. “Rejects as reference” does not claim identical messages,
+            columns or terminal colors. A reference REPL limitation is identified explicitly.</p>
+          <details class="ordinary-uncovered">
+            <summary id="ordinary-uncovered-count">Contracts not yet covered by these probes</summary>
+            <ul id="ordinary-uncovered"></ul>
+          </details>
+        </details>
+      </section>
+
+      <section class="summary-grid" id="summary" aria-label="Capability summary"></section>
+      <section class="scope-grid" id="scope-filters" aria-label="Coverage lenses"></section>
+
+      <section class="coverage-surface">
+        <div class="filter-bar">
+          <label class="search-wrap">
+            <span aria-hidden="true">⌕</span>
+            <span class="sr-only">Search capabilities</span>
+            <input id="search" type="search" placeholder="Search capabilities…" autocomplete="off" />
+          </label>
+          <div class="filter-row" id="status-filters" aria-label="Filter by status"></div>
+          <div class="expand-actions">
+            <button class="quiet-button" id="expand-all" type="button">Expand all</button>
+            <button class="quiet-button" id="collapse-all" type="button">Collapse all</button>
+          </div>
+          <span class="visible-count" id="visible-count" aria-live="polite"></span>
+        </div>
+
+        <div class="area-list" id="area-list"></div>
+        <noscript>This capability map requires JavaScript for filtering and expandable details.</noscript>
+      </section>
+
+      <footer>
+        <p>TypeRB Native capability map · current evidence and remaining coverage</p>
+        <p>Capability evidence does not by itself establish release support or compatibility guarantees.</p>
+      </footer>
+    </main>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

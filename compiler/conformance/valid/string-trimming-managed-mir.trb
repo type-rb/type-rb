@@ -1,0 +1,24 @@
+record Trimmed
+	text: String
+end
+
+def make(value: String): String
+	return " " + value + " "
+end
+
+def main()
+	mut saved: Array<String> := []
+	mut original := " before "
+	transform := fn(value: String): String
+		original = " after "
+		return make(value).strip()
+	end
+	kept := Trimmed.new(text: transform(original))
+	saved.push(kept.text)
+	[" one ", " two "].each do |item|
+		saved.push(item.strip())
+	end
+	puts(saved.join("/"))
+	puts(original.strip())
+	puts(make("held").rstrip().lstrip())
+end

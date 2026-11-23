@@ -1,0 +1,37 @@
+module Outer
+	module First
+		Label := "first"
+		record Entry<T>
+			value: T
+			copy: T = value
+		end
+		record Envelope
+			entry: Entry<String> = Entry<String>.new(value: Label)
+		end
+	end
+	module Second
+		record Entry<T, U>
+			value: T
+			extra: U
+		end
+		record Envelope
+			entry: Entry<Integer, String>
+		end
+	end
+end
+module Outer
+	module First
+		def self.stored(): Envelope
+			return Envelope.new()
+		end
+	end
+end
+alias TextEntry = Outer::First::Entry<String>
+def main()
+	first := Outer::First.stored()
+	second := Outer::Second::Envelope.new(entry: Outer::Second::Entry<Integer, String>.new(value: 9, extra: "second"))
+	puts(first.entry.copy)
+	puts(second.entry.value)
+	puts(second.entry.extra)
+	puts(TextEntry.new(value: "alias").copy)
+end

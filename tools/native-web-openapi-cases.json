@@ -1,0 +1,1910 @@
+[
+  {
+    "id": "web-endpoint-string",
+    "files": {
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, response } from trb/web\n\n\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\n\nclass ItemsEndpoint < Endpoint\nhandles(get)\nresponse<String>(status: 200)\nend\n",
+      "main.trb": "def main()\nputs(\"ready\")\nend\n"
+    },
+    "success": true,
+    "document": {
+      "openapi": "3.1.0",
+      "info": {
+        "title": "sample-api",
+        "version": "1.2.3"
+      },
+      "paths": {
+        "/items": {
+          "get": {
+            "operationId": "ItemsEndpoint",
+            "responses": {
+              "200": {
+                "description": "OK",
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "id": "web-endpoint-unit",
+    "files": {
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, response } from trb/web\nimport { Unit } from trb/std/unit\n\n\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\n\nclass ItemsEndpoint < Endpoint\nhandles(get)\nresponse<Unit>(status: 204)\nend\n",
+      "main.trb": "def main()\nputs(\"ready\")\nend\n"
+    },
+    "success": true,
+    "document": {
+      "openapi": "3.1.0",
+      "info": {
+        "title": "sample-api",
+        "version": "1.2.3"
+      },
+      "paths": {
+        "/items": {
+          "get": {
+            "operationId": "ItemsEndpoint",
+            "responses": {
+              "204": {
+                "description": "No Content"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "id": "web-endpoint-nullable",
+    "files": {
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, response } from trb/web\n\n\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\n\nclass ItemsEndpoint < Endpoint\nhandles(get)\nresponse<String?>(status: 200)\nend\n",
+      "main.trb": "def main()\nputs(\"ready\")\nend\n"
+    },
+    "success": true,
+    "document": {
+      "openapi": "3.1.0",
+      "info": {
+        "title": "sample-api",
+        "version": "1.2.3"
+      },
+      "paths": {
+        "/items": {
+          "get": {
+            "operationId": "ItemsEndpoint",
+            "responses": {
+              "200": {
+                "description": "OK",
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "id": "web-endpoint-record",
+    "files": {
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, response } from trb/web\n\nrecord Item\nid: Integer\ntitle: String @json(\"item_title\")\nnote: String?\nend\n\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\n\nclass ItemsEndpoint < Endpoint\nhandles(get)\nresponse<Item>(status: 200)\nend\n",
+      "main.trb": "def main()\nputs(\"ready\")\nend\n"
+    },
+    "success": true,
+    "document": {
+      "openapi": "3.1.0",
+      "info": {
+        "title": "sample-api",
+        "version": "1.2.3"
+      },
+      "paths": {
+        "/items": {
+          "get": {
+            "operationId": "ItemsEndpoint",
+            "responses": {
+              "200": {
+                "description": "OK",
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/Item"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "components": {
+        "schemas": {
+          "Item": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "item_title": {
+                "type": "string"
+              },
+              "note": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "item_title"
+            ]
+          }
+        }
+      }
+    }
+  },
+  {
+    "id": "web-endpoint-input-envelope",
+    "files": {
+      "routes/items/[id].trb": "import { Context, Response, Endpoint, handles, input, response } from trb/web\n\nrecord Params\nid: Integer\nend\nrecord Query\npage: Integer?\ntag: Array<String>\nactive: Boolean\nend\nrecord Payload\ntitle: String\nend\nrecord Input\nparams: Params\nquery: Query\nbody: Payload\nend\n\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\n\nclass ItemsEndpoint < Endpoint\nhandles(get)\ninput<Input>()\nresponse<String>(status: 200)\nend\n",
+      "main.trb": "def main()\nputs(\"ready\")\nend\n"
+    },
+    "success": true,
+    "document": {
+      "openapi": "3.1.0",
+      "info": {
+        "title": "sample-api",
+        "version": "1.2.3"
+      },
+      "paths": {
+        "/items/{id}": {
+          "get": {
+            "operationId": "ItemsEndpoint",
+            "parameters": [
+              {
+                "name": "id",
+                "in": "path",
+                "required": true,
+                "schema": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                }
+              },
+              {
+                "name": "page",
+                "in": "query",
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              {
+                "name": "tag",
+                "in": "query",
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              {
+                "name": "active",
+                "in": "query",
+                "required": true,
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            ],
+            "requestBody": {
+              "required": true,
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/Payload"
+                  }
+                }
+              }
+            },
+            "responses": {
+              "200": {
+                "description": "OK",
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "components": {
+        "schemas": {
+          "Payload": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "title"
+            ]
+          }
+        }
+      }
+    }
+  },
+  {
+    "id": "web-endpoint-collections",
+    "files": {
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, response } from trb/web\n\n\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\n\nclass ItemsEndpoint < Endpoint\nhandles(get)\nresponse<Hash<String, Array<Integer?>>>(status: 200)\nend\n",
+      "main.trb": "def main()\nputs(\"ready\")\nend\n"
+    },
+    "success": true,
+    "document": {
+      "openapi": "3.1.0",
+      "info": {
+        "title": "sample-api",
+        "version": "1.2.3"
+      },
+      "paths": {
+        "/items": {
+          "get": {
+            "operationId": "ItemsEndpoint",
+            "responses": {
+              "200": {
+                "description": "OK",
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "array",
+                        "items": {
+                          "anyOf": [
+                            {
+                              "type": "integer",
+                              "minimum": -9007199254740991,
+                              "maximum": 9007199254740991
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "id": "web-endpoint-nominal",
+    "files": {
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, response } from trb/web\n\nnewtype ItemID = Integer\nalias Label = String\nenum Color\nRed = \"red\"\nBlue = \"blue\"\nend\nrecord Item\nid: ItemID\nlabel: Label\ncolor: Color\nend\n\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\n\nclass ItemsEndpoint < Endpoint\nhandles(get)\nresponse<Item>(status: 200)\nend\n",
+      "main.trb": "def main()\nputs(\"ready\")\nend\n"
+    },
+    "success": true,
+    "document": {
+      "openapi": "3.1.0",
+      "info": {
+        "title": "sample-api",
+        "version": "1.2.3"
+      },
+      "paths": {
+        "/items": {
+          "get": {
+            "operationId": "ItemsEndpoint",
+            "responses": {
+              "200": {
+                "description": "OK",
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/Item"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "components": {
+        "schemas": {
+          "Color": {
+            "type": "string",
+            "enum": [
+              "red",
+              "blue"
+            ]
+          },
+          "Item": {
+            "type": "object",
+            "properties": {
+              "color": {
+                "$ref": "#/components/schemas/Color"
+              },
+              "id": {
+                "$ref": "#/components/schemas/ItemID"
+              },
+              "label": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "label",
+              "color"
+            ]
+          },
+          "ItemID": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        }
+      }
+    }
+  },
+  {
+    "id": "web-endpoint-portable-time",
+    "files": {
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, response } from trb/web\nimport { Date, Instant } from trb/std/time\n\nrecord Item\ndate: Date\ncreated: Instant\nend\n\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\n\nclass ItemsEndpoint < Endpoint\nhandles(get)\nresponse<Item>(status: 200)\nend\n",
+      "main.trb": "def main()\nputs(\"ready\")\nend\n"
+    },
+    "success": true,
+    "document": {
+      "openapi": "3.1.0",
+      "info": {
+        "title": "sample-api",
+        "version": "1.2.3"
+      },
+      "paths": {
+        "/items": {
+          "get": {
+            "operationId": "ItemsEndpoint",
+            "responses": {
+              "200": {
+                "description": "OK",
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/Item"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "components": {
+        "schemas": {
+          "Item": {
+            "type": "object",
+            "properties": {
+              "created": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "date": {
+                "type": "string",
+                "format": "date"
+              }
+            },
+            "required": [
+              "date",
+              "created"
+            ]
+          }
+        }
+      }
+    }
+  },
+  {
+    "id": "web-endpoint-missing-handles",
+    "files": {
+      "routes/items.trb": "import { Context, Response, Endpoint, response } from trb/web\n\n\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\n\nclass ItemsEndpoint < Endpoint\nresponse<String>(status: 200)\nend\n",
+      "main.trb": "def main()\nputs(\"ready\")\nend\n"
+    },
+    "success": false,
+    "document": null
+  },
+  {
+    "id": "web-endpoint-duplicate-handles",
+    "files": {
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, response } from trb/web\n\n\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\n\nclass ItemsEndpoint < Endpoint\nhandles(get)\nhandles(get)\nresponse<String>(status: 200)\nend\n",
+      "main.trb": "def main()\nputs(\"ready\")\nend\n"
+    },
+    "success": false,
+    "document": null
+  },
+  {
+    "id": "web-endpoint-missing-response",
+    "files": {
+      "routes/items.trb": "import { Context, Response, Endpoint, handles } from trb/web\n\n\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\n\nclass ItemsEndpoint < Endpoint\nhandles(get)\nend\n",
+      "main.trb": "def main()\nputs(\"ready\")\nend\n"
+    },
+    "success": false,
+    "document": null
+  },
+  {
+    "id": "web-endpoint-duplicate-status",
+    "files": {
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, response } from trb/web\n\n\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\n\nclass ItemsEndpoint < Endpoint\nhandles(get)\nresponse<String>(status: 200)\nresponse<Integer>(status: 200)\nend\n",
+      "main.trb": "def main()\nputs(\"ready\")\nend\n"
+    },
+    "success": false,
+    "document": null
+  },
+  {
+    "id": "web-endpoint-computed-status",
+    "files": {
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, response } from trb/web\n\n\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\n\nclass ItemsEndpoint < Endpoint\nhandles(get)\nresponse<String>(status: 100 + 100)\nend\n",
+      "main.trb": "def main()\nputs(\"ready\")\nend\n"
+    },
+    "success": false,
+    "document": null
+  },
+  {
+    "id": "web-endpoint-status-range",
+    "files": {
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, response } from trb/web\n\n\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\n\nclass ItemsEndpoint < Endpoint\nhandles(get)\nresponse<String>(status: 600)\nend\n",
+      "main.trb": "def main()\nputs(\"ready\")\nend\n"
+    },
+    "success": false,
+    "document": null
+  },
+  {
+    "id": "web-endpoint-wrong-handler",
+    "files": {
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, response } from trb/web\n\n\ndef get(_value: Integer): Response\nreturn Response.text(\"ok\")\nend\n\nclass ItemsEndpoint < Endpoint\nhandles(get)\nresponse<String>(status: 200)\nend\n",
+      "main.trb": "def main()\nputs(\"ready\")\nend\n"
+    },
+    "success": false,
+    "document": null
+  },
+  {
+    "id": "web-endpoint-foreign-handler",
+    "files": {
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, response } from trb/web\nimport { remote_get } from shared\n\n\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\n\nclass ItemsEndpoint < Endpoint\nhandles(remote_get)\nresponse<String>(status: 200)\nend\n",
+      "main.trb": "def main()\nputs(\"ready\")\nend\n",
+      "shared.trb": "import { Context, Response } from trb/web\ndef remote_get(_context: Context): Response\nreturn Response.text(\"remote\")\nend\n"
+    },
+    "success": false,
+    "document": null
+  },
+  {
+    "id": "web-endpoint-recursive-schema",
+    "files": {
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, response } from trb/web\n\nrecord Node\nnext: Node?\nend\n\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\n\nclass ItemsEndpoint < Endpoint\nhandles(get)\nresponse<Node>(status: 200)\nend\n",
+      "main.trb": "def main()\nputs(\"ready\")\nend\n"
+    },
+    "success": false,
+    "document": null
+  },
+  {
+    "id": "web-endpoint-generic-schema",
+    "files": {
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, response } from trb/web\n\nrecord Box<T>\nvalue: T\nend\n\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\n\nclass ItemsEndpoint < Endpoint\nhandles(get)\nresponse<Box<String>>(status: 200)\nend\n",
+      "main.trb": "def main()\nputs(\"ready\")\nend\n"
+    },
+    "success": false,
+    "document": null
+  },
+  {
+    "id": "web-endpoint-catch-all-schema",
+    "files": {
+      "routes/items/[...path].trb": "import { Context, Response, Endpoint, handles, response } from trb/web\n\n\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\n\nclass ItemsEndpoint < Endpoint\nhandles(get)\nresponse<String>(status: 200)\nend\n",
+      "main.trb": "def main()\nputs(\"ready\")\nend\n"
+    },
+    "success": false,
+    "document": null
+  },
+  {
+    "id": "web-endpoint-no-contract",
+    "files": {
+      "routes/items.trb": "import { Context, Response } from trb/web\n\n\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\n",
+      "main.trb": "def main()\nputs(\"ready\")\nend\n"
+    },
+    "success": false,
+    "document": null
+  },
+  {
+    "id": "web-endpoint-all-time-scalars",
+    "files": {
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, response } from trb/web\nimport { Date, TimeOfDay, DateTime, Instant, Duration, TimeZone } from trb/std/time\nrecord Times\ndate: Date\nclock: TimeOfDay\nlocal: DateTime\ninstant: Instant\nduration: Duration\nzone: TimeZone\nend\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\nclass ItemsEndpoint < Endpoint\nhandles(get)\nresponse<Times>(status: 200)\nend\n",
+      "main.trb": "def main()\nputs(\"ready\")\nend\n"
+    },
+    "success": true,
+    "document": {
+      "openapi": "3.1.0",
+      "info": {
+        "title": "sample-api",
+        "version": "1.2.3"
+      },
+      "paths": {
+        "/items": {
+          "get": {
+            "operationId": "ItemsEndpoint",
+            "responses": {
+              "200": {
+                "description": "OK",
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/Times"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "components": {
+        "schemas": {
+          "Times": {
+            "type": "object",
+            "properties": {
+              "clock": {
+                "type": "string",
+                "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9](?::[0-5][0-9](?:\\.[0-9]{1,9})?)?$"
+              },
+              "date": {
+                "type": "string",
+                "format": "date"
+              },
+              "duration": {
+                "type": "string",
+                "format": "duration"
+              },
+              "instant": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "local": {
+                "type": "string",
+                "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T(?:[01][0-9]|2[0-3]):[0-5][0-9](?::[0-5][0-9](?:\\.[0-9]{1,9})?)?$"
+              },
+              "zone": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "date",
+              "clock",
+              "local",
+              "instant",
+              "duration",
+              "zone"
+            ]
+          }
+        }
+      }
+    }
+  },
+  {
+    "id": "web-endpoint-integer-enum",
+    "files": {
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, response } from trb/web\n\nenum Code\nZero = 0\nNegative = -1\nMaximum = 9007199254740991\nend\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\nclass ItemsEndpoint < Endpoint\nhandles(get)\nresponse<Code>(status: 200)\nend\n",
+      "main.trb": "def main()\nputs(\"ready\")\nend\n"
+    },
+    "success": true,
+    "document": {
+      "openapi": "3.1.0",
+      "info": {
+        "title": "sample-api",
+        "version": "1.2.3"
+      },
+      "paths": {
+        "/items": {
+          "get": {
+            "operationId": "ItemsEndpoint",
+            "responses": {
+              "200": {
+                "description": "OK",
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/Code"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "components": {
+        "schemas": {
+          "Code": {
+            "type": "integer",
+            "enum": [
+              0,
+              -1,
+              9007199254740991
+            ],
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        }
+      }
+    }
+  },
+  {
+    "id": "web-endpoint-empty-record",
+    "files": {
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, response } from trb/web\n\nrecord Empty\nend\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\nclass ItemsEndpoint < Endpoint\nhandles(get)\nresponse<Empty>(status: 200)\nend\n",
+      "main.trb": "def main()\nputs(\"ready\")\nend\n"
+    },
+    "success": true,
+    "document": {
+      "openapi": "3.1.0",
+      "info": {
+        "title": "sample-api",
+        "version": "1.2.3"
+      },
+      "paths": {
+        "/items": {
+          "get": {
+            "operationId": "ItemsEndpoint",
+            "responses": {
+              "200": {
+                "description": "OK",
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/Empty"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "components": {
+        "schemas": {
+          "Empty": {
+            "type": "object"
+          }
+        }
+      }
+    }
+  },
+  {
+    "id": "web-endpoint-alias-record",
+    "files": {
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, response } from trb/web\n\nrecord Item\nname: String\nend\nalias Alias = Item\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\nclass ItemsEndpoint < Endpoint\nhandles(get)\nresponse<Alias>(status: 200)\nend\n",
+      "main.trb": "def main()\nputs(\"ready\")\nend\n"
+    },
+    "success": true,
+    "document": {
+      "openapi": "3.1.0",
+      "info": {
+        "title": "sample-api",
+        "version": "1.2.3"
+      },
+      "paths": {
+        "/items": {
+          "get": {
+            "operationId": "ItemsEndpoint",
+            "responses": {
+              "200": {
+                "description": "OK",
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/Item"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "components": {
+        "schemas": {
+          "Item": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name"
+            ]
+          }
+        }
+      }
+    }
+  },
+  {
+    "id": "web-endpoint-generic-alias",
+    "files": {
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, response } from trb/web\n\nalias Box<T> = Array<T>\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\nclass ItemsEndpoint < Endpoint\nhandles(get)\nresponse<Box<String>>(status: 200)\nend\n",
+      "main.trb": "def main()\nputs(\"ready\")\nend\n"
+    },
+    "success": false,
+    "document": null
+  },
+  {
+    "id": "web-endpoint-hash-invalid-key",
+    "files": {
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, response } from trb/web\n\n\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\nclass ItemsEndpoint < Endpoint\nhandles(get)\nresponse<Hash<Integer,String>>(status: 200)\nend\n",
+      "main.trb": "def main()\nputs(\"ready\")\nend\n"
+    },
+    "success": false,
+    "document": null
+  },
+  {
+    "id": "web-endpoint-empty-wire",
+    "files": {
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, response } from trb/web\n\nrecord Item\nname: String @json(\"\")\nend\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\nclass ItemsEndpoint < Endpoint\nhandles(get)\nresponse<Item>(status: 200)\nend\n",
+      "main.trb": "def main()\nputs(\"ready\")\nend\n"
+    },
+    "success": false,
+    "document": null
+  },
+  {
+    "id": "web-endpoint-duplicate-wire",
+    "files": {
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, response } from trb/web\n\nrecord Item\na: String @json(\"same\")\nb: String @json(\"same\")\nend\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\nclass ItemsEndpoint < Endpoint\nhandles(get)\nresponse<Item>(status: 200)\nend\n",
+      "main.trb": "def main()\nputs(\"ready\")\nend\n"
+    },
+    "success": false,
+    "document": null
+  },
+  {
+    "id": "web-endpoint-ignored-wire",
+    "files": {
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, response } from trb/web\n\nrecord Item\nname: String @json(\"-\")\nend\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\nclass ItemsEndpoint < Endpoint\nhandles(get)\nresponse<Item>(status: 200)\nend\n",
+      "main.trb": "def main()\nputs(\"ready\")\nend\n"
+    },
+    "success": false,
+    "document": null
+  },
+  {
+    "id": "web-endpoint-forbidden-body",
+    "files": {
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, response } from trb/web\n\n\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\nclass ItemsEndpoint < Endpoint\nhandles(get)\nresponse<String>(status: 204)\nend\n",
+      "main.trb": "def main()\nputs(\"ready\")\nend\n"
+    },
+    "success": false,
+    "document": null
+  },
+  {
+    "id": "web-endpoint-empty-statuses",
+    "files": {
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, response } from trb/web\nimport { Unit } from trb/std/unit\n\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\nclass ItemsEndpoint < Endpoint\nhandles(get)\nresponse<Unit>(status: 100)\nresponse<Unit>(status: 101)\nresponse<Unit>(status: 102)\nresponse<Unit>(status: 103)\nresponse<Unit>(status: 199)\nresponse<Unit>(status: 200)\nresponse<Unit>(status: 204)\nresponse<Unit>(status: 205)\nresponse<Unit>(status: 304)\nresponse<Unit>(status: 599)\nend\n",
+      "main.trb": "def main()\nputs(\"ready\")\nend\n"
+    },
+    "success": true,
+    "document": {
+      "openapi": "3.1.0",
+      "info": {
+        "title": "sample-api",
+        "version": "1.2.3"
+      },
+      "paths": {
+        "/items": {
+          "get": {
+            "operationId": "ItemsEndpoint",
+            "responses": {
+              "100": {
+                "description": "Continue"
+              },
+              "101": {
+                "description": "Switching Protocols"
+              },
+              "102": {
+                "description": "Processing"
+              },
+              "103": {
+                "description": "Early Hints"
+              },
+              "199": {
+                "description": "Response"
+              },
+              "200": {
+                "description": "OK"
+              },
+              "204": {
+                "description": "No Content"
+              },
+              "205": {
+                "description": "Reset Content"
+              },
+              "304": {
+                "description": "Not Modified"
+              },
+              "599": {
+                "description": "Response"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "id": "web-endpoint-no-entry",
+    "files": {
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, response } from trb/web\n\n\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\nclass ItemsEndpoint < Endpoint\nhandles(get)\nresponse<String>(status: 200)\nend\n"
+    },
+    "success": false,
+    "document": null
+  },
+  {
+    "id": "web-endpoint-path-nullable",
+    "files": {
+      "routes/items/[id].trb": "import { Context, Response, Endpoint, handles, input, response } from trb/web\n\nrecord Params\nid: String?\nend\nrecord Input\nparams: Params\nend\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\nclass ItemsEndpoint < Endpoint\nhandles(get)\ninput<Input>()\nresponse<String>(status: 200)\nend\n",
+      "main.trb": "def main()\nputs(\"ready\")\nend\n"
+    },
+    "success": false,
+    "document": null
+  },
+  {
+    "id": "web-endpoint-path-array",
+    "files": {
+      "routes/items/[id].trb": "import { Context, Response, Endpoint, handles, input, response } from trb/web\n\nrecord Params\nid: Array<String>\nend\nrecord Input\nparams: Params\nend\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\nclass ItemsEndpoint < Endpoint\nhandles(get)\ninput<Input>()\nresponse<String>(status: 200)\nend\n",
+      "main.trb": "def main()\nputs(\"ready\")\nend\n"
+    },
+    "success": false,
+    "document": null
+  },
+  {
+    "id": "web-endpoint-missing-route-params",
+    "files": {
+      "routes/items/[id].trb": "import { Context, Response, Endpoint, handles, response } from trb/web\n\n\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\nclass ItemsEndpoint < Endpoint\nhandles(get)\nresponse<String>(status: 200)\nend\n",
+      "main.trb": "def main()\nputs(\"ready\")\nend\n"
+    },
+    "success": false,
+    "document": null
+  },
+  {
+    "id": "web-endpoint-unsupported-envelope-field",
+    "files": {
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, input, response } from trb/web\n\nrecord Input\nheaders: String\nend\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\nclass ItemsEndpoint < Endpoint\nhandles(get)\ninput<Input>()\nresponse<String>(status: 200)\nend\n",
+      "main.trb": "def main()\nputs(\"ready\")\nend\n"
+    },
+    "success": false,
+    "document": null
+  },
+  {
+    "id": "web-endpoint-duplicate-input",
+    "files": {
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, input, response } from trb/web\n\nrecord Input\nend\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\nclass ItemsEndpoint < Endpoint\nhandles(get)\ninput<Input>()\ninput<Input>()\nresponse<String>(status: 200)\nend\n",
+      "main.trb": "def main()\nputs(\"ready\")\nend\n"
+    },
+    "success": false,
+    "document": null
+  },
+  {
+    "id": "web-endpoint-duplicate-contract",
+    "files": {
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, response } from trb/web\n\n\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\nclass ItemsEndpoint < Endpoint\nhandles(get)\nresponse<String>(status: 200)\nend\n\nclass OtherEndpoint < Endpoint\nhandles(get)\nresponse<String>(status: 201)\nend\n",
+      "main.trb": "def main()\nputs(\"ready\")\nend\n"
+    },
+    "success": false,
+    "document": null
+  },
+  {
+    "id": "web-endpoint-generic-contract",
+    "files": {
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, response } from trb/web\n\n\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\nclass ItemsEndpoint<T> < Endpoint\nhandles(get)\nresponse<String>(status: 200)\nend\n",
+      "main.trb": "def main()\nputs(\"ready\")\nend\n"
+    },
+    "success": false,
+    "document": null
+  },
+  {
+    "id": "web-endpoint-parenthesized-handler",
+    "files": {
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, response } from trb/web\n\n\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\nclass ItemsEndpoint < Endpoint\nhandles((get))\nresponse<String>(status: 200)\nend\n",
+      "main.trb": "def main()\nputs(\"ready\")\nend\n"
+    },
+    "success": true,
+    "document": {
+      "openapi": "3.1.0",
+      "info": {
+        "title": "sample-api",
+        "version": "1.2.3"
+      },
+      "paths": {
+        "/items": {
+          "get": {
+            "operationId": "ItemsEndpoint",
+            "responses": {
+              "200": {
+                "description": "OK",
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "id": "web-endpoint-parenthesized-status",
+    "files": {
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, response } from trb/web\n\n\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\nclass ItemsEndpoint < Endpoint\nhandles(get)\nresponse<String>(status: (200))\n\nend\n",
+      "main.trb": "def main()\nputs(\"ready\")\nend\n"
+    },
+    "success": true,
+    "document": {
+      "openapi": "3.1.0",
+      "info": {
+        "title": "sample-api",
+        "version": "1.2.3"
+      },
+      "paths": {
+        "/items": {
+          "get": {
+            "operationId": "ItemsEndpoint",
+            "responses": {
+              "200": {
+                "description": "OK",
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "id": "web-endpoint-trailing-comma",
+    "files": {
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, response } from trb/web\n\n\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\nclass ItemsEndpoint < Endpoint\nhandles(get,)\nresponse<String>(status: 200)\nend\n",
+      "main.trb": "def main()\nputs(\"ready\")\nend\n"
+    },
+    "success": true,
+    "document": {
+      "openapi": "3.1.0",
+      "info": {
+        "title": "sample-api",
+        "version": "1.2.3"
+      },
+      "paths": {
+        "/items": {
+          "get": {
+            "operationId": "ItemsEndpoint",
+            "responses": {
+              "200": {
+                "description": "OK",
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "id": "web-endpoint-qualified-directive",
+    "files": {
+      "routes/items.trb": "import trb/web\nimport { Context, Response, Endpoint } from trb/web\n\n\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\nclass ItemsEndpoint < Endpoint\nweb.handles(get)\nweb.response<String>(status: 200)\nend\n",
+      "main.trb": "def main()\nputs(\"ready\")\nend\n"
+    },
+    "success": false,
+    "document": null
+  },
+  {
+    "id": "web-endpoint-renamed-superclass",
+    "files": {
+      "routes/items.trb": "import { Context, Response, Endpoint as Base, handles, response } from trb/web\n\n\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\nclass ItemsEndpoint < Base\nhandles(get)\nresponse<String>(status: 200)\nend\n",
+      "main.trb": "def main()\nputs(\"ready\")\nend\n"
+    },
+    "success": true,
+    "document": {
+      "openapi": "3.1.0",
+      "info": {
+        "title": "sample-api",
+        "version": "1.2.3"
+      },
+      "paths": {
+        "/items": {
+          "get": {
+            "operationId": "ItemsEndpoint",
+            "responses": {
+              "200": {
+                "description": "OK",
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "id": "web-endpoint-renamed-directives",
+    "files": {
+      "routes/items.trb": "import { Context, Response, Endpoint, handles as bind, response as result } from trb/web\n\n\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\nclass ItemsEndpoint < Endpoint\nbind(get)\nresult<String>(status: 200)\nend\n",
+      "main.trb": "def main()\nputs(\"ready\")\nend\n"
+    },
+    "success": false,
+    "document": null
+  },
+  {
+    "id": "web-endpoint-alias-superclass",
+    "files": {
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, response } from trb/web\n\n\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\nalias Base = Endpoint\nclass ItemsEndpoint < Base\nhandles(get)\nresponse<String>(status: 200)\nend\n",
+      "main.trb": "def main()\nputs(\"ready\")\nend\n"
+    },
+    "success": false,
+    "document": null
+  },
+  {
+    "id": "web-endpoint-local-directive-homonyms",
+    "files": {
+      "routes/items.trb": "import { Context, Response, Endpoint } from trb/web\n\n\ndef response<T>(*, status: Integer)\nreturn\nend\ndef handles(handler: (Context) -> Response)\nreturn\nend\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\nclass ItemsEndpoint < Endpoint\nhandles(get)\nresponse<String>(status: 200)\nend\n",
+      "main.trb": "def main()\nputs(\"ready\")\nend\n"
+    },
+    "success": false,
+    "document": null
+  },
+  {
+    "id": "web-endpoint-path-record",
+    "files": {
+      "routes/items/[id].trb": "import { Context, Response, Endpoint, handles, input, response } from trb/web\n\nrecord Params\nid: Child\nend\nrecord Input\nparams: Params\nend\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\nclass ItemsEndpoint < Endpoint\nhandles(get)\ninput<Input>()\nresponse<String>(status: 200)\nend\n\nrecord Child\nvalue: String\nend\n",
+      "main.trb": "def main()\nputs(\"ready\")\nend\n\nrecord Child\nvalue: String\nend\n"
+    },
+    "success": false,
+    "document": null
+  },
+  {
+    "id": "web-endpoint-query-optional-array",
+    "files": {
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, input, response } from trb/web\n\nnewtype Tags = Array<String>\nnewtype MaybeID = Integer\nrecord Query\nvalue: Array<String>?\nend\nrecord Input\nquery: Query\nend\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\nclass ItemsEndpoint < Endpoint\nhandles(get)\ninput<Input>()\nresponse<String>(status: 200)\nend\n",
+      "main.trb": "def main()\nputs(\"ready\")\nend\n"
+    },
+    "success": true,
+    "document": {
+      "openapi": "3.1.0",
+      "info": {
+        "title": "sample-api",
+        "version": "1.2.3"
+      },
+      "paths": {
+        "/items": {
+          "get": {
+            "operationId": "ItemsEndpoint",
+            "parameters": [
+              {
+                "name": "value",
+                "in": "query",
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            ],
+            "responses": {
+              "200": {
+                "description": "OK",
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "id": "web-endpoint-query-nullable-element",
+    "files": {
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, input, response } from trb/web\n\nnewtype Tags = Array<String>\nnewtype MaybeID = Integer\nrecord Query\nvalue: Array<String?>\nend\nrecord Input\nquery: Query\nend\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\nclass ItemsEndpoint < Endpoint\nhandles(get)\ninput<Input>()\nresponse<String>(status: 200)\nend\n",
+      "main.trb": "def main()\nputs(\"ready\")\nend\n"
+    },
+    "success": false,
+    "document": null
+  },
+  {
+    "id": "web-endpoint-query-nested-array",
+    "files": {
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, input, response } from trb/web\n\nnewtype Tags = Array<String>\nnewtype MaybeID = Integer\nrecord Query\nvalue: Array<Array<String>>\nend\nrecord Input\nquery: Query\nend\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\nclass ItemsEndpoint < Endpoint\nhandles(get)\ninput<Input>()\nresponse<String>(status: 200)\nend\n",
+      "main.trb": "def main()\nputs(\"ready\")\nend\n"
+    },
+    "success": false,
+    "document": null
+  },
+  {
+    "id": "web-endpoint-query-nominal-array",
+    "files": {
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, input, response } from trb/web\n\nnewtype Tags = Array<String>\nnewtype MaybeID = Integer\nrecord Query\nvalue: Tags\nend\nrecord Input\nquery: Query\nend\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\nclass ItemsEndpoint < Endpoint\nhandles(get)\ninput<Input>()\nresponse<String>(status: 200)\nend\n",
+      "main.trb": "def main()\nputs(\"ready\")\nend\n"
+    },
+    "success": true,
+    "document": {
+      "openapi": "3.1.0",
+      "info": {
+        "title": "sample-api",
+        "version": "1.2.3"
+      },
+      "paths": {
+        "/items": {
+          "get": {
+            "operationId": "ItemsEndpoint",
+            "parameters": [
+              {
+                "name": "value",
+                "in": "query",
+                "schema": {
+                  "$ref": "#/components/schemas/Tags"
+                }
+              }
+            ],
+            "responses": {
+              "200": {
+                "description": "OK",
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "components": {
+        "schemas": {
+          "Tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "id": "web-endpoint-query-nominal-optional",
+    "files": {
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, input, response } from trb/web\n\nnewtype Tags = Array<String>\nnewtype MaybeID = Integer\nrecord Query\nvalue: MaybeID?\nend\nrecord Input\nquery: Query\nend\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\nclass ItemsEndpoint < Endpoint\nhandles(get)\ninput<Input>()\nresponse<String>(status: 200)\nend\n",
+      "main.trb": "def main()\nputs(\"ready\")\nend\n"
+    },
+    "success": true,
+    "document": {
+      "openapi": "3.1.0",
+      "info": {
+        "title": "sample-api",
+        "version": "1.2.3"
+      },
+      "paths": {
+        "/items": {
+          "get": {
+            "operationId": "ItemsEndpoint",
+            "parameters": [
+              {
+                "name": "value",
+                "in": "query",
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/MaybeID"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            ],
+            "responses": {
+              "200": {
+                "description": "OK",
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "components": {
+        "schemas": {
+          "MaybeID": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          }
+        }
+      }
+    }
+  },
+  {
+    "id": "web-endpoint-main-module-without-entry",
+    "files": {
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, response } from trb/web\n\n\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\n\nclass ItemsEndpoint < Endpoint\nhandles(get)\nresponse<String>(status: 200)\nend\n",
+      "main.trb": "def helper(): Integer\nreturn 1\nend\n"
+    },
+    "success": false,
+    "document": null
+  },
+  {
+    "id": "web-endpoint-empty-main-module",
+    "files": {
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, response } from trb/web\n\n\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\n\nclass ItemsEndpoint < Endpoint\nhandles(get)\nresponse<String>(status: 200)\nend\n",
+      "main.trb": ""
+    },
+    "success": false,
+    "document": null
+  },
+  {
+    "id": "web-endpoint-different-entry-module",
+    "files": {
+      "app.trb": "def main()\nputs(\"ready\")\nend\n",
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, response } from trb/web\n\n\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\n\nclass ItemsEndpoint < Endpoint\nhandles(get)\nresponse<String>(status: 200)\nend\n"
+    },
+    "success": true,
+    "document": {
+      "openapi": "3.1.0",
+      "info": {
+        "title": "sample-api",
+        "version": "1.2.3"
+      },
+      "paths": {
+        "/items": {
+          "get": {
+            "operationId": "ItemsEndpoint",
+            "responses": {
+              "200": {
+                "description": "OK",
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "id": "web-endpoint-renamed-time",
+    "files": {
+      "routes/items.trb": "import { Date as D } from trb/std/time\n\nimport { Context, Response, Endpoint, handles, response } from trb/web\n\n\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\n\nclass ItemsEndpoint < Endpoint\nhandles(get)\nresponse<D>(status: 200)\nend\n",
+      "main.trb": "def main()\nputs(\"ready\")\nend\n"
+    },
+    "success": false,
+    "document": null
+  },
+  {
+    "id": "web-endpoint-alias-time",
+    "files": {
+      "routes/items.trb": "import { Date } from trb/std/time\nalias D = Date\nimport { Context, Response, Endpoint, handles, response } from trb/web\n\n\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\n\nclass ItemsEndpoint < Endpoint\nhandles(get)\nresponse<D>(status: 200)\nend\n",
+      "main.trb": "def main()\nputs(\"ready\")\nend\n"
+    },
+    "success": true,
+    "document": {
+      "openapi": "3.1.0",
+      "info": {
+        "title": "sample-api",
+        "version": "1.2.3"
+      },
+      "paths": {
+        "/items": {
+          "get": {
+            "operationId": "ItemsEndpoint",
+            "responses": {
+              "200": {
+                "description": "OK",
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "string",
+                      "format": "date"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "id": "web-endpoint-renamed-unit",
+    "files": {
+      "routes/items.trb": "import { Unit as U } from trb/std/unit\n\nimport { Context, Response, Endpoint, handles, response } from trb/web\n\n\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\n\nclass ItemsEndpoint < Endpoint\nhandles(get)\nresponse<U>(status: 200)\nend\n",
+      "main.trb": "def main()\nputs(\"ready\")\nend\n"
+    },
+    "success": true,
+    "document": {
+      "openapi": "3.1.0",
+      "info": {
+        "title": "sample-api",
+        "version": "1.2.3"
+      },
+      "paths": {
+        "/items": {
+          "get": {
+            "operationId": "ItemsEndpoint",
+            "responses": {
+              "200": {
+                "description": "OK",
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/Unit"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "components": {
+        "schemas": {
+          "Unit": {
+            "type": "object"
+          }
+        }
+      }
+    }
+  },
+  {
+    "id": "web-endpoint-alias-unit",
+    "files": {
+      "routes/items.trb": "import { Unit } from trb/std/unit\nalias U = Unit\nimport { Context, Response, Endpoint, handles, response } from trb/web\n\n\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\n\nclass ItemsEndpoint < Endpoint\nhandles(get)\nresponse<U>(status: 200)\nend\n",
+      "main.trb": "def main()\nputs(\"ready\")\nend\n"
+    },
+    "success": true,
+    "document": {
+      "openapi": "3.1.0",
+      "info": {
+        "title": "sample-api",
+        "version": "1.2.3"
+      },
+      "paths": {
+        "/items": {
+          "get": {
+            "operationId": "ItemsEndpoint",
+            "responses": {
+              "200": {
+                "description": "OK"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "id": "web-endpoint-multiple-routes-methods",
+    "files": {
+      "main.trb": "def main()\nputs(\"ready\")\nend\n",
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, response } from trb/web\n\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\nclass ItemsRead < Endpoint\nhandles(get)\n\nresponse<String>(status: 200)\nend\n\ndef post(_context: Context): Response\nreturn Response.text(\"created\")\nend\nclass ItemsCreate < Endpoint\nhandles(post)\nresponse<String>(status: 201)\nend\n",
+      "routes/health.trb": "import { Context, Response, Endpoint, handles, response } from trb/web\n\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\nclass HealthRead < Endpoint\nhandles(get)\n\nresponse<String>(status: 200)\nend\n"
+    },
+    "success": true,
+    "document": {
+      "openapi": "3.1.0",
+      "info": {
+        "title": "sample-api",
+        "version": "1.2.3"
+      },
+      "paths": {
+        "/health": {
+          "get": {
+            "operationId": "HealthRead",
+            "responses": {
+              "200": {
+                "description": "OK",
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "/items": {
+          "get": {
+            "operationId": "ItemsRead",
+            "responses": {
+              "200": {
+                "description": "OK",
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "post": {
+            "operationId": "ItemsCreate",
+            "responses": {
+              "201": {
+                "description": "Created",
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "id": "web-endpoint-duplicate-operation-name",
+    "files": {
+      "main.trb": "def main()\nputs(\"ready\")\nend\n",
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, response } from trb/web\n\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\nclass Repeated < Endpoint\nhandles(get)\n\nresponse<String>(status: 200)\nend\n",
+      "routes/health.trb": "import { Context, Response, Endpoint, handles, response } from trb/web\n\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\nclass Repeated < Endpoint\nhandles(get)\n\nresponse<String>(status: 200)\nend\n"
+    },
+    "success": false,
+    "document": null
+  },
+  {
+    "id": "web-endpoint-component-name-collision",
+    "files": {
+      "main.trb": "def main()\nputs(\"ready\")\nend\n",
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, response } from trb/web\nrecord Item\nname: String\nend\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\nclass ItemsRead < Endpoint\nhandles(get)\n\nresponse<Item>(status: 200)\nend\n",
+      "routes/health.trb": "import { Context, Response, Endpoint, handles, response } from trb/web\nrecord Item\nready: Boolean\nend\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\nclass HealthRead < Endpoint\nhandles(get)\n\nresponse<Item>(status: 200)\nend\n"
+    },
+    "success": false,
+    "document": null
+  },
+  {
+    "id": "web-endpoint-generic-alias-record-field",
+    "files": {
+      "main.trb": "def main()\nputs(\"ready\")\nend\n",
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, response } from trb/web\nalias Pick<T> = T\nrecord Item\nvalue: Pick<Integer>\nend\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\nclass ItemsEndpoint < Endpoint\nhandles(get)\n\nresponse<Item>(status: 200)\nend\n"
+    },
+    "success": false,
+    "document": null
+  },
+  {
+    "id": "web-endpoint-generic-alias-query-field",
+    "files": {
+      "main.trb": "def main()\nputs(\"ready\")\nend\n",
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, input, response } from trb/web\nalias Pick<T> = T\nrecord Query\nvalue: Pick<String>\nend\nrecord Input\nquery: Query\nend\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\nclass ItemsEndpoint < Endpoint\nhandles(get)\ninput<Input>()\nresponse<String>(status: 200)\nend\n"
+    },
+    "success": false,
+    "document": null
+  },
+  {
+    "id": "web-endpoint-imported-unsupported-field",
+    "files": {
+      "main.trb": "def main()\nputs(\"ready\")\nend\n",
+      "models.trb": "record Item\nvalue: Hash<Integer, String>\nend\n",
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, response } from trb/web\nimport { Item } from models\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\nclass ItemsEndpoint < Endpoint\nhandles(get)\n\nresponse<Item>(status: 200)\nend\n"
+    },
+    "success": false,
+    "document": null
+  },
+  {
+    "id": "web-endpoint-status-underscores",
+    "files": {
+      "main.trb": "def main()\nputs(\"ready\")\nend\n",
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, response } from trb/web\n\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\nclass ItemsEndpoint < Endpoint\nhandles(get)\n\nresponse<String>(status: 2_00)\nend\n"
+    },
+    "success": true,
+    "document": {
+      "openapi": "3.1.0",
+      "info": {
+        "title": "sample-api",
+        "version": "1.2.3"
+      },
+      "paths": {
+        "/items": {
+          "get": {
+            "operationId": "ItemsEndpoint",
+            "responses": {
+              "200": {
+                "description": "OK",
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "id": "web-endpoint-status-hexadecimal",
+    "files": {
+      "main.trb": "def main()\nputs(\"ready\")\nend\n",
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, response } from trb/web\n\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\nclass ItemsEndpoint < Endpoint\nhandles(get)\n\nresponse<String>(status: 0xC8)\nend\n"
+    },
+    "success": false,
+    "document": null
+  },
+  {
+    "id": "web-endpoint-nullable-field-alias",
+    "files": {
+      "main.trb": "def main()\nputs(\"ready\")\nend\n",
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, response } from trb/web\n\nalias OptionalName = String?\nrecord Item\nname: OptionalName\nend\n\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\n\nclass ItemsEndpoint < Endpoint\nhandles(get)\nresponse<Item>(status: 200)\nend\n"
+    },
+    "success": true,
+    "document": {
+      "openapi": "3.1.0",
+      "info": {
+        "title": "sample-api",
+        "version": "1.2.3"
+      },
+      "paths": {
+        "/items": {
+          "get": {
+            "operationId": "ItemsEndpoint",
+            "responses": {
+              "200": {
+                "description": "OK",
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/Item"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "components": {
+        "schemas": {
+          "Item": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "id": "web-endpoint-namespaced-contract",
+    "files": {
+      "main.trb": "def main()\nputs(\"ready\")\nend\n",
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, response } from trb/web\n\n\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\n\nmodule Contracts\nclass ItemsEndpoint < Endpoint\nhandles(get)\nresponse<String>(status: 200)\nend\nend\n"
+    },
+    "success": false,
+    "document": null
+  },
+  {
+    "id": "web-endpoint-namespaced-record",
+    "files": {
+      "main.trb": "def main()\nputs(\"ready\")\nend\n",
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, response } from trb/web\n\nmodule Models\nrecord Item\nname: String\nend\nend\n\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\n\nclass ItemsEndpoint < Endpoint\nhandles(get)\nresponse<Models::Item>(status: 200)\nend\n"
+    },
+    "success": true,
+    "document": {
+      "openapi": "3.1.0",
+      "info": {
+        "title": "sample-api",
+        "version": "1.2.3"
+      },
+      "paths": {
+        "/items": {
+          "get": {
+            "operationId": "ItemsEndpoint",
+            "responses": {
+              "200": {
+                "description": "OK",
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/Models::Item"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "components": {
+        "schemas": {
+          "Models::Item": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name"
+            ]
+          }
+        }
+      }
+    }
+  },
+  {
+    "id": "web-openapi-imported-namespace",
+    "files": {
+      "main.trb": "def main()\nputs(\"entry must not run during generation\")\nend\n",
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, response } from trb/web\nimport { Models } from contracts/models\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\nclass ItemsEndpoint < Endpoint\nhandles(get)\n\nresponse<Models::Item>(status: 200)\nend\n",
+      "contracts/models.trb": "module Models\nrecord Item\nid: Integer\nend\nend\n"
+    },
+    "success": false
+  },
+  {
+    "id": "web-openapi-root-imported-namespace",
+    "files": {
+      "main.trb": "def main()\nputs(\"entry must not run during generation\")\nend\n",
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, response } from trb/web\nimport contracts/models\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\nclass ItemsEndpoint < Endpoint\nhandles(get)\n\nresponse<Models::Item>(status: 200)\nend\n",
+      "contracts/models.trb": "module Models\nrecord Item\nid: Integer\nend\nend\n"
+    },
+    "success": false
+  },
+  {
+    "id": "web-openapi-local-namespace",
+    "files": {
+      "main.trb": "def main()\nputs(\"entry must not run during generation\")\nend\n",
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, response } from trb/web\nmodule Models\nrecord Item\nid: Integer\nend\nend\n\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\nclass ItemsEndpoint < Endpoint\nhandles(get)\n\nresponse<Models::Item>(status: 200)\nend\n"
+    },
+    "success": true,
+    "document": {
+      "openapi": "3.1.0",
+      "info": {
+        "title": "sample-api",
+        "version": "1.2.3"
+      },
+      "paths": {
+        "/items": {
+          "get": {
+            "operationId": "ItemsEndpoint",
+            "responses": {
+              "200": {
+                "description": "OK",
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/Models::Item"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "components": {
+        "schemas": {
+          "Models::Item": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "id"
+            ]
+          }
+        }
+      }
+    }
+  },
+  {
+    "id": "web-openapi-shared-alias-of-namespace",
+    "files": {
+      "main.trb": "def main()\nputs(\"entry must not run during generation\")\nend\n",
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, response } from trb/web\nimport { Item } from contracts/models\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\nclass ItemsEndpoint < Endpoint\nhandles(get)\n\nresponse<Item>(status: 200)\nend\n",
+      "contracts/models.trb": "module Models\nrecord Item\nid: Integer\nend\nend\nalias Item = Models::Item\n"
+    },
+    "success": true,
+    "document": {
+      "openapi": "3.1.0",
+      "info": {
+        "title": "sample-api",
+        "version": "1.2.3"
+      },
+      "paths": {
+        "/items": {
+          "get": {
+            "operationId": "ItemsEndpoint",
+            "responses": {
+              "200": {
+                "description": "OK",
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "$ref": "#/components/schemas/Models::Item"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "components": {
+        "schemas": {
+          "Models::Item": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "id"
+            ]
+          }
+        }
+      }
+    }
+  },
+  {
+    "id": "web-openapi-local-alias-of-imported-namespace",
+    "files": {
+      "main.trb": "def main()\nputs(\"entry must not run during generation\")\nend\n",
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, response } from trb/web\nimport { Models } from contracts/models\nalias Item = Models::Item\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\nclass ItemsEndpoint < Endpoint\nhandles(get)\n\nresponse<Item>(status: 200)\nend\n",
+      "contracts/models.trb": "module Models\nrecord Item\nid: Integer\nend\nend\n"
+    },
+    "success": false
+  },
+  {
+    "id": "web-openapi-imported-namespace-in-field",
+    "files": {
+      "main.trb": "def main()\nputs(\"entry must not run during generation\")\nend\n",
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, response } from trb/web\nimport { Models } from contracts/models\nrecord Envelope\nitem: Models::Item\nend\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\nclass ItemsEndpoint < Endpoint\nhandles(get)\n\nresponse<Envelope>(status: 200)\nend\n",
+      "contracts/models.trb": "module Models\nrecord Item\nid: Integer\nend\nend\n"
+    },
+    "success": false
+  },
+  {
+    "id": "web-openapi-imported-namespaced-newtype",
+    "files": {
+      "main.trb": "def main()\nputs(\"entry must not run during generation\")\nend\n",
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, response } from trb/web\nimport { Models } from contracts/models\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\nclass ItemsEndpoint < Endpoint\nhandles(get)\n\nresponse<Models::Item>(status: 200)\nend\n",
+      "contracts/models.trb": "module Models\nnewtype Item = Integer\nend\n"
+    },
+    "success": false
+  },
+  {
+    "id": "web-openapi-imported-namespaced-enum",
+    "files": {
+      "main.trb": "def main()\nputs(\"entry must not run during generation\")\nend\n",
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, response } from trb/web\nimport { Models } from contracts/models\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\nclass ItemsEndpoint < Endpoint\nhandles(get)\n\nresponse<Models::Item>(status: 200)\nend\n",
+      "contracts/models.trb": "module Models\nenum Item\nOne = \"one\"\nend\nend\n"
+    },
+    "success": false
+  },
+  {
+    "id": "web-openapi-imported-namespaced-alias",
+    "files": {
+      "main.trb": "def main()\nputs(\"entry must not run during generation\")\nend\n",
+      "routes/items.trb": "import { Context, Response, Endpoint, handles, response } from trb/web\nimport { Models } from contracts/models\ndef get(_context: Context): Response\nreturn Response.text(\"ok\")\nend\nclass ItemsEndpoint < Endpoint\nhandles(get)\n\nresponse<Models::Item>(status: 200)\nend\n",
+      "contracts/models.trb": "module Models\nalias Item = Integer\nend\n"
+    },
+    "success": false
+  }
+]

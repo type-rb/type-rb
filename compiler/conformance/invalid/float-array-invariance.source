@@ -1,0 +1,9 @@
+def accept(values: Array<Float>)
+	return
+end
+
+def main()
+	values: Array<Integer> := [1]
+	accept(values)
+	return
+end

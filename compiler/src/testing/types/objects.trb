@@ -1,0 +1,15 @@
+import { object_syntax_state } from testing/syntax/objects
+import { resolve_object_declarations } from frontend/resolution/object_resolution
+import { CompilerState } from state/state
+import { load_string } from support/storage
+import { expect } from trb/std/test
+
+def object_resolution_state(source: String): CompilerState
+	mut state := object_syntax_state(source)
+	valid := resolve_object_declarations(state)
+	if !valid
+		puts(load_string(state.diagnostics.messages, 0))
+	end
+	expect(valid).to_be_true()
+	return state
+end

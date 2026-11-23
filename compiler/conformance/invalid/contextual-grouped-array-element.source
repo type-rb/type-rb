@@ -1,0 +1,4 @@
+def main()
+	values: Array<Float> := ((["wrong"]))
+	return
+end

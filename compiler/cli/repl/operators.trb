@@ -1,0 +1,216 @@
+import { union_parts } from frontend/types/union_types
+import { string_starts_with } from support/path
+import { integer_string } from support/literals
+import { native_cli_pow } from host
+import { repl_failed, ReplStore, repl_type, repl_get, repl_boolean, repl_string, repl_float, repl_integer } from repl/model
+import { repl_absent } from repl/nullable
+
+# Scalar operators consume checked operands. Union and newtype wrappers retain
+# their value semantics; failures are recorded in the shared evaluation store.
+def repl_number(text: String): Integer
+	mut result := 0
+	mut index := 0
+	while index < text.size()
+		mut digit := 0
+		while digit < 10
+			if integer_string(digit) == text[index]
+				result = result * 10 + digit
+			end
+			digit += 1
+		end
+		index += 1
+	end
+	return result
+end
+
+def repl_binary_value(mut store: ReplStore, left: Integer, operator: String, right: Integer): Integer
+	if union_parts(repl_type(store, left)).size() > 0
+		return repl_binary_value(store, store.children[left][0], operator, right)
+	end
+	if union_parts(repl_type(store, right)).size() > 0
+		return repl_binary_value(store, left, operator, store.children[right][0])
+	end
+	if repl_type(store, left) == "Nil" || repl_type(store, right) == "Nil"
+		mut same := repl_absent(store, left) == repl_absent(store, right)
+		if operator == "!="
+			same = !same
+		end
+		return repl_boolean(store, same)
+	end
+	if string_starts_with(repl_type(store, left), "Newtype#")
+		return repl_binary_value(store, store.children[left][0], operator, store.children[right][0])
+	end
+	a := repl_get(store, left)
+	b := repl_get(store, right)
+	if (a.type_name == "String") != (b.type_name == "String")
+		if operator == "==" || operator == "!="
+			return repl_boolean(store, operator == "!=")
+		end
+	end
+	if a.type_name == "String"
+		if operator == "+"
+			return repl_string(store, a.text + b.text)
+		end
+		if operator == "=="
+			return repl_boolean(store, a.text == b.text)
+		end
+		return repl_boolean(store, a.text != b.text)
+	end
+	if a.type_name == "Boolean"
+		if operator == "=="
+			return repl_boolean(store, a.integer == b.integer)
+		end
+		return repl_boolean(store, a.integer != b.integer)
+	end
+	mut floating := a.type_name == "Float"
+	if b.type_name == "Float"
+		floating = true
+	end
+	if floating
+		mut x := a.floating
+		mut y := b.floating
+		if a.type_name == "Integer"
+			x = a.integer
+		end
+		if b.type_name == "Integer"
+			y = b.integer
+		end
+		return repl_float_binary_value(store, x, operator, y)
+	end
+	return repl_integer_binary_value(store, left, operator, right)
+end
+
+# Operands have already been promoted according to the checked numeric type.
+def repl_float_binary_value(mut store: ReplStore, x: Float, operator: String, y: Float): Integer
+	if operator == "+"
+		return repl_float(store, x + y)
+	end
+	if operator == "-"
+		return repl_float(store, x - y)
+	end
+	if operator == "*"
+		return repl_float(store, x * y)
+	end
+	if operator == "/"
+		return repl_float(store, x / y)
+	end
+	if operator == "**"
+		return repl_float(store, native_cli_pow(x, y))
+	end
+	if operator == "=="
+		return repl_boolean(store, x == y)
+	end
+	if operator == "!="
+		return repl_boolean(store, x != y)
+	end
+	if operator == "<"
+		return repl_boolean(store, x < y)
+	end
+	if operator == "<="
+		return repl_boolean(store, x <= y)
+	end
+	if operator == ">"
+		return repl_boolean(store, x > y)
+	end
+	return repl_boolean(store, x >= y)
+end
+
+# Portable Integer checks stay with Integer evaluation, including each
+# multiplication performed by exponentiation.
+def repl_integer_binary_value(mut store: ReplStore, left: Integer, operator: String, right: Integer): Integer
+	x := repl_get(store, left).integer
+	y := repl_get(store, right).integer
+	if operator == "=="
+		return repl_boolean(store, x == y)
+	end
+	if operator == "!="
+		return repl_boolean(store, x != y)
+	end
+	if operator == "<"
+		return repl_boolean(store, x < y)
+	end
+	if operator == "<="
+		return repl_boolean(store, x <= y)
+	end
+	if operator == ">"
+		return repl_boolean(store, x > y)
+	end
+	if operator == ">="
+		return repl_boolean(store, x >= y)
+	end
+	if operator == "**"
+		if y < 0
+			store.error[0] = "panic: negative Integer exponent"
+			return 0
+		end
+		mut result := repl_integer(store, 1)
+		mut factor := left
+		mut exponent := y
+		while exponent > 0
+			if exponent % 2 == 1
+				result = repl_binary_value(store, result, "*", factor)
+				if repl_failed(store)
+					return 0
+				end
+			end
+			exponent /= 2
+			if exponent > 0
+				factor = repl_binary_value(store, factor, "*", factor)
+				if repl_failed(store)
+					return 0
+				end
+			end
+		end
+		return result
+	end
+	limit := 9007199254740991
+	mut overflow := false
+	if operator == "+"
+		if y > 0
+			overflow = x > limit - y
+		else
+			overflow = x < -limit - y
+		end
+	end
+	if operator == "-"
+		if y < 0
+			overflow = x > limit + y
+		else
+			overflow = x < -limit + y
+		end
+	end
+	if operator == "*"
+		if y != 0
+			mut ax := x
+			mut ay := y
+			if ax < 0
+				ax = -ax
+			end
+			if ay < 0
+				ay = -ay
+			end
+			overflow = ax > limit / ay
+		end
+	end
+	if overflow
+		store.error[0] = "panic: Integer is outside the portable range"
+		return 0
+	end
+	if operator == "+"
+		return repl_integer(store, x + y)
+	end
+	if operator == "-"
+		return repl_integer(store, x - y)
+	end
+	if operator == "*"
+		return repl_integer(store, x * y)
+	end
+	if y == 0
+		store.error[0] = "panic: division by zero"
+		return 0
+	end
+	if operator == "/"
+		return repl_integer(store, x / y)
+	end
+	return repl_integer(store, x % y)
+end

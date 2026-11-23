@@ -1,0 +1,58 @@
+alias Callback = (Integer) -> Integer
+
+record Holder
+	callback: Callback
+end
+
+def add(value: Integer): Integer
+	return value + 2
+end
+def _private(value: Integer): Integer
+	return value * 3
+end
+def apply(callback: (Integer) -> Integer): Integer
+	return callback(3)
+end
+def maker(): (Integer) -> Integer
+	return add
+end
+def keep<T>(value: T): T
+	return value
+end
+def report(value: Integer)
+	puts(value)
+end
+def main()
+	puts(apply(add))
+	callback := add
+	puts(callback(4))
+	puts(maker()(5))
+	functions := [add, _private]
+	puts(functions[0](6))
+	puts(functions[1](6))
+	optional: Callback? := add
+	if optional != nil
+		puts(optional(7))
+	end
+	printer := report
+	printer(10)
+	shadow := fn(add: (Integer) -> Integer): Integer
+		return add(2)
+	end
+	puts(shadow(_private))
+	retained := keep<(Integer) -> Integer>(add)
+	puts(retained(11))
+	present: Holder? := Holder.new(callback: add)
+	absent: Holder? := nil
+	mut calls := 0
+	argument := fn(): Integer
+		calls += 1
+		return 2
+	end
+	value := present&.callback(argument())
+	if value != nil
+		puts(value)
+	end
+	puts(absent&.callback(argument()) == nil)
+	puts(calls)
+end

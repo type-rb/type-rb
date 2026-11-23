@@ -1,0 +1,71 @@
+import { check, emit_qbe } from compiler
+import { lex } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { encode_static_string } from backend/qbe/emit/constants
+import { resolve } from frontend/checking/program/resolution
+import { CompilerState, compiler_new } from state/state
+import { describe, expect, test } from trb/std/test
+import { occurrence_count, output_source, repeat_text } from testing/compiler
+
+describe("Native TypeRB frontend") do
+	test("folds literal-only String concatenation and preserves postfix binding") do
+		source := "def main()\n\tdirect := \"a\" + \"b\" + \"c\"\n\tdynamic := direct + \"d\"\n\tpostfix := \"a\" + \"b\".size().to_s()\n\tputs(dynamic)\n\tputs(postfix)\n\treturn\nend\n"
+		mut state := compiler_new(source.size() + 1)
+		expect(lex(state, source)).to_be_true()
+		expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_true()
+		qbe := output_source(emit_qbe(state))
+		expect(occurrence_count(qbe, "call $trbn_string_concat")).to_equal(2)
+	end
+
+	test("compresses only profitable static Strings at the registered boundary") do
+		overlapping := repeat_text("a", 300)
+		encoded := encode_static_string(overlapping)
+		expect(encoded.size() < overlapping.size()).to_be_true()
+		expect(encoded[0]).to_equal(97)
+		expect(encoded[1]).to_equal(255)
+		expect(encoded[2]).to_equal(0)
+		expect(encoded[3]).to_equal(1)
+
+		incompressible := "aaabaacaadaaeaafaagaahaaiaajaakaalaamaanaaoaapabbabcabdabeabfabgabhabiabjabkablabmabnaboabpacbaccacdaceacfacgachaciacjackaclacmacnacoacpadbadcaddadeadfadgadhadiadjadkadladmadnadoadpaebaecaedaeeaefaegaehaeiaejaekaelaemaenaeoaepafbafcafdafeaffafgafhafiafjafk"
+		incompressible_encoded := encode_static_string(incompressible)
+		expect(incompressible.size()).to_equal(256)
+		expect(incompressible_encoded.size()).to_equal(incompressible.size())
+
+		below := repeat_text("abcd", 63) + "abc"
+		below_source := "def main()\n\tvalue := \"" + below + "\"\n\tputs(value)\n\treturn\nend\n"
+		mut below_state := compiler_new(below_source.size() + 1)
+		expect(lex(below_state, below_source)).to_be_true()
+		expect(parse_module(below_state, 0, below_state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(below_state)).to_be_true()
+		expect(check(below_state)).to_be_true()
+		below_qbe := output_source(emit_qbe(below_state))
+		expect(below_qbe.include?("trbn_static_string_decode")).to_be_false()
+		expect(below_qbe.include?("trbn_static_strings_initialize")).to_be_false()
+
+		boundary := repeat_text("abcd", 64)
+		boundary_source := "def main()\n\tvalue := \"" + boundary + "\"\n\tputs(value)\n\treturn\nend\n"
+		mut boundary_state := compiler_new(boundary_source.size() + 1)
+		expect(lex(boundary_state, boundary_source)).to_be_true()
+		expect(parse_module(boundary_state, 0, boundary_state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(boundary_state)).to_be_true()
+		expect(check(boundary_state)).to_be_true()
+		boundary_qbe := output_source(emit_qbe(boundary_state))
+		expect(boundary_qbe.include?(" = align 8 { z 281 }")).to_be_true()
+		expect(boundary_qbe.include?("data $trbnc")).to_be_true()
+		expect(boundary_qbe.include?("function $trbn_static_string_decode")).to_be_true()
+		expect(boundary_qbe.include?("\tstoreb 0, %terminator")).to_be_true()
+		expect(boundary_qbe.include?("\tcall $trbn_static_strings_initialize()")).to_be_true()
+
+		deduplicated_source := "def compiler_main(source: String, mode: String, with_path: Boolean): Integer\n\tfirst := \"" + boundary + "\"\n\tsecond := \"" + boundary + "\"\n\tif first == second\n\t\treturn 0\n\telse\n\t\treturn 1\n\tend\nend\n\ndef main()\n\treturn\nend\n"
+		mut deduplicated_state := compiler_new(deduplicated_source.size() + 1)
+		expect(lex(deduplicated_state, deduplicated_source)).to_be_true()
+		expect(parse_module(deduplicated_state, 0, deduplicated_state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(deduplicated_state)).to_be_true()
+		expect(check(deduplicated_state)).to_be_true()
+		deduplicated_qbe := output_source(emit_qbe(deduplicated_state))
+		expect(occurrence_count(deduplicated_qbe, " = align 8 { z 281 }")).to_equal(1)
+		expect(occurrence_count(deduplicated_qbe, "call $trbn_static_string_decode")).to_equal(1)
+	end
+end

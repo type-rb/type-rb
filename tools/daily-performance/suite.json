@@ -1,0 +1,168 @@
+{
+  "version": 2,
+  "baseline": "8980b5978f0e8519964d200b7f7799b741796478",
+  "warmups": 1,
+  "samples": 5,
+  "timeoutSeconds": 30,
+  "cases": [
+    {
+      "id": "fannkuch-redux",
+      "area": "Integer and Array updates",
+      "source": "benchmarks/benchmarksgame/fannkuch-redux/src/main.trb",
+      "args": [
+        "10"
+      ],
+      "expectedFile": "benchmarks/benchmarksgame/fannkuch-redux/expected/10.txt",
+      "pureGoSource": "benchmarks/benchmarksgame/pure-go/fannkuch-redux/main.go"
+    },
+    {
+      "id": "n-body",
+      "area": "Floating point",
+      "source": "benchmarks/benchmarksgame/n-body/src/main.trb",
+      "args": [
+        "1000000"
+      ],
+      "expectedFile": "benchmarks/benchmarksgame/n-body/expected/1000000.txt",
+      "pureGoSource": "benchmarks/benchmarksgame/pure-go/n-body/main.go"
+    },
+    {
+      "id": "spectral-norm",
+      "area": "Numeric loops",
+      "source": "benchmarks/benchmarksgame/spectral-norm/src/main.trb",
+      "args": [
+        "5500"
+      ],
+      "expectedFile": "benchmarks/benchmarksgame/spectral-norm/expected/5500.txt",
+      "pureGoSource": "benchmarks/benchmarksgame/pure-go/spectral-norm/main.go"
+    },
+    {
+      "id": "array-streaming",
+      "area": "Array traversal",
+      "source": "tools/native-mir-array-loop-recovery/workload.trb",
+      "args": [],
+      "expected": "450000000\n"
+    },
+    {
+      "id": "allocation",
+      "area": "Allocation and GC",
+      "source": "tools/runtime-memory-soak/workload.trb",
+      "replace": [
+        "run_memory_soak(60, 5000000)",
+        "run_memory_soak(1, 5000000)"
+      ],
+      "args": [],
+      "expected": "native-memory-soak-phase\nnative-memory-soak-ok\n",
+      "gcProbe": true
+    },
+    {
+      "id": "worker",
+      "area": "Strings and stateful batches",
+      "source": "tools/runtime-worker-soak/workload.trb",
+      "replace": [
+        "run_worker_lifecycle(60, 120000, 128)",
+        "run_worker_lifecycle(1, 40000, 128)"
+      ],
+      "args": [],
+      "expected": "native-worker-phase\nnative-worker-ok\n",
+      "gcProbe": true
+    },
+    {
+      "id": "startup",
+      "area": "CLI startup",
+      "source": "tools/daily-performance/startup.trb",
+      "args": [],
+      "expected": "ready\n"
+    },
+    {
+      "id": "string-building",
+      "area": "Strings and UTF-8",
+      "family": "strings",
+      "source": "benchmarks/features/string-building/src/main.trb",
+      "args": [],
+      "expectedFile": "benchmarks/features/string-building/expected.txt",
+      "pureGoSource": "benchmarks/features/pure-go/string-building/main.go",
+      "frozenBaseline": false
+    },
+    {
+      "id": "string-scanning",
+      "area": "Strings and UTF-8",
+      "family": "strings",
+      "source": "benchmarks/features/string-scanning/src/main.trb",
+      "args": [],
+      "expectedFile": "benchmarks/features/string-scanning/expected.txt",
+      "pureGoSource": "benchmarks/features/pure-go/string-scanning/main.go",
+      "frozenBaseline": false
+    },
+    {
+      "id": "hash-integer-keys",
+      "area": "Hash values and operations",
+      "family": "hashes",
+      "source": "benchmarks/features/hash-integer-keys/src/main.trb",
+      "args": [],
+      "expectedFile": "benchmarks/features/hash-integer-keys/expected.txt",
+      "pureGoSource": "benchmarks/features/pure-go/hash-integer-keys/main.go",
+      "frozenBaseline": false
+    },
+    {
+      "id": "hash-string-keys",
+      "area": "Hash values and operations",
+      "family": "hashes",
+      "source": "benchmarks/features/hash-string-keys/src/main.trb",
+      "args": [],
+      "expectedFile": "benchmarks/features/hash-string-keys/expected.txt",
+      "pureGoSource": "benchmarks/features/pure-go/hash-string-keys/main.go",
+      "frozenBaseline": false
+    },
+    {
+      "id": "array-sorting",
+      "area": "Arrays and checked indexes",
+      "family": "arrays",
+      "source": "benchmarks/features/array-sorting/src/main.trb",
+      "args": [],
+      "expectedFile": "benchmarks/features/array-sorting/expected.txt",
+      "pureGoSource": "benchmarks/features/pure-go/array-sorting/main.go",
+      "frozenBaseline": false
+    },
+    {
+      "id": "object-dispatch",
+      "area": "Classes, fields and methods",
+      "family": "classes",
+      "source": "benchmarks/features/object-dispatch/src/main.trb",
+      "args": [],
+      "expectedFile": "benchmarks/features/object-dispatch/expected.txt",
+      "pureGoSource": "benchmarks/features/pure-go/object-dispatch/main.go",
+      "frozenBaseline": false
+    },
+    {
+      "id": "closures",
+      "area": "Function values and lexical capture",
+      "family": "callables",
+      "source": "benchmarks/features/closures/src/main.trb",
+      "args": [],
+      "expectedFile": "benchmarks/features/closures/expected.txt",
+      "pureGoSource": "benchmarks/features/pure-go/closures/main.go",
+      "frozenBaseline": false
+    },
+    {
+      "id": "recursion",
+      "area": "Function declarations and calls",
+      "family": "functions",
+      "source": "benchmarks/features/recursion/src/main.trb",
+      "args": [],
+      "expectedFile": "benchmarks/features/recursion/expected.txt",
+      "pureGoSource": "benchmarks/features/pure-go/recursion/main.go",
+      "frozenBaseline": false
+    },
+    {
+      "id": "enum-result",
+      "area": "Result and typed propagation",
+      "family": "results",
+      "source": "benchmarks/features/enum-result/src/main.trb",
+      "args": [],
+      "expectedFile": "benchmarks/features/enum-result/expected.txt",
+      "pureGoSource": "benchmarks/features/pure-go/enum-result/main.go",
+      "frozenBaseline": false
+    }
+  ],
+  "pureGoRevision": "40296663ed350d5fe4a6ab5e367bab61cb77c219"
+}

@@ -1,0 +1,18 @@
+class Reading
+	@enabled: Boolean
+	@amount: Float
+	def initialize(enabled: Boolean, amount: Float)
+		@enabled = enabled
+		@amount = amount
+	end
+	def update(amount: Float)
+		@amount += amount
+		@enabled = !@enabled
+	end
+end
+def main()
+	mut reading := Reading.new(false, 1.5)
+	reading.update(2.0)
+	puts(reading.amount)
+	puts(reading.enabled)
+end

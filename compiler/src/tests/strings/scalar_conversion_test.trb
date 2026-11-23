@@ -1,0 +1,221 @@
+import { managed_mir_test_fixture } from testing/mir/managed
+import { check, emit_qbe } from compiler
+import { compiler_test_instruction_with_cell } from testing/compiler
+import { control_test_output } from testing/mir/control
+import { logical_checked_source } from testing/pipeline
+import { logical_run_qbe } from testing/qbe_runner
+import { mir_instruction_effects } from mir/analysis/call_effects
+import { verify_mir } from mir/verify/module
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+describe("Scalar String conversion MIR") do
+	test("concatenates empty and nonempty Strings through the runtime") do
+		mut state := logical_checked_source("def main()\nempty := \"\"\nputs(join(\"hello\", empty))\nputs(join(empty, \"world\"))\nputs(join(empty, empty).size())\nputs(join(\"a\", \"b\"))\nend\ndef join(left: String, right: String): String\nreturn left + right\nend\n")
+		expect(check(state)).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+			when Result::Ok(actual)
+				expect(actual).to_equal("hello\nworld\n0\nab\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("prints Any scalars through a verified dynamic output operation") do
+		mut state := logical_checked_source("def main()\nvalues: Array<Any> := [1, \"word\", true, nil, 1.5, 2.0]\nputs(values[0])\nputs(values[1])\nputs(values[2])\nputs(values[3])\nputs(values[4])\nputs(values[5])\nend\n")
+		expect(check(state)).to_be_true()
+		mut dynamic := 0
+		state.scalar_mir.instructions.each.with_index do |instruction, index|
+			if instruction.kind == 18 && instruction.payload == 1
+				expect(mir_instruction_effects(state.scalar_mir, instruction)).to_equal(13)
+				state.scalar_mir.instructions[index] = compiler_test_instruction_with_cell(instruction, 4, 2)
+				expect(verify_mir(state.scalar_mir, true).empty?()).to_be_false()
+				state.scalar_mir.instructions[index] = instruction
+				dynamic += 1
+			end
+		end
+		expect(dynamic).to_equal(6)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			generated := control_test_output(emit_qbe(state))
+			expect(generated.include?("export function w $main")).to_be_true()
+			case logical_run_qbe(qbe, generated)
+			when Result::Ok(actual)
+				expect(actual).to_equal("1\nword\ntrue\n<nil>\n1.5\n2\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("prints Any Arrays and Hashes from verified type identities") do
+		mut state := logical_checked_source("def main()\nvalues: Array<Any> := [[1, 2], {\"key\" => 3}, [\"a\", \"b\"]]\nputs(values[0])\nputs(values[1])\nputs(values[2])\nend\n")
+		expect(check(state)).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+			when Result::Ok(actual)
+				expect(actual).to_equal("&[1 2]\nmap[key:3]\n&[a b]\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("prints empty Any collections") do
+		mut state := logical_checked_source("def main()\nempty_array: Array<Integer> := []\nempty_hash: Hash<String, Integer> := {}\nvalues: Array<Any> := [empty_array, empty_hash, [\"text\"]]\nputs(values[0])\nputs(values[1])\nputs(values[2])\nend\n")
+		expect(check(state)).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			generated := control_test_output(emit_qbe(state))
+			expect(generated.include?("export function w $main")).to_be_true()
+			case logical_run_qbe(qbe, generated)
+			when Result::Ok(actual)
+				expect(actual).to_equal("&[]\nmap[]\n&[text]\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("prints Any Hash keys in reference order") do
+		mut state := logical_checked_source("def main()\nvalues: Array<Any> := [{\"z\" => 1, \"a\" => 2, \"m\" => 3}, {3 => \"c\", 1 => \"a\", 2 => \"b\"}]\nputs(values[0])\nputs(values[1])\nend\n")
+		expect(check(state)).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+			when Result::Ok(actual)
+				expect(actual).to_equal("map[a:2 m:3 z:1]\nmap[1:a 2:b 3:c]\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("skips deleted Hash slots and sorts signed Integer keys") do
+		mut state := logical_checked_source("def main()\nmut table: Hash<Integer, String> := {3 => \"three\", -1 => \"minus\", 0 => \"zero\"}\ntable.delete(3)\nvalues: Array<Any> := [table]\nputs(values[0])\nend\n")
+		expect(check(state)).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+			when Result::Ok(actual)
+				expect(actual).to_equal("map[-1:minus 0:zero]\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("prints Any collections with Float and nullable elements") do
+		mut state := logical_checked_source("def main()\nvalues: Array<Any> := [[1.5, 2.0], {\"b\" => 1.5, \"a\" => 2.25}, [1, \"x\", nil]]\nputs(values[0])\nputs(values[1])\nputs(values[2])\nend\n")
+		expect(check(state)).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+			when Result::Ok(actual)
+				expect(actual).to_equal("&[1.5 2]\nmap[a:2.25 b:1.5]\n&[1 x <nil>]\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("retains Any collection payloads across forced output collection") do
+		mut state := logical_checked_source("def main()\nvalues: Array<Any> := [[1.5, 2.0], 2.0]\nputs(values[0])\nputs(values[1])\nend\n")
+		expect(check(state)).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			before := control_test_output(emit_qbe(state))
+			forced := before.replace_all(" %string =l call $trbn_float_to_string(d %number)", " call $trbn_gc_collect(w 0)\n %string =l call $trbn_float_to_string(d %number)")
+			expect(forced == before).to_be_false()
+			case logical_run_qbe(qbe, forced)
+			when Result::Ok(actual)
+				expect(actual).to_equal("&[1.5 2]\n2\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("uses general Float presentation for dynamically boxed values") do
+		mut state := logical_checked_source("def main()\nvalues: Array<Any> := [0.0, -0.0, 999999.0, 1000000.0, 0.0001, 0.00001, 1234560.0]\nmut i := 0\nwhile i < values.size()\nputs(values[i])\ni += 1\nend\nend\n")
+		expect(check(state)).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+			when Result::Ok(actual)
+				expect(actual).to_equal("0\n-0\n999999\n1e+06\n0.0001\n1e-05\n1.23456e+06\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("prints boxed nonfinite Float values") do
+		mut state := logical_checked_source("def main()\nzero := 0.0\nvalues: Array<Any> := [1.0 / zero, -1.0 / zero, zero / zero]\nputs(values[0])\nputs(values[1])\nputs(values[2])\nend\n")
+		expect(check(state)).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+			when Result::Ok(actual)
+				expect(actual).to_equal("+Inf\n-Inf\nNaN\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("formats special values and asymmetric rounding boundaries after erasing source") do
+		managed_mir_test_fixture("scalar-string-values", 1)
+	end
+
+	test("retains results and caller roots through callbacks optional calls and collection") do
+		managed_mir_test_fixture("scalar-string-managed", 1)
+	end
+
+	test("verifies exact conversion modes and allocation effects independently") do
+		mut state := logical_checked_source("def main()\nputs(1.25.to_s())\nputs(true.to_s())\nend\n")
+		expect(check(state)).to_be_true()
+		mut found := 0
+		state.scalar_mir.instructions.each.with_index do |instruction, index|
+			if instruction.kind == 17
+				if instruction.payload == 4
+					expect(mir_instruction_effects(state.scalar_mir, instruction)).to_equal(9)
+				else
+					expect(instruction.payload).to_equal(5)
+					expect(mir_instruction_effects(state.scalar_mir, instruction)).to_equal(0)
+				end
+				state.scalar_mir.instructions[index] = compiler_test_instruction_with_cell(instruction, 4, 1)
+				expect(verify_mir(state.scalar_mir, true).empty?()).to_be_false()
+				state.scalar_mir.instructions[index] = instruction
+				found += 1
+			end
+		end
+		expect(found).to_equal(2)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	end
+end

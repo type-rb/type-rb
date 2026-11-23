@@ -1,0 +1,24 @@
+import { check, emit_qbe } from compiler
+import { lex } from frontend/syntax/lexer
+import { mir_function_index } from mir/model/module
+import { verify_mir } from mir/verify/module
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { compiler_new, has_diagnostic } from state/state
+import { describe, expect, test } from trb/std/test
+
+describe("Checked Boolean arrays") do
+	test("lowers Boolean array reads and early-return loops through general MIR") do
+		source := "def read(values: Array<Boolean>, index: Integer): Boolean\nreturn values[index]\nend\ndef every(values: Array<Boolean>): Boolean\nmut index := 0\nwhile index < values.size()\nif !values[index]\nreturn false\nend\nindex += 1\nend\nreturn true\nend\ndef main()\nreturn\nend\n"
+		mut state := compiler_new(source.size() + 1)
+		expect(lex(state, source)).to_be_true()
+		expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_true()
+		expect(state.scalar_mir.functions[mir_function_index(state.scalar_mir, 0)].kind).to_equal(3)
+		expect(state.scalar_mir.functions[mir_function_index(state.scalar_mir, 1)].kind).to_equal(3)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		emit_qbe(state)
+		expect(has_diagnostic(state)).to_be_false()
+	end
+end

@@ -1,0 +1,10 @@
+class Box
+	@value: Integer := 7
+	def identity(): Box
+		return self
+	end
+end
+
+def main()
+	puts(Box.new().identity().value)
+end

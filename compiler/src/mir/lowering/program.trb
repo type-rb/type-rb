@@ -1,0 +1,39 @@
+import { token_kind_string } from state/token_kinds
+import { MirProgram } from mir/model/program
+import { CompilerState, find_module } from state/state
+import { compiler_entry_function, compiler_file_entry_function } from frontend/resolution/entry_resolution
+import { find_function_in_module } from frontend/resolution/declaration_lookup
+import { load_integer, load_string } from support/storage
+
+def mir_lower_program(mut state: CompilerState)
+	entry_source := state.module_graph.entry_module[0]
+	compiler_function := compiler_entry_function(state)
+	mut compiler_file_function := -1
+	mut cli_function := -1
+	mut runtime_function := -1
+	mut runtime_literal := ""
+	mut runtime_error := 0
+	if compiler_function >= 0
+		compiler_file_function = compiler_file_entry_function(state)
+		cli_function = find_function_in_module(state, entry_source, "native_cli_main")
+		if cli_function >= 0
+			runtime_function = find_function_in_module(state, find_module(state, "host"), "native_cli_runtime_qbe")
+			if runtime_function < 0
+				runtime_error = 1
+			else
+				runtime_token := load_integer(state.declarations.function_body_starts, runtime_function) + 1
+				if load_integer(state.source_tokens.token_kinds, runtime_token) != token_kind_string()
+					runtime_error = 2
+				else
+					runtime_literal = load_string(state.source_tokens.token_texts, runtime_token)
+				end
+			end
+		end
+	end
+	program := MirProgram.new(entry_source: entry_source, main_function: find_function_in_module(state, entry_source, "main"), compiler_function: compiler_function, compiler_file_function: compiler_file_function, cli_function: cli_function, runtime_function: runtime_function, runtime_literal: runtime_literal, runtime_error: runtime_error)
+	if state.scalar_mir.program.size() == 0
+		state.scalar_mir.program.push(program)
+	else
+		state.scalar_mir.program[0] = program
+	end
+end

@@ -1,0 +1,18 @@
+interface Source<T>
+	get(): T
+end
+class Box<T> implements Source < T>
+	@value: T
+	def initialize(value: T)
+		@value = value
+	end
+	def get(): T
+		return @value
+	end
+end
+def read(value: Source<String>): String
+	return value.get()
+end
+def main()
+	puts(read(Box<String>.new("held")))
+end

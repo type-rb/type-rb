@@ -1,0 +1,52 @@
+name: Initiative
+description: A measurable outcome delivered through several tasks.
+type: Initiative
+projects: ["type-rb/6"]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        See the [project workflow](https://github.com/type-rb/type-rb-native/blob/main/docs/project-workflow.md).
+        New initiatives start as Proposed and need maintainer approval.
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Outcome
+      description: What is true when this initiative is done, and why it matters now.
+    validations:
+      required: true
+  - type: textarea
+    id: metric
+    attributes:
+      label: Metric and target
+      description: The measured value, the command or workflow that measures it, and the target.
+    validations:
+      required: true
+  - type: textarea
+    id: baseline
+    attributes:
+      label: Baseline
+      description: Current value with the revision, conditions and a link to the evidence.
+    validations:
+      required: true
+  - type: textarea
+    id: tasks
+    attributes:
+      label: Candidate tasks
+      description: The first tasks, in order. Open them with the Task form as sub-issues.
+  - type: textarea
+    id: scope
+    attributes:
+      label: Out of scope
+  - type: input
+    id: parent
+    attributes:
+      label: Parent milestone
+      description: For example #439 or #454, if the initiative belongs to a milestone issue.
+  - type: checkboxes
+    id: public
+    attributes:
+      label: Public repository
+      options:
+        - label: This issue contains only public information and synthetic reproductions.
+          required: true

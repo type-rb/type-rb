@@ -1,0 +1,9 @@
+def probe()
+	text := "A\000B"
+	puts(text.size())
+	text.codepoints().each { |point| puts(point) }
+end
+
+def main()
+	probe()
+end

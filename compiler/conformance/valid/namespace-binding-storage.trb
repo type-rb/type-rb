@@ -1,0 +1,50 @@
+value := 1
+
+module Counter
+
+	def self.before(): Integer
+		return value
+	end
+
+	mut value := 10
+	mut text := "first" + " value"
+
+	def self.bump(): Integer
+		value += 1
+		return value
+	end
+
+	def self.replace(): String
+		old := text
+		text = "last" + " value"
+		return old
+	end
+
+	module Inner
+		mut value := 20
+
+		def self.bump(): Integer
+			value += 1
+			return value
+		end
+	end
+end
+
+module Counter
+
+	def self.shadow(): String
+		saved := fn(): String
+			return text
+		end
+		text := "local"
+		return saved() + " / " + text
+	end
+end
+
+def main()
+	puts(Counter.before())
+	puts(Counter.bump())
+	puts(Counter::Inner.bump())
+	puts(Counter.replace())
+	puts(Counter.shadow())
+end

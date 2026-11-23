@@ -1,0 +1,69 @@
+import trb/std/result
+import { NumberParseError, NumberParseErrorKind } from trb/std/errors
+import { builtin_result_variant } from frontend/checking/builtins/results
+import { find_enum_type, find_enum_variant } from frontend/types/enum_types
+import { repl_builtin_error } from repl/builtin_lookup
+import { ReplStore, repl_float, repl_integer, repl_string, repl_value } from repl/model
+import { find_record_type } from frontend/resolution/type_resolution
+import { CompilerState } from state/state
+import { load_integer, load_string } from support/storage
+
+# The CLI is built by the current core, so it can use the same portable parsing
+# implementation as authored programs instead of maintaining another parser.
+def repl_string_integer(mut store: ReplStore, text: String): Integer
+	case text.try_to_i()
+	when Result::Ok(value)
+		return value
+	when Result::Err(error)
+		store.error[0] = "panic: " + error.message
+		return 0
+	end
+end
+
+def repl_string_float(mut store: ReplStore, text: String): Float
+	case text.try_to_f()
+	when Result::Ok(value)
+		return value
+	when Result::Err(error)
+		store.error[0] = "panic: " + error.message
+		return 0.0
+	end
+end
+
+def repl_number_parse_error(state: CompilerState, mut store: ReplStore, result_type: String, input: Integer, error: NumberParseError): Integer
+	err := builtin_result_variant(state, result_type, false)
+	error_type := state.nominal.enum_fields[state.nominal.enum_variants[err].field_start].type_name
+	record_index := find_record_type(state, error_type)
+	start := load_integer(state.declarations.record_field_starts, record_index)
+	kind_type := load_string(state.declarations.field_types, start)
+	mut name := "OutOfRange"
+	case error.kind
+	when NumberParseErrorKind::InvalidFormat
+		name = "InvalidFormat"
+	when NumberParseErrorKind::OutOfRange
+		name = "OutOfRange"
+	end
+	variant := find_enum_variant(state, find_enum_type(state, kind_type), name)
+	kind := repl_value(store, kind_type, variant, 0.0, name, [])
+	message := repl_string(store, error.message)
+	return repl_builtin_error(state, store, result_type, [kind, input, message])
+end
+
+def repl_builtin_number_parse(state: CompilerState, mut store: ReplStore, receiver: Integer, floating: Boolean, result_type: String): Integer
+	ok := builtin_result_variant(state, result_type, true)
+	text := store.texts[receiver]
+	if floating
+		case text.try_to_f()
+		when Result::Ok(value)
+			return repl_value(store, result_type, ok, 0.0, "Ok", [repl_float(store, value)])
+		when Result::Err(error)
+			return repl_number_parse_error(state, store, result_type, receiver, error)
+		end
+	end
+	case text.try_to_i()
+	when Result::Ok(value)
+		return repl_value(store, result_type, ok, 0.0, "Ok", [repl_integer(store, value)])
+	when Result::Err(error)
+		return repl_number_parse_error(state, store, result_type, receiver, error)
+	end
+end

@@ -1,0 +1,51 @@
+import { binary_subtract } from frontend/types/operators
+import { mir_op_scalar_binary } from mir/model/instructions
+import { mir_type_integer } from mir/model/type_ids
+import { MirFunction, MirModule } from mir/model/module
+import { MirFlow, mir_flow_aliases, mir_flow_block_index, mir_flow_dominates, mir_flow_type } from mir/analysis/flow
+import { MirNonnegative } from mir/analysis/ranges
+import { mir_array_loop, mir_array_loop_candidate } from mir/analysis/array_loops
+import { mir_loop_bounded_index } from mir/analysis/array_bounds
+import { mir_live_add } from mir/analysis/liveness
+
+# For i < (last + 1) / 2 with i nonnegative and last invariant,
+# 0 <= last - i <= last <= portable maximum. This arithmetic proof also holds
+# in a checked fallback: Array length is needed only to elide memory checks.
+# Rebuild loop/identity facts from SSA rather than trusting retained loop plans.
+def mir_loop_reflected_arithmetic(native_module: MirModule, function: MirFunction, flow: MirFlow, nonnegative: MirNonnegative): Array<Integer>
+	mut proven: Array<Integer> := []
+	mut header_index := 0
+	while header_index < function.block_count
+		header := native_module.blocks[function.block_start + header_index]
+		if mir_array_loop_candidate(native_module, header)
+			plan := mir_array_loop(native_module, function, flow, nonnegative, header_index)
+			if plan.header >= 0
+				body := mir_flow_block_index(flow, header.first_target)
+				if flow.predecessors[body].size() == 1 && flow.predecessors[body][0] == header_index
+					preheader := native_module.blocks[function.block_start + mir_flow_block_index(flow, plan.preheader)]
+					aliases := mir_flow_aliases(native_module, function, flow, header)
+					origins := mir_flow_aliases(native_module, function, flow, native_module.blocks[function.block_start + flow.entry])
+					mut index := 0
+					while index < function.block_count
+						if mir_flow_dominates(flow, body, index)
+							block := native_module.blocks[function.block_start + index]
+							mut position := block.instruction_start
+							while position < block.instruction_start + block.instruction_count
+								instruction := native_module.instructions[position]
+								if instruction.kind == mir_op_scalar_binary() && instruction.payload == binary_subtract() && instruction.failure >= 0 && mir_flow_type(flow, instruction.result) == mir_type_integer()
+									if mir_loop_bounded_index(native_module, flow, aliases, origins, header, preheader, instruction.result)
+										mir_live_add(proven, position)
+									end
+								end
+								position += 1
+							end
+						end
+						index += 1
+					end
+				end
+			end
+		end
+		header_index += 1
+	end
+	return proven
+end

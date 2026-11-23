@@ -1,0 +1,24 @@
+def main()
+	empty: Array<String> := []
+	puts(empty.join("ignored") == "")
+	puts(["one"].join("ignored"))
+	puts(["", "", ""].join("/"))
+	puts(["a", "", "b"].join("-"))
+	puts(["a", "b", "c"].join(""))
+	values := ["first", "second"]
+	puts(values.reverse().join("/"))
+	puts(values.first())
+	mut calls := 0
+	argument := fn(): String
+		calls += 1
+		return "/"
+	end
+	absent: Array<String>? := nil
+	present: Array<String>? := values
+	puts(absent&.join(argument()) == nil)
+	joined := present&.join(argument())
+	if joined != nil
+		puts(joined)
+	end
+	puts(calls)
+end

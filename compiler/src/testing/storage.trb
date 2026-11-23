@@ -1,0 +1,73 @@
+import { checked_body_new } from state/checked_body
+import { callable_forced_collection } from testing/mir/callables
+import { finalize_checked_module } from frontend/checking/program/functions
+import { check_function, emit_qbe } from compiler
+import { control_test_output } from testing/mir/control
+import { find_function_in_module } from frontend/resolution/declaration_lookup
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { logical_checked_source } from testing/pipeline
+import { logical_run_qbe } from testing/qbe_runner
+import { mir_declare_signatures } from mir/lowering/calls
+import { mir_declare_types } from mir/model/types
+import { verify_mir } from mir/verify/module
+import { CompilerState, select_checked_body } from state/state
+import { load_string } from support/storage
+import { expect } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+def captured_storage_run(mut state: CompilerState, expected: String)
+	finished := finalize_checked_module(state)
+	if !finished
+		puts(load_string(state.diagnostics.messages, 0))
+	end
+	expect(finished).to_be_true()
+	if !finished
+		return
+	end
+	captured_storage_execute(state, expected)
+end
+
+def captured_storage_execute(mut state: CompilerState, expected: String)
+	before := control_test_output(emit_qbe(state))
+	intrinsic_mir_erase(state)
+	mut body := 0
+	while body < state.callables.checked_bodies.size()
+		state.callables.checked_bodies[body] = checked_body_new(-1, 0, 0)
+		body += 1
+	end
+	state.callables.checked[0] = checked_body_new(-1, 0, 0)
+	expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	expect(control_test_output(emit_qbe(state))).to_equal(before)
+	qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+	if qbe != nil
+		case logical_run_qbe(qbe, callable_forced_collection(before))
+		when Result::Ok(actual)
+			expect(actual).to_equal(expected)
+		when Result::Err(error)
+			puts(error)
+			expect(false).to_be_true()
+		end
+	end
+end
+
+def captured_storage_source(source: String, name: String, identities: Array<Integer>): CompilerState
+	mut state := logical_checked_source(source)
+	function := find_function_in_module(state, state.module_graph.entry_module[0], name)
+	select_checked_body(state, function)
+	identities.each do |identity|
+		state.callables.checked[0].shared_bindings.push(identity)
+	end
+	mir_declare_types(state)
+	mir_declare_signatures(state)
+	mut index := 0
+	while index < state.declarations.function_count[0]
+		valid := check_function(state, index)
+		if !valid
+			puts(load_string(state.diagnostics.messages, 0))
+		end
+		expect(valid).to_be_true()
+		index += 1
+	end
+	return state
+end

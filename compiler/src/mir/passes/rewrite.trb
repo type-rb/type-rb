@@ -1,0 +1,300 @@
+import { mir_op_file_scope } from mir/model/instructions
+import { MirFileScope } from mir/model/module
+import { mir_function_control, mir_terminator_trap } from mir/model/control
+import { mir_op_array_position, mir_op_array_store, mir_op_callable_new, mir_op_direct_call, mir_op_enum_new, mir_op_hash_new, mir_op_hash_set, mir_op_indirect_call, mir_op_record_new, mir_op_scalar_binary, mir_op_scalar_literal, mir_op_singleton_literal, mir_op_string_compare, mir_op_string_concat, mir_op_string_index, mir_op_string_literal, mir_op_string_replace } from mir/model/instructions
+import { integer_string } from support/literals
+import { MirBlock, MirCall, MirFunction, MirInstruction, MirModule } from mir/model/module
+import { mir_block } from mir/build/blocks
+import { mir_live_add, mir_live_before, mir_managed_contains } from mir/analysis/liveness
+
+# Values leaving a rewritten region must travel through its exit arguments.
+# Direct references from outside would need additional SSA merge parameters.
+def mir_rewrite_confined_values(native_module: MirModule, function: MirFunction, members: Array<Integer>): Array<Integer>
+	mut values: Array<Integer> := []
+	members.each do |member|
+		block := native_module.blocks[function.block_start + member]
+		mut index := block.parameter_start
+		while index < block.parameter_start + block.parameter_count
+			mir_live_add(values, native_module.arguments[index])
+			index += 1
+		end
+		index = block.instruction_start
+		while index < block.instruction_start + block.instruction_count
+			value := native_module.instructions[index].result
+			if value >= 0
+				mir_live_add(values, value)
+			end
+			index += 1
+		end
+	end
+	mut member := 0
+	while member < function.block_count
+		if !mir_managed_contains(members, member)
+			block := native_module.blocks[function.block_start + member]
+			if mir_managed_contains(values, block.condition) || mir_managed_contains(values, block.return_value)
+				return []
+			end
+			mut index := block.instruction_start
+			while index < block.instruction_start + block.instruction_count
+				if mir_live_before(native_module, values, native_module.instructions[index], []).size() > 0
+					return []
+				end
+				index += 1
+			end
+			index = block.first_argument_start
+			while index < block.first_argument_start + block.first_argument_count
+				if mir_managed_contains(values, native_module.arguments[index])
+					return []
+				end
+				index += 1
+			end
+			index = block.second_argument_start
+			while index < block.second_argument_start + block.second_argument_count
+				if mir_managed_contains(values, native_module.arguments[index])
+					return []
+				end
+				index += 1
+			end
+		end
+		member += 1
+	end
+	return values
+end
+
+def mir_rewrite_value(mapping: Hash<String, Integer>, value: Integer): Integer
+	if value >= 0 && mapping.key?(integer_string(value))
+		return mapping[integer_string(value)]
+	end
+	return value
+end
+
+def mir_rewrite_arguments(mut native_module: MirModule, start: Integer, count: Integer, mapping: Hash<String, Integer>): Integer
+	result := native_module.arguments.size()
+	mut index := 0
+	while index < count
+		native_module.arguments.push(mir_rewrite_value(mapping, native_module.arguments[start + index]))
+		index += 1
+	end
+	return result
+end
+
+# Operand roles are semantic MIR roles, including argument-table slices. Literal
+# facts, field IDs, declaration IDs and operation selectors are never SSA names.
+def mir_rewrite_instruction(mut native_module: MirModule, instruction: MirInstruction, values: Hash<String, Integer>, blocks: Hash<String, Integer>): MirInstruction
+	kind := instruction.kind
+	mut first := instruction.first
+	mut second := instruction.second
+	mut payload := instruction.payload
+	if kind == mir_op_file_scope()
+		scope := native_module.file_scopes[payload]
+		start := mir_rewrite_arguments(native_module, scope.argument_start, scope.argument_count, values)
+		payload = native_module.file_scopes.size()
+		native_module.file_scopes.push(MirFileScope.new(body: scope.body, error: scope.error, error_variant: scope.error_variant, argument_start: start, argument_count: scope.argument_count))
+		first = mir_rewrite_value(values, first)
+		second = mir_rewrite_value(values, second)
+	elsif kind == mir_op_direct_call()
+		call := native_module.calls[payload]
+		start := mir_rewrite_arguments(native_module, call.argument_start, call.argument_count, values)
+		payload = native_module.calls.size()
+		native_module.calls.push(MirCall.new(callee: call.callee, argument_start: start, argument_count: call.argument_count, effects: call.effects))
+	elsif kind == mir_op_record_new() || kind == mir_op_enum_new() || kind == mir_op_callable_new()
+		first = mir_rewrite_arguments(native_module, first, second, values)
+	elsif kind == mir_op_indirect_call()
+		first = mir_rewrite_value(values, first)
+		payload = mir_rewrite_arguments(native_module, payload, second, values)
+	elsif kind != mir_op_scalar_literal() && kind != mir_op_string_literal() && kind != mir_op_singleton_literal() && kind != mir_op_hash_new()
+		first = mir_rewrite_value(values, first)
+		if kind == mir_op_scalar_binary() || kind == mir_op_string_concat() || kind == mir_op_string_compare() || kind == mir_op_string_index() || kind >= mir_op_array_position()
+			second = mir_rewrite_value(values, second)
+		end
+	end
+	if kind == mir_op_array_store() || kind == mir_op_hash_set() || kind == mir_op_string_replace()
+		payload = mir_rewrite_value(values, payload)
+	end
+	return MirInstruction.new(kind: kind, result: mir_rewrite_value(values, instruction.result), first: first, second: second, payload: payload, failure: mir_rewrite_value(blocks, instruction.failure), source_id: instruction.source_id, line: instruction.line)
+end
+
+def mir_rewrite_block(mut native_module: MirModule, block: MirBlock, values: Hash<String, Integer>, blocks: Hash<String, Integer>, instruction_start: Integer, instruction_count: Integer): MirBlock
+	if block.terminator == mir_terminator_trap()
+		return mir_block(mir_rewrite_value(blocks, block.id), block.source_id, block.line, 0, 0, instruction_start, instruction_count, mir_terminator_trap(), -1, -1, -1, 0, 0, 0, 0, -1)
+	end
+	parameters := mir_rewrite_arguments(native_module, block.parameter_start, block.parameter_count, values)
+	first := mir_rewrite_arguments(native_module, block.first_argument_start, block.first_argument_count, values)
+	second := mir_rewrite_arguments(native_module, block.second_argument_start, block.second_argument_count, values)
+	return mir_block(mir_rewrite_value(blocks, block.id), block.source_id, block.line, parameters, block.parameter_count, instruction_start, instruction_count, block.terminator, mir_rewrite_value(values, block.condition), mir_rewrite_value(blocks, block.first_target), mir_rewrite_value(blocks, block.second_target), first, block.first_argument_count, second, block.second_argument_count, mir_rewrite_value(values, block.return_value))
+end
+
+def mir_rewrite_function(function: MirFunction, start: Integer, count: Integer): MirFunction
+	return MirFunction.new(kind: mir_function_control(), result_type: function.result_type, integer_guard: 0, id: function.id, entry_block: function.entry_block, source_id: function.source_id, line: function.line, parameter_start: function.parameter_start, parameter_count: function.parameter_count, block_start: start, block_count: count)
+end
+
+def mir_rewrite_next_value(native_module: MirModule, function: MirFunction): Integer
+	mut next_id := 0
+	native_module.values.each do |value|
+		if value.function_id == function.id && value.id >= next_id
+			next_id = value.id + 1
+		end
+	end
+	return next_id
+end
+
+def mir_rewrite_next_block(native_module: MirModule, function: MirFunction): Integer
+	mut next_id := 0
+	mut index := function.block_start
+	while index < function.block_start + function.block_count
+		if native_module.blocks[index].id >= next_id
+			next_id = native_module.blocks[index].id + 1
+		end
+		index += 1
+	end
+	return next_id
+end
+
+# The recovery subset supports append and indexed replacement. Stage a rewrite
+# in independent tables and publish only a complete accepted transaction; a
+# rejected candidate never needs destructive truncation of the input module.
+def mir_rewrite_fork(native_module: MirModule): MirModule
+	mut result := MirModule.new(enum_scalars: native_module.enum_scalars, source_names: native_module.source_names,
+		program: native_module.program,
+		object_methods: native_module.object_methods,
+		object_witnesses: native_module.object_witnesses,
+		objects: native_module.objects,
+		newtypes: native_module.newtypes,
+		unions: native_module.unions,
+		globals: native_module.globals,
+		global_initialization: native_module.global_initialization,
+		callables: native_module.callables,
+		call_return_guards: native_module.call_return_guards,
+		callable_plans: native_module.callable_plans,
+		enums: native_module.enums,
+		enum_variants: native_module.enum_variants,
+		enum_fields: native_module.enum_fields,
+		numeric_plans: native_module.numeric_plans,
+		hash_lookup_reuse: native_module.hash_lookup_reuse,
+		hash_membership_reuse: native_module.hash_membership_reuse,
+		hash_concat_probes: native_module.hash_concat_probes,
+		types: native_module.types,
+		records: native_module.records,
+		fields: native_module.fields,
+		root_plans: native_module.root_plans,
+		enum_stack_functions: native_module.enum_stack_functions,
+		array_loops: native_module.array_loops,
+		loop_calls: native_module.loop_calls,
+		string_concats: native_module.string_concats,
+		array_check_reuse: native_module.array_check_reuse,
+		array_read_guards: native_module.array_read_guards,
+		array_joins: native_module.array_joins,
+		string_splits: native_module.string_splits,
+		signatures: native_module.signatures,
+		source_count: native_module.source_count,
+		entry_function: native_module.entry_function,
+		literal_data: native_module.literal_data,
+		functions: [],
+		blocks: [],
+		values: [],
+		instructions: [],
+		arguments: [],
+		calls: [], file_scopes: [],
+		literal_texts: [],
+	)
+	native_module.functions.each do |row|
+		result.functions.push(row)
+	end
+	native_module.blocks.each do |row|
+		result.blocks.push(row)
+	end
+	native_module.values.each do |row|
+		result.values.push(row)
+	end
+	native_module.instructions.each do |row|
+		result.instructions.push(row)
+	end
+	native_module.arguments.each do |row|
+		result.arguments.push(row)
+	end
+	native_module.file_scopes.each do |row|
+		result.file_scopes.push(row)
+	end
+	native_module.calls.each do |row|
+		result.calls.push(row)
+	end
+	native_module.literal_texts.each do |row|
+		result.literal_texts.push(row)
+	end
+	return result
+end
+
+def mir_rewrite_commit(mut native_module: MirModule, rewritten: MirModule)
+	mut scopes_index := 0
+	while scopes_index < rewritten.file_scopes.size()
+		if scopes_index < native_module.file_scopes.size()
+			native_module.file_scopes[scopes_index] = rewritten.file_scopes[scopes_index]
+		else
+			native_module.file_scopes.push(rewritten.file_scopes[scopes_index])
+		end
+		scopes_index += 1
+	end
+	mut functions_index := 0
+	while functions_index < rewritten.functions.size()
+		if functions_index < native_module.functions.size()
+			native_module.functions[functions_index] = rewritten.functions[functions_index]
+		else
+			native_module.functions.push(rewritten.functions[functions_index])
+		end
+		functions_index += 1
+	end
+	mut blocks_index := 0
+	while blocks_index < rewritten.blocks.size()
+		if blocks_index < native_module.blocks.size()
+			native_module.blocks[blocks_index] = rewritten.blocks[blocks_index]
+		else
+			native_module.blocks.push(rewritten.blocks[blocks_index])
+		end
+		blocks_index += 1
+	end
+	mut values_index := 0
+	while values_index < rewritten.values.size()
+		if values_index < native_module.values.size()
+			native_module.values[values_index] = rewritten.values[values_index]
+		else
+			native_module.values.push(rewritten.values[values_index])
+		end
+		values_index += 1
+	end
+	mut instructions_index := 0
+	while instructions_index < rewritten.instructions.size()
+		if instructions_index < native_module.instructions.size()
+			native_module.instructions[instructions_index] = rewritten.instructions[instructions_index]
+		else
+			native_module.instructions.push(rewritten.instructions[instructions_index])
+		end
+		instructions_index += 1
+	end
+	mut arguments_index := 0
+	while arguments_index < rewritten.arguments.size()
+		if arguments_index < native_module.arguments.size()
+			native_module.arguments[arguments_index] = rewritten.arguments[arguments_index]
+		else
+			native_module.arguments.push(rewritten.arguments[arguments_index])
+		end
+		arguments_index += 1
+	end
+	mut calls_index := 0
+	while calls_index < rewritten.calls.size()
+		if calls_index < native_module.calls.size()
+			native_module.calls[calls_index] = rewritten.calls[calls_index]
+		else
+			native_module.calls.push(rewritten.calls[calls_index])
+		end
+		calls_index += 1
+	end
+	mut literal_texts_index := 0
+	while literal_texts_index < rewritten.literal_texts.size()
+		if literal_texts_index < native_module.literal_texts.size()
+			native_module.literal_texts[literal_texts_index] = rewritten.literal_texts[literal_texts_index]
+		else
+			native_module.literal_texts.push(rewritten.literal_texts[literal_texts_index])
+		end
+		literal_texts_index += 1
+	end
+end

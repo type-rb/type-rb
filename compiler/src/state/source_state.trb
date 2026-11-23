@@ -1,0 +1,202 @@
+import { DeclarationAttribute } from frontend/types/attribute_model
+import { CatchSyntax } from frontend/types/result_model
+import { TransformSyntax } from frontend/types/transform_model
+import frontend/syntax/iteration_syntax
+import { IntegerStorage, StringStorage, integer_storage, integer_storage_copy, sparse_integer_at, store_integer, string_storage, string_storage_copy } from support/storage
+
+# Parsed test declarations are shared with the project runner. Executable
+# cases become ordinary typed functions; backends do not inspect this metadata.
+record TestDeclaration
+	source_id: Integer
+	origin: Integer
+	closing_token: Integer
+	parent: Integer
+	name: String
+	full_name: String
+	function_id: Integer
+end
+
+# Parsed declaration-scope expression. Function identities are assigned only
+# after all authored declarations and their types have been resolved.
+record DefaultInitializer
+	kind: Integer
+	owner: Integer
+	slot: Integer
+	start: Integer
+	finish: Integer
+end
+
+# Authored flow-only type spellings are rejected after the REPL has identified
+# its compiler-generated binding projections. Ordinary files have no such span.
+record InternalTypeAnnotation
+	source_id: Integer
+	origin: Integer
+end
+
+# Type-name tokens are distinguished from value bindings and literal payloads.
+# Generated projections may rebind only these parsed type positions.
+record TypeNameOrigin
+	source_id: Integer
+	origin: Integer
+end
+
+# Parsed branch regions retained for checking and the checked REPL projection.
+# Native execution uses only the resulting typed MIR blocks and edges.
+record ControlBranch
+	condition: Integer
+	condition_finish: Integer
+	body: Integer
+	finish: Integer
+end
+
+record ControlSyntax
+	kind: Integer
+	origin: Integer
+	finish: Integer
+	selector: Integer
+	selector_finish: Integer
+	branches: Array<ControlBranch>
+end
+
+# Optional checked projection for a single interactive input. The ordinary
+# compiler leaves this empty; no backend consumes it.
+record CheckedFlowFact
+	name: String
+	field: String
+	presence: Integer
+end
+
+record CheckedPresentation
+	name: String
+	type_name: String
+end
+
+# A retained nominal type is rebound by declaration ownership, not a display
+# name or an index from a previous checked catalog. Only generated projections
+# consume these descriptors; they do not add imports or authored declarations.
+record ProjectedType
+	name: String
+	module_name: String
+	declaration: String
+	arguments: Array<String>
+end
+
+record CheckedSubmission
+	start: Integer
+	finish: Integer
+	before: Array<CheckedFlowFact>
+	after: Array<CheckedFlowFact>
+	types: StringStorage
+	presentations: StringStorage
+	# Display facts for compiler-generated retained binding witnesses only.
+	retained_presentations: Array<CheckedPresentation>
+	mutable: IntegerStorage
+	resets: Array<Integer>
+	# Retained mutable captures are lexical facts, never observed value proofs.
+	captured: Array<String>
+end
+
+# Parsed statement regions and authored initializer plans remain source facts.
+# A template-checking fork shares syntax indexes but owns mutable default plans.
+record CompilerParsedProgram
+	tests: Array<TestDeclaration>
+	attributes: Array<DeclarationAttribute>
+	catch_syntax: Array<CatchSyntax>
+	catch_origins: IntegerStorage
+	statement_finishes: IntegerStorage
+	loop_finishes: IntegerStorage
+	controls: Array<ControlSyntax>
+	# Positive rows identify parsed controls; typed facts live in CheckedBody.
+	control_origins: IntegerStorage
+	default_initializers: Array<DefaultInitializer>
+	default_functions: Array<Integer>
+	parameter_defaults: IntegerStorage
+	field_defaults: IntegerStorage
+	# Authored field type spellings are retained for reference codec identity checks.
+	field_type_names: StringStorage
+	function_expression_bodies: IntegerStorage
+	record_default_parameters: IntegerStorage
+	transforms: Array<TransformSyntax>
+	transform_origins: IntegerStorage
+	iterations: Array<IterationSyntax>
+	iteration_origins: IntegerStorage
+end
+
+# One token table and its source-origin annotations are shared by semantic
+# template forks. Checked facts and executable MIR belong to other owners.
+record CompilerSourceTokens
+	token_kinds: IntegerStorage
+	token_texts: StringStorage
+	token_lines: IntegerStorage
+	token_columns: IntegerStorage
+	lexer_column: Array<Integer>
+	token_count: Array<Integer>
+	token_fused_literals: IntegerStorage
+	token_namespaces: StringStorage
+	internal_type_annotations: Array<InternalTypeAnnotation>
+	type_names: Array<TypeNameOrigin>
+end
+
+def compiler_source_tokens_new(capacity: Integer): CompilerSourceTokens
+	return CompilerSourceTokens.new(
+		token_kinds: integer_storage(capacity),
+		token_texts: string_storage(capacity),
+		token_lines: integer_storage(capacity),
+		token_columns: integer_storage(capacity),
+		lexer_column: [1],
+		token_count: [0],
+		token_fused_literals: integer_storage(capacity),
+		token_namespaces: string_storage(capacity),
+		internal_type_annotations: [],
+		type_names: [],
+	)
+end
+
+def store_fused_literal(mut tokens: CompilerSourceTokens, index: Integer, value: Integer)
+	# Unwritten flags are zero; reused token positions must still clear old flags.
+	if sparse_integer_at(tokens.token_fused_literals, index) != value
+		store_integer(tokens.token_fused_literals, index, value)
+	end
+end
+
+def compiler_parsed_program_new(capacity: Integer): CompilerParsedProgram
+	return CompilerParsedProgram.new(
+		tests: [],
+		attributes: [],
+		catch_syntax: [], catch_origins: integer_storage(capacity),
+		statement_finishes: integer_storage(capacity), loop_finishes: integer_storage(capacity),
+		controls: [], control_origins: integer_storage(capacity),
+		default_initializers: [], default_functions: [],
+		parameter_defaults: integer_storage(capacity), field_defaults: integer_storage(capacity),
+		field_type_names: string_storage(capacity),
+		function_expression_bodies: integer_storage(capacity), record_default_parameters: integer_storage(capacity),
+		transforms: [], transform_origins: integer_storage(capacity),
+		iterations: [], iteration_origins: integer_storage(capacity),
+	)
+end
+
+def compiler_parsed_program_fork(parsed: CompilerParsedProgram): CompilerParsedProgram
+	mut default_initializers: Array<DefaultInitializer> := []
+	parsed.default_initializers.each do |value|
+		default_initializers.push(value)
+	end
+	mut default_functions: Array<Integer> := []
+	parsed.default_functions.each do |value|
+		default_functions.push(value)
+	end
+	return CompilerParsedProgram.new(
+		tests: parsed.tests,
+		attributes: parsed.attributes,
+		catch_syntax: parsed.catch_syntax, catch_origins: parsed.catch_origins,
+		statement_finishes: parsed.statement_finishes, loop_finishes: parsed.loop_finishes,
+		controls: parsed.controls, control_origins: parsed.control_origins,
+		default_initializers: default_initializers, default_functions: default_functions,
+		parameter_defaults: integer_storage_copy(parsed.parameter_defaults),
+		field_defaults: integer_storage_copy(parsed.field_defaults),
+		field_type_names: string_storage_copy(parsed.field_type_names),
+		function_expression_bodies: integer_storage_copy(parsed.function_expression_bodies),
+		record_default_parameters: integer_storage_copy(parsed.record_default_parameters),
+		transforms: parsed.transforms, transform_origins: parsed.transform_origins,
+		iterations: parsed.iterations, iteration_origins: parsed.iteration_origins,
+	)
+end

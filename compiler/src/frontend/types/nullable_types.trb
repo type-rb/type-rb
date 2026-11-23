@@ -1,0 +1,127 @@
+import { literal_type_base } from frontend/types/literal_types
+import { union_parts } from frontend/types/union_types
+
+# Canonical optional types retain their payload identity independently of layout.
+def nullable_element(name: String): String
+	if name.size() < 2
+		return ""
+	end
+	if name[name.size() - 1] != "?"
+		return ""
+	end
+	mut result := ""
+	mut index := 0
+	while index < name.size() - 1
+		result += name[index]
+		index += 1
+	end
+	return result
+end
+
+def nullable_type(name: String): String
+	if nullable_element(name) != ""
+		return name
+	end
+	if name == "" || name == "Nil" || name == "Void" || name == "Never" || name == "Invalid"
+		return ""
+	end
+	return name + "?"
+end
+
+def nullable_assignable(actual: String, expected: String): Boolean
+	if actual == expected
+		return true
+	end
+	if expected == "Any"
+		if actual == "" || actual == "Invalid" || actual == "Void"
+			return false
+		end
+		return true
+	end
+	actual_element := nullable_element(actual)
+	expected_element := nullable_element(expected)
+	if actual == "Nil" && expected_element != ""
+		return true
+	end
+	if actual_element != "" && expected_element == ""
+		return false
+	end
+	if expected_element != ""
+		if actual_element != ""
+			return nullable_assignable(actual_element, expected_element)
+		end
+		return nullable_assignable(actual, expected_element)
+	end
+	alternatives := union_parts(expected)
+	if alternatives.size() > 0
+		mut sources := union_parts(actual)
+		if sources.size() == 0
+			sources.push(actual)
+		end
+		mut accepted := true
+		sources.each do |source|
+			mut found := false
+			alternatives.each do |target|
+				if nullable_assignable(source, target)
+					found = true
+				end
+			end
+			if !found
+				accepted = false
+			end
+		end
+		return accepted
+	end
+	if actual == "Nil"
+		return false
+	end
+	sources := union_parts(actual)
+	if sources.size() > 0
+		mut accepted := true
+		sources.each do |source|
+			if !nullable_assignable(source, expected)
+				accepted = false
+			end
+		end
+		return accepted
+	end
+	literal := literal_type_base(actual)
+	if literal != ""
+		return nullable_assignable(literal, expected)
+	end
+	if actual == "Integer"
+		return expected == "Float"
+	end
+	return false
+end
+
+def nullable_common(left: String, right: String): String
+	if left == right
+		return left
+	end
+	if left == "Never"
+		return right
+	end
+	if right == "Never"
+		return left
+	end
+	if left == "Nil"
+		if nullable_element(right) != ""
+			return right
+		end
+		return ""
+	end
+	if right == "Nil"
+		if nullable_element(left) != ""
+			return left
+		end
+		return ""
+	end
+	if nullable_assignable(left, right)
+		return right
+	end
+	if nullable_assignable(right, left)
+		return left
+	end
+	return ""
+end

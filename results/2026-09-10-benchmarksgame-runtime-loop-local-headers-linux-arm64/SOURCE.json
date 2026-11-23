@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "sourceRevision": "8980b5978f0e8519964d200b7f7799b741796478",
+  "sourceKind": "Unmodified raw files downloaded from the complete accepted GitHub Actions cohort; sourceRevision identifies the measured compiler source, not a prior Git import of these files.",
+  "workflowRun": 34431896353,
+  "attempt": 1,
+  "artifacts": [
+    {
+      "id": 10137349942,
+      "name": "benchmarksgame-runtime-fannkuch-redux",
+      "size_in_bytes": 393058,
+      "digest": "sha256:e984ba60313c1d6980ddca77031cce6ef316b3501aac36523b613ff1012b75a7"
+    },
+    {
+      "id": 10135254844,
+      "name": "benchmarksgame-runtime-n-body",
+      "size_in_bytes": 388739,
+      "digest": "sha256:a722a0ce5c1b886f1856da98cd34fb76bf1266f69d50fb45482f0b3248c528c3"
+    },
+    {
+      "id": 10135068350,
+      "name": "benchmarksgame-runtime-spectral-norm",
+      "size_in_bytes": 386780,
+      "digest": "sha256:c34fb28a48748596f0cd3408c069036971cc46909c2a44ad18fc5c260156e11c"
+    }
+  ]
+}

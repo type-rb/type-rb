@@ -1,0 +1,36 @@
+import { FileSystemError } from trb/std/errors
+import { File, FileMode } from trb/std/file
+import trb/std/path
+import trb/std/process
+import trb/std/result
+import trb/std/unit
+
+def native_read_text(path: String, max_bytes: Integer = 67108864): Result<String, FileSystemError>
+	return File.open(Path.new(path)) do |file|
+		try file.read_text(max_bytes: max_bytes)
+	end
+end
+
+def native_write_text(path: String, value: String): Result<Unit, FileSystemError>
+	return File.open(Path.new(path), mode: FileMode::Write) do |file|
+		try file.write_text(value)
+	end
+end
+
+def native_create_directory(path: String): Result<Process::Output, Process::Error>
+	case Process.run("/bin/mkdir", ["-p", path])
+	when Result::Ok(process)
+		if process.success
+			return Result<Process::Output, Process::Error>::Ok(process)
+		end
+		return Result<Process::Output, Process::Error>::Err(
+			Process::Error.new(
+				operation: "mkdir",
+				command: "/bin/mkdir",
+				message: process.stderr,
+			),
+		)
+	when Result::Err(error)
+		return Result<Process::Output, Process::Error>::Err(error)
+	end
+end

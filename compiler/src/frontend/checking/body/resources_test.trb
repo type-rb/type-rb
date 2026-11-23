@@ -1,0 +1,86 @@
+import { check } from compiler
+import { lex } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { compiler_new } from state/state
+import { load_string } from support/storage
+import { expect_compiler_phase } from testing/pipeline
+import { describe, expect, test } from trb/std/test
+
+describe("Scoped resource value containment") do
+	test("rejects escaping uses before coercion or container storage") do
+		[
+			"def escape(file: File): Any\nreturn file\nend\n",
+			"def escape(file: File)\nvalue: Any := file\nputs(value)\nend\n",
+			"def escape(file: File)\nmut value := file\nputs(value)\nend\n",
+			"def escape(file: File): Array<Any>\nreturn [file]\nend\n",
+			"def escape(file: File): Hash<String, Any>\nreturn {\"handle\" => file}\nend\n",
+			"record Holder\nvalue: Any\nend\ndef escape(file: File): Holder\nreturn Holder.new(value: file)\nend\n",
+			"enum Holder\nValue(value: Any)\nend\ndef escape(file: File): Holder\nreturn Holder::Value(file)\nend\n",
+			"def accept(_value: Any)\nend\ndef escape(file: File)\naccept(file)\nend\n",
+			"def accept<T>(_value: T)\nend\ndef escape(file: File)\naccept<File>(file)\nend\n",
+			"def escape(file: File)\n_handle: File? := file\nend\n",
+			"def escape()\n_handles: Array<File> := []\nend\n",
+			"def accept(_file: File)\nend\ndef escape()\n_callback := accept\nend\n",
+			"def accept(_file: File)\nend\ndef escape()\n_callback: Any := accept\nend\n",
+			"def escape(value: Any)\n_handle: File := value\nend\n",
+			"record Holder<T>\nvalues: Array<T>\nend\ndef escape()\n_holder := Holder<File>.new(values: [])\nend\n",
+			"enum Holder<T>\nCount(value: Integer)\nend\ndef escape()\n_holder := Holder<File>::Count(1)\nend\n",
+			"record Holder<T>\nvalue: Integer\nend\ndef escape()\n_holder := Holder<File>.new(value: 1)\nend\n",
+			"def kind<T>(): Integer\nreturn 1\nend\ndef escape(): Integer\nreturn kind<File>()\nend\n",
+		].each do |declarations|
+			mut state := compiler_new(1048576)
+			source := "import trb/std/file\n" + declarations + "def main()\nreturn\nend\n"
+			expect_compiler_phase(state, "lex", lex(state, source))
+			expect_compiler_phase(state, "parse", parse_module(state, 0, 0))
+			if resolve(state)
+				expect(check(state)).to_be_false()
+			end
+			expect(load_string(state.diagnostics.messages, 0).include?("scoped resource")).to_be_true()
+		end
+	end
+
+	test("rejects capture even when the callback only forwards or aliases a borrow") do
+		[
+			"def escape(file: File): () -> Integer\nreturn fn(): Integer\naccept(file)\nreturn 1\nend\nend\n",
+			"def escape(file: File): () -> Integer\nreturn fn(): Integer\nhandle := file\naccept(handle)\nreturn 1\nend\nend\n",
+			"def escape()\n_callback := fn(_file: File): Integer\nreturn 1\nend\nend\n",
+		].each do |declarations|
+			mut state := compiler_new(1048576)
+			source := "import trb/std/file\ndef accept(_file: File)\nend\n" + declarations + "def main()\nreturn\nend\n"
+			expect_compiler_phase(state, "lex", lex(state, source))
+			expect_compiler_phase(state, "parse", parse_module(state, 0, 0))
+			if resolve(state)
+				expect(check(state)).to_be_false()
+			end
+			expect(load_string(state.diagnostics.messages, 0).include?("scoped resource")).to_be_true()
+		end
+	end
+
+	test("keeps immutable aliases and exact source borrows usable") do
+		[
+			"def borrow(file: File)\naccept(file)\nend\n",
+			"def borrow(file: File)\nhandle := (file)\naccept(handle)\nend\n",
+			"def named(*, file: File)\naccept(file)\nend\ndef borrow(file: File)\nhandle: File := file\nnamed(file: handle)\nend\n",
+			"def borrow(file: File)\n[1].each do |_value|\naccept(file)\nend\nend\n",
+			"def generic<T>(_file: File, value: T): T\nreturn value\nend\ndef borrow(file: File): Integer\nreturn generic<Integer>(file, 2)\nend\n",
+			"class Reader\ndef accept(file: File)\nhandle := file\naccept(handle)\nend\nend\ndef borrow(file: File)\nReader.new().accept(file)\nend\n",
+		].each do |declarations|
+			mut state := compiler_new(1048576)
+			source := "import trb/std/file\ndef accept(_file: File)\nend\n" + declarations + "def main()\nreturn\nend\n"
+			expect_compiler_phase(state, "lex", lex(state, source))
+			expect_compiler_phase(state, "parse", parse_module(state, 0, 0))
+			expect_compiler_phase(state, "resolve", resolve(state))
+			expect_compiler_phase(state, "check", check(state))
+		end
+	end
+
+	test("leaves authored lookalike values ordinary") do
+		mut state := compiler_new(1048576)
+		source := "class File\nend\ndef ordinary(file: File): Array<File>\nhandle := file\nreturn [handle]\nend\ndef main()\nputs(ordinary(File.new()).size())\nend\n"
+		expect_compiler_phase(state, "lex", lex(state, source))
+		expect_compiler_phase(state, "parse", parse_module(state, 0, 0))
+		expect_compiler_phase(state, "resolve", resolve(state))
+		expect_compiler_phase(state, "check", check(state))
+	end
+end

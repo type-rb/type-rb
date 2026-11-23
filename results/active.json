@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "entries": [
+    {
+      "slot": "published-runtime",
+      "directory": "2026-09-10-benchmarksgame-runtime-loop-local-headers-linux-arm64",
+      "reason": "Observation tables used by the published benchmark explorer.",
+      "retireWhen": "A reviewed replacement runtime result is published and all consumers switch in the same PR."
+    },
+    {
+      "slot": "published-build",
+      "directory": "2026-09-10-benchmarksgame-build-loop-local-headers-linux-arm64",
+      "reason": "Observation tables used by the published benchmark explorer.",
+      "retireWhen": "A reviewed replacement build result is published and all consumers switch in the same PR."
+    },
+    {
+      "slot": "compatibility",
+      "directory": "2026-09-07-string-escape-reference-compatibility",
+      "reason": "Exact compatibility evidence named by compatibility/current.json and the active ordinary record Array cost assessment.",
+      "retireWhen": "The compatibility manifest adopts a validated replacement and the record Array cost decision no longer depends on this cohort."
+    },
+    {
+      "slot": "bootstrap-seed",
+      "directory": "2026-08-30-gate6l-bootstrap-seed-darwin-linux-arm64",
+      "reason": "The compatibility validator reads its immutable release manifest; preserve the complete small seed record.",
+      "retireWhen": "No current tool or supported seed contract depends on this record. Never mutate published seed assets."
+    },
+    {
+      "slot": "target-amd64",
+      "directory": "2026-08-31-gate6n-linux-amd64",
+      "reason": "Target-chain evidence named by compatibility/current.json.",
+      "retireWhen": "A validated replacement target-chain record updates the compatibility manifest."
+    },
+    {
+      "slot": "persistent-memory",
+      "directory": "2026-09-01-persistent-worker-memory-darwin-linux-arm64",
+      "reason": "Evidence for the published persistent-worker lifecycle capability.",
+      "retireWhen": "The capability map adopts replacement memory evidence."
+    },
+    {
+      "slot": "accepted-compiler",
+      "directory": "2026-09-10-loop-local-headers-accepted-darwin-linux-arm64",
+      "reason": "Latest retained accepted compiler-change checkpoint underlying current published benchmarks.",
+      "retireWhen": "A subsequent accepted compiler checkpoint replaces it; intermediate candidates do not qualify."
+    },
+    {
+      "slot": "candidate",
+      "directory": "2026-09-10-native-hash-diagnostic",
+      "reason": "Complete bounded Hash implementation cohorts retained for the active cost and correctness review.",
+      "retireWhen": "The Hash review closes and a subsequent candidate replaces this slot; retain the decision and exact historical evidence link."
+    }
+  ]
+}

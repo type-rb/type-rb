@@ -1,0 +1,286 @@
+import { managed_mir_test_fixture } from testing/mir/managed
+import { emit_qbe } from compiler
+import { array_mir_test_read } from testing/mir/arrays
+import { array_loop_mir_check } from testing/mir/array_loops
+import { control_test_output } from testing/mir/control
+import { mir_numeric_find, mir_numeric_plans_equal } from mir/analysis/numeric
+import { describe, expect, test } from trb/std/test
+import { MirNumericOperation, MirValue } from mir/model/module
+import { mir_test_block_with_cell, mir_test_instruction_with_cell } from testing/mir/model
+import { mir_build_flow, mir_flow_aliases, mir_flow_block_index, mir_flow_blocks } from mir/analysis/flow
+import { mir_parameter_subtraction_proven } from mir/analysis/ranges
+import { CompilerState } from state/state
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { logical_run_qbe } from testing/qbe_runner
+import { optimize_verified_mir } from mir/passes/optimize
+import { verify_mir } from mir/verify/module
+import trb/std/result
+import trb/std/process
+
+def branch_subtraction_source(body: String): String
+	return "def step(value: Integer, other: Integer, flag: Boolean): Integer\n" + body + "\nend\ndef main()\nend\n"
+end
+
+def branch_subtraction_count(state: CompilerState): Integer
+	mut count := 0
+	mir_numeric_find(state.scalar_mir.numeric_plans[0], 0, -1, -1).operations.each do |operation|
+		if operation.mode == 7
+			count += 1
+		end
+	end
+	return count
+end
+
+describe("MIR comparison-bounded subtraction") do
+	test("proves exactly the two fib subtractions in the unchanged recursion fixture") do
+		root := Process.environment("TYPE_RB_NATIVE_ROOT")
+		if root != nil
+			state := array_loop_mir_check(array_mir_test_read(root + "/benchmarks/features/recursion/src/main.trb"))
+			fib := mir_numeric_find(state.scalar_mir.numeric_plans[0], 0, -1, -1)
+			mut proven := 0
+			fib.operations.each do |operation|
+				if operation.mode == 7
+					expect(state.scalar_mir.instructions[operation.instruction].payload).to_equal(2)
+					proven += 1
+				end
+			end
+			expect(proven).to_equal(2)
+			tak := mir_numeric_find(state.scalar_mir.numeric_plans[0], 1, -1, -1)
+			tak.operations.each do |operation|
+				expect(operation.mode == 7).to_be_false()
+			end
+			mut inside := false
+			mut subtractions := 0
+			mut checks := 0
+			control_test_output(emit_qbe(state)).split("\n").each do |line|
+				if line.include?("function l $trbnf0(")
+					inside = true
+				elsif line == "}"
+					inside = false
+				elsif inside
+					if line.include?(" =l sub ")
+						subtractions += 1
+					end
+					if line.include?(" =w cugtl ")
+						checks += 1
+					end
+				end
+			end
+			expect(subtractions).to_equal(2)
+			# The addition of the two recursive results remains checked.
+			expect(checks).to_equal(1)
+		end
+	end
+
+	test("normalizes both comparison polarities and reversed operands") do
+		["value >= 2", "value > 1", "2 <= value", "1 < value"].each do |guard|
+			state := array_loop_mir_check(branch_subtraction_source("if " + guard + "\nreturn value - 2\nend\nreturn 0"))
+			expect(branch_subtraction_count(state)).to_equal(1)
+		end
+		["value < 2", "value <= 1", "2 > value", "1 >= value"].each do |guard|
+			state := array_loop_mir_check(branch_subtraction_source("if " + guard + "\nreturn 0\nend\nreturn value - 2"))
+			expect(branch_subtraction_count(state)).to_equal(1)
+		end
+	end
+
+	test("retains checks for unproved bounds transformed values and bypass joins") do
+		bodies := [
+			"if value >= 1\nreturn value - 2\nend\nreturn 0",
+			"if value >= -1\nreturn value - 0\nend\nreturn 0",
+			"if value >= 2\nreturn value - other\nend\nreturn 0",
+			"if value >= 2\nreturn value - (-1)\nend\nreturn 0",
+			"if value > 9007199254740991\nreturn value - 2\nend\nreturn 0",
+			"if value == 2\nreturn value - 2\nend\nreturn 0",
+			"if value >= 2\nreturn (value + other) - 2\nend\nreturn 0",
+			"mut current := value\nif value >= 2\ncurrent = other\nreturn current - 2\nend\nreturn 0",
+			"if flag\nif value < 2\nreturn 0\nend\nend\nreturn value - 2",
+			"mut current := value\nif flag\ncurrent = other\nend\nif value >= 2\nreturn current - 2\nend\nreturn 0",
+			"mut current := value\nwhile current >= 2\ncurrent -= 2\nend\nreturn current",
+			"while flag\nremaining := value - 2\nif value >= 2\nreturn remaining\nend\nend\nreturn 0",
+		]
+		bodies.each do |body|
+			state := array_loop_mir_check(branch_subtraction_source(body))
+			expect(branch_subtraction_count(state)).to_equal(0)
+		end
+	end
+
+	test("forwards identical parameters through unanimous joins and nested branches") do
+		bodies := [
+			"if value >= 0\nreturn value - 0\nend\nreturn 0",
+			"if value >= 9007199254740991\nreturn value - 9007199254740991\nend\nreturn 0",
+			"mut current := value\nif flag\ncurrent = value\nend\nif current >= 2\nreturn current - 2\nend\nreturn 0",
+			"if value >= 2\nif flag\nreturn value - 2\nend\nreturn 0\nend\nreturn 0",
+		]
+		bodies.each do |body|
+			state := array_loop_mir_check(branch_subtraction_source(body))
+			expect(branch_subtraction_count(state)).to_equal(1)
+		end
+	end
+
+	test("rejects forged absent excess and stale subtraction proofs") do
+		[0, 1, 2, 3, 4, 5].each do |mutation|
+			mut state := array_loop_mir_check(branch_subtraction_source("if value >= 2\nreturn value - 1\nend\nreturn 0"))
+			mut plan := mir_numeric_find(state.scalar_mir.numeric_plans[0], 0, -1, -1)
+			original := plan.operations[0]
+			expect(original.mode).to_equal(7)
+			if mutation == 0
+				plan.operations[0] = MirNumericOperation.new(tested_value: -1, instruction: original.instruction, mode: 1, divisor: 0, reciprocal: 0, shift: 0)
+			elsif mutation == 1
+				state.scalar_mir.numeric_plans[0] = []
+			elsif mutation == 2
+				plan.operations.push(original)
+			elsif mutation == 3
+				plan.operations[0] = MirNumericOperation.new(tested_value: -1, instruction: original.instruction, mode: 7, divisor: 1, reciprocal: 0, shift: 0)
+			else
+				mut index := 0
+				while index < state.scalar_mir.literal_texts.size()
+					if mutation == 4 && state.scalar_mir.literal_texts[index] == "2"
+						state.scalar_mir.literal_texts[index] = "0"
+					elsif mutation == 5 && state.scalar_mir.literal_texts[index] == "1"
+						state.scalar_mir.literal_texts[index] = "3"
+					end
+					index += 1
+				end
+			end
+			expect(verify_mir(state.scalar_mir, true)).to_equal("MIR numeric plan differs")
+		end
+		mut unsafe := array_loop_mir_check(branch_subtraction_source("return value - 1"))
+		mut plan := mir_numeric_find(unsafe.scalar_mir.numeric_plans[0], 0, -1, -1)
+		original := plan.operations[0]
+		plan.operations[0] = MirNumericOperation.new(tested_value: -1, instruction: original.instruction, mode: 7, divisor: 0, reciprocal: 0, shift: 0)
+		expect(verify_mir(unsafe.scalar_mir, true)).to_equal("MIR numeric plan differs")
+	end
+
+	test("retains proof after source erasure storage reordering and repeated optimization") do
+		mut state := array_loop_mir_check(branch_subtraction_source("if value < 2\nreturn 0\nend\nreturn value - 2"))
+		plans := state.scalar_mir.numeric_plans[0]
+		before := control_test_output(emit_qbe(state))
+		intrinsic_mir_erase(state)
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+		state.scalar_mir.functions.each do |function|
+			mut left := function.block_start
+			mut right := left + function.block_count - 1
+			while left < right
+				saved := state.scalar_mir.blocks[left]
+				state.scalar_mir.blocks[left] = state.scalar_mir.blocks[right]
+				state.scalar_mir.blocks[right] = saved
+				left += 1
+				right -= 1
+			end
+		end
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		last := state.scalar_mir.functions.size() - 1
+		saved := state.scalar_mir.functions[0]
+		state.scalar_mir.functions[0] = state.scalar_mir.functions[last]
+		state.scalar_mir.functions[last] = saved
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(mir_numeric_plans_equal(plans, state.scalar_mir.numeric_plans[0])).to_be_true()
+		optimize_verified_mir(state.scalar_mir)
+		expect(mir_numeric_plans_equal(plans, state.scalar_mir.numeric_plans[0])).to_be_true()
+	end
+
+	test("executes portable endpoints with the final result check intact") do
+		source := "def step(value: Integer): Integer\nif value < 2\nreturn value\nend\nreturn value - 2\nend\ndef main()\nputs(step(-9007199254740991))\nputs(step(-1))\nputs(step(0))\nputs(step(1))\nputs(step(2))\nputs(step(3))\nputs(step(9007199254740991))\nend\n"
+		state := array_loop_mir_check(source)
+		expect(branch_subtraction_count(state)).to_equal(1)
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+			when Result::Ok(actual)
+				expect(actual).to_equal("-9007199254740991\n-1\n0\n1\n0\n1\n9007199254740989\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("keeps the proof independent of sparse value identities") do
+		mut state := array_loop_mir_check(branch_subtraction_source("if value < 2\nreturn 0\nend\nreturn value - 2"))
+		offset := 9007199254740000
+		mut index := 0
+		while index < state.scalar_mir.values.size()
+			value := state.scalar_mir.values[index]
+			state.scalar_mir.values[index] = MirValue.new(function_id: value.function_id, id: value.id + offset, type_id: value.type_id, source_id: value.source_id, line: value.line)
+			index += 1
+		end
+		index = 0
+		while index < state.scalar_mir.arguments.size()
+			state.scalar_mir.arguments[index] += offset
+			index += 1
+		end
+		index = 0
+		while index < state.scalar_mir.instructions.size()
+			mut instruction := state.scalar_mir.instructions[index]
+			if instruction.result >= 0
+				instruction = mir_test_instruction_with_cell(instruction, 1, instruction.result + offset)
+			end
+			if instruction.kind == 7
+				instruction = mir_test_instruction_with_cell(instruction, 2, instruction.first + offset)
+				instruction = mir_test_instruction_with_cell(instruction, 3, instruction.second + offset)
+			else
+				expect(instruction.kind).to_equal(6)
+			end
+			state.scalar_mir.instructions[index] = instruction
+			index += 1
+		end
+		index = 0
+		while index < state.scalar_mir.blocks.size()
+			mut block := state.scalar_mir.blocks[index]
+			if block.condition >= 0
+				block = mir_test_block_with_cell(block, 8, block.condition + offset)
+			end
+			if block.return_value >= 0
+				block = mir_test_block_with_cell(block, 15, block.return_value + offset)
+			end
+			state.scalar_mir.blocks[index] = block
+			index += 1
+		end
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(branch_subtraction_count(state)).to_equal(1)
+	end
+
+	test("requires reachable distinct successors with one incoming edge") do
+		[0, 1, 2].each do |mutation|
+			mut state := array_loop_mir_check(branch_subtraction_source("if value < 2\nreturn 0\nend\nreturn value - 2"))
+			function := state.scalar_mir.functions[0]
+			plan := mir_numeric_find(state.scalar_mir.numeric_plans[0], 0, -1, -1)
+			instruction := state.scalar_mir.instructions[plan.operations[0].instruction]
+			mut use := -1
+			mut guard := -1
+			mut index := 0
+			while index < function.block_count
+				block := state.scalar_mir.blocks[function.block_start + index]
+				if plan.operations[0].instruction >= block.instruction_start && plan.operations[0].instruction < block.instruction_start + block.instruction_count
+					use = index
+				end
+				if block.terminator == 2
+					guard = index
+				end
+				index += 1
+			end
+			expect(use >= 0 && guard >= 0).to_be_true()
+			mut flow := mir_build_flow(state.scalar_mir, function, mir_flow_blocks(state.scalar_mir, function))
+			aliases := mir_flow_aliases(state.scalar_mir, function, flow, state.scalar_mir.blocks[function.block_start + flow.entry])
+			expect(mir_parameter_subtraction_proven(state.scalar_mir, function, flow, aliases, use, instruction)).to_be_true()
+			guard_block := state.scalar_mir.blocks[function.block_start + guard]
+			if mutation == 0
+				# A second edge invalidates a conditional-edge fact even when it
+				# comes from the same predecessor.
+				successor := mir_flow_block_index(flow, guard_block.second_target)
+				mut incoming := flow.predecessors[successor]
+				incoming.push(guard)
+			elsif mutation == 1
+				flow.ranks[use] = -1
+			else
+				state.scalar_mir.blocks[function.block_start + guard] = mir_test_block_with_cell(guard_block, 9, guard_block.second_target)
+			end
+			expect(mir_parameter_subtraction_proven(state.scalar_mir, function, flow, aliases, use, instruction)).to_be_false()
+		end
+	end
+	test("preserves roots across ordinary and opaque calls around guarded subtraction") do
+		managed_mir_test_fixture("integer-branch-subtraction", 8)
+	end
+end

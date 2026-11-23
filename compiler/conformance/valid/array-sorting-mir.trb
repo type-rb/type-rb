@@ -1,0 +1,34 @@
+def main()
+	values := [3, -1, 2, 3, 0, -1, 8]
+	values.sort().each { |value| puts(value) }
+	values.sort_descending().each { |value| puts(value) }
+	puts(values[0])
+	empty: Array<Integer> := []
+	puts(empty.sort().size())
+	puts([7].sort_descending()[0])
+	nan := 0.0 / 0.0
+	infinity := 1.0 / 0.0
+	numbers := [nan, 0.0, -0.0, infinity, -infinity, 2.5, nan, -4.0]
+	ordered := numbers.sort().sort()
+	puts(ordered[0] == -infinity)
+	puts(ordered[1] == -4.0)
+	puts(1.0 / ordered[2] == infinity)
+	puts(1.0 / ordered[3] == -infinity)
+	puts(ordered[4] == 2.5)
+	puts(ordered[5] == infinity)
+	puts(ordered[6].nan?())
+	puts(ordered[7].nan?())
+	backwards := numbers.sort_descending().sort_descending()
+	puts(backwards[0] == infinity)
+	puts(backwards[1] == 2.5)
+	puts(1.0 / backwards[2] == infinity)
+	puts(1.0 / backwards[3] == -infinity)
+	puts(backwards[4] == -4.0)
+	puts(backwards[5] == -infinity)
+	puts(backwards[6].nan?())
+	puts(backwards[7].nan?())
+	# An inversion after a NaN must resume sorting even in an otherwise ordered run.
+	late := [-1.0, 0.0, nan, 2.0].sort()
+	puts(late[2] == 2.0)
+	puts(late[3].nan?())
+end

@@ -1,0 +1,26 @@
+record Box箱<T>
+	中身: T
+end
+
+enum Choice選択
+	Some値(中身: Integer)
+end
+
+def 加える(左: Integer, 右: Integer): Integer
+	return 左 + 右
+end
+
+def main()
+	Å := 1
+	Å := 2
+	å := 3
+	数字١ := 加える(Å, Å) + å
+	𐐨 := Box箱<Integer>.new(中身: 数字١)
+	case Choice選択::Some値(𐐨.中身)
+	when Choice選択::Some値(結果)
+		puts(結果)
+	end
+	記号 := :日本語
+	puts(記号)
+	puts({ 日本語: "kept" }["日本語"])
+end

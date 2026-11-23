@@ -1,0 +1,48 @@
+def choose(flag: Boolean): Array<String>
+	value := if flag
+		["yes" + "!"]
+	else
+		["no" + "!"]
+	end
+	return value
+end
+
+def widened(flag: Boolean): Float
+	value := if flag
+		1
+	else
+		2.5
+	end
+	return value
+end
+
+def mark(value: Integer): Integer
+	puts("selector")
+	return value
+end
+
+def main()
+	mut first := choose(true)
+	second := choose(false)
+	first.push("added")
+	puts(first.size())
+	puts(second[0])
+	puts(widened(true).to_i())
+	puts(widened(false).to_i())
+	selected := case mark(2)
+	when 0, 1
+		"first"
+	when 2
+		if first.size() == 2
+			"second"
+		else
+			"wrong"
+		end
+	else
+		"other"
+	end
+	puts(selected)
+	puts(false ? "wrong" : "right")
+	puts(true ? false || true : false)
+	puts(false ? false : false || true)
+end

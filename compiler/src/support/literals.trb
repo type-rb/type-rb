@@ -1,0 +1,235 @@
+def ascii_code(character: String): Integer
+	if character == "\n"
+		return 10
+	end
+	if character == "\r"
+		return 13
+	end
+	if character == "\t"
+		return 9
+	end
+	if character == " "
+		return 32
+	end
+	if character == "$"
+		return 36
+	end
+	if character == "%"
+		return 37
+	end
+	if character == "("
+		return 40
+	end
+	if character == ")"
+		return 41
+	end
+	if character == ","
+		return 44
+	end
+	if character == "="
+		return 61
+	end
+	if character == "@"
+		return 64
+	end
+	if character == "_"
+		return 95
+	end
+	if character == "{"
+		return 123
+	end
+	if character == "}"
+		return 125
+	end
+	mut lowercase_index := 0
+	lowercase := "abcdefghijklmnopqrstuvwxyz"
+	while lowercase_index < lowercase.size()
+		if lowercase[lowercase_index] == character
+			return lowercase_index + 97
+		end
+		lowercase_index += 1
+	end
+	mut uppercase_index := 0
+	uppercase := "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	while uppercase_index < uppercase.size()
+		if uppercase[uppercase_index] == character
+			return uppercase_index + 65
+		end
+		uppercase_index += 1
+	end
+	mut digit_index := 0
+	digits := "0123456789"
+	while digit_index < digits.size()
+		if digits[digit_index] == character
+			return digit_index + 48
+		end
+		digit_index += 1
+	end
+	alphabet := " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
+	mut index := 0
+	while index < alphabet.size()
+		if alphabet[index] == character
+			return index + 32
+		end
+		index += 1
+	end
+	return -1
+end
+
+def small_nonnegative_integer_operand(value: String): Boolean
+	if value.size() == 0
+		return false
+	end
+	if value.size() > 4
+		return false
+	end
+	mut parsed := 0
+	mut index := 0
+	while index < value.size()
+		code := ascii_code(value[index])
+		if code < 48
+			return false
+		end
+		if code > 57
+			return false
+		end
+		parsed = parsed * 10 + code - 48
+		index += 1
+	end
+	return parsed <= 1024
+end
+
+def number_without_underscores(value: String): String
+	mut result := ""
+	mut index := 0
+	while index < value.size()
+		if value[index] != "_"
+			result += value[index]
+		end
+		index += 1
+	end
+	return result
+end
+
+def number_is_float(value: String): Boolean
+	mut index := 0
+	while index < value.size()
+		if value[index] == "."
+			return true
+		end
+		index += 1
+	end
+	return false
+end
+
+def integer_literal_in_range(value: String): Boolean
+	normalized := number_without_underscores(value)
+	limit := "9007199254740991"
+	mut first := 0
+	mut scanning := true
+	while scanning
+		if first >= normalized.size()
+			scanning = false
+		else
+			if normalized[first] == "0"
+				first += 1
+			else
+				scanning = false
+			end
+		end
+	end
+	if first == normalized.size()
+		return true
+	end
+	digits := normalized.size() - first
+	if digits < limit.size()
+		return true
+	end
+	if digits > limit.size()
+		return false
+	end
+	mut index := 0
+	while index < limit.size()
+		actual := ascii_code(normalized[first + index])
+		maximum := ascii_code(limit[index])
+		if actual < maximum
+			return true
+		end
+		if actual > maximum
+			return false
+		end
+		index += 1
+	end
+	return true
+end
+
+def float_literal_in_range(value: String): Boolean
+	normalized := number_without_underscores(value)
+	# Round-to-nearest overflows at 2^1024 - 2^970. The tie rounds to
+	# infinity, so a decimal magnitude must be strictly below this integer.
+	limit := "179769313486231580793728971405303415079934132710037826936173778980444968292764750946649017977587207096330286416692887910946555547851940402630657488671505820681908902000708383676273854845817711531764475730270069855571366959622842914819860834936475292719074168444365510704342711559699508093042880177904174497792"
+	mut decimal := normalized.size()
+	mut index := 0
+	while index < normalized.size()
+		if normalized[index] == "."
+			decimal = index
+			index = normalized.size()
+		else
+			index += 1
+		end
+	end
+	mut first := 0
+	mut scanning := true
+	while scanning
+		if first >= decimal
+			scanning = false
+		else
+			if normalized[first] == "0"
+				first += 1
+			else
+				scanning = false
+			end
+		end
+	end
+	integer_digits := decimal - first
+	if integer_digits < limit.size()
+		return true
+	end
+	if integer_digits > limit.size()
+		return false
+	end
+	index = 0
+	while index < limit.size()
+		actual := ascii_code(normalized[first + index])
+		maximum := ascii_code(limit[index])
+		if actual < maximum
+			return true
+		end
+		if actual > maximum
+			return false
+		end
+		index += 1
+	end
+	return false
+end
+
+def integer_string(value: Integer): String
+	if value == 0
+		return "0"
+	end
+	mut remaining := value
+	mut negative := false
+	if remaining < 0
+		negative = true
+		remaining = 0 - remaining
+	end
+	mut result := ""
+	while remaining > 0
+		result = "0123456789"[remaining % 10] + result
+		remaining /= 10
+	end
+	if negative
+		result = "-" + result
+	end
+	return result
+end

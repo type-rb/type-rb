@@ -1,0 +1,71 @@
+import { mir_convert_string_float_status, mir_convert_string_integer_status, mir_convert_string_to_float, mir_convert_string_to_integer } from mir/model/operation_modes
+import { checked_category_value } from frontend/types/value_categories
+import { mir_op_scalar_conversion } from mir/model/instructions
+import { mir_builtin_error } from frontend/checking/builtins/lookup
+import { builtin_result_type, builtin_result_variant } from frontend/checking/builtins/results
+import { CheckedValue, checked_mir_value, checked_value, scalar_mir_binary, scalar_mir_literal } from frontend/checking/body/values
+import { mir_enum_construct } from mir/lowering/enums
+import { find_enum_type, find_enum_variant } from frontend/types/enum_types
+import { mir_control_active, mir_control_branch, mir_control_enter, mir_control_prepare } from mir/build/control
+import { mir_checked_string_operation } from mir/lowering/strings
+import { mir_value_complete, mir_value_exit, mir_value_join } from mir/build/value_control
+import { raw_enum_literal } from frontend/checking/nominal/raw_enums
+import { find_record_type } from frontend/resolution/type_resolution
+import { CompilerState } from state/state
+import { CheckedLocals } from state/local_state
+import { load_integer, load_string, store_string } from support/storage
+
+def mir_number_parse_error(mut state: CompilerState, mut locals: CheckedLocals, result_type: String, input: CheckedValue, number: String, invalid: Boolean, origin: Integer): CheckedValue
+	err := builtin_result_variant(state, result_type, false)
+	error_type := state.nominal.enum_fields[state.nominal.enum_variants[err].field_start].type_name
+	record_index := find_record_type(state, error_type)
+	start := load_integer(state.declarations.record_field_starts, record_index)
+	enum_index := find_enum_type(state, load_string(state.declarations.field_types, start))
+	mut variant := "OutOfRange"
+	mut text := number + " is outside the portable range"
+	if invalid
+		variant = "InvalidFormat"
+		text = "invalid " + number
+	end
+	kind := mir_enum_construct(state, locals, find_enum_variant(state, enum_index, variant), [], origin)
+	message := raw_enum_literal(state, locals, "String", text, origin)
+	return mir_builtin_error(state, locals, result_type, [kind, input, message], origin)
+end
+
+# Typed parse status is independent of Result's nominal representation. Existing
+# verified branches and aggregate operations own success and structured failure.
+def mir_builtin_number_parse(mut state: CompilerState, mut locals: CheckedLocals, receiver: CheckedValue, floating: Boolean, origin: Integer): CheckedValue
+	mut number := "Integer"
+	mut conversion := mir_convert_string_to_integer()
+	mut status_mode := mir_convert_string_integer_status()
+	if floating
+		number = "Float"
+		conversion = mir_convert_string_to_float()
+		status_mode = mir_convert_string_float_status()
+	end
+	result_type := builtin_result_type(state, number, "NumberParseError")
+	store_string(state.callables.checked[0].builtin_result_types, origin, result_type)
+	mir_control_prepare(state, locals)
+	if !mir_control_active(locals)
+		return checked_value(result_type, checked_category_value(), origin, 0)
+	end
+	line := load_integer(state.source_tokens.token_lines, origin)
+	status := mir_checked_string_operation(state, locals, mir_op_scalar_conversion(), checked_mir_value(receiver), -1, status_mode, "Integer", origin)
+	zero := scalar_mir_literal(state, locals, "Integer", origin, "0")
+	valid := scalar_mir_binary(state, locals, "==", status, zero, "Boolean", origin)
+	mut join := mir_value_join(locals, line)
+	failure := mir_control_branch(state, locals, valid, line)
+	value := mir_checked_string_operation(state, locals, mir_op_scalar_conversion(), checked_mir_value(receiver), -1, conversion, number, origin)
+	success := mir_enum_construct(state, locals, builtin_result_variant(state, result_type, true), [checked_mir_value(value)], origin)
+	mir_value_exit(state, locals, join, success)
+	mir_control_enter(state, locals, failure, line)
+	one := scalar_mir_literal(state, locals, "Integer", origin, "1")
+	invalid := scalar_mir_binary(state, locals, "==", status, one, "Boolean", origin)
+	range := mir_control_branch(state, locals, invalid, line)
+	format_error := mir_number_parse_error(state, locals, result_type, receiver, number, true, origin)
+	mir_value_exit(state, locals, join, format_error)
+	mir_control_enter(state, locals, range, line)
+	range_error := mir_number_parse_error(state, locals, result_type, receiver, number, false, origin)
+	mir_value_exit(state, locals, join, range_error)
+	return mir_value_complete(state, locals, join, result_type, origin)
+end

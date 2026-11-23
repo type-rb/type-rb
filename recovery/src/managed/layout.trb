@@ -1,0 +1,625 @@
+import { Diagnostic, boundary_diagnostic } from support/diagnostic
+import { ScalarType } from scalar/mir
+import trb/std/result
+
+MANAGED_RECOVERY_MAX_TYPE_DEFINITIONS := 1024
+MANAGED_RECOVERY_MAX_FIELDS := 256
+MANAGED_RECOVERY_MAX_VARIANTS := 1024
+MANAGED_RECOVERY_MAX_LAYOUT_BYTES := 1048576
+
+enum RecoveryManagedValueType
+	Scalar(value_type: ScalarType)
+	Aggregate(type_id: String)
+end
+
+record RecoveryManagedField
+	name: String
+	value_type: RecoveryManagedValueType
+end
+
+record RecoveryManagedVariant
+	name: String
+	fields: Array<RecoveryManagedField>
+end
+
+enum RecoveryManagedTypeDefinition
+	Record(type_id: String, fields: Array<RecoveryManagedField>)
+	Tagged(type_id: String, variants: Array<RecoveryManagedVariant>)
+	String(type_id: String)
+	Hash(type_id: String)
+	Array(type_id: String, element_type: RecoveryManagedValueType)
+	Function(type_id: String, parameter_types: Array<RecoveryManagedValueType>, result_type: RecoveryManagedValueType?)
+end
+
+enum RecoveryManagedLayoutKind
+	Record
+	Tagged
+	String
+	Hash
+	Array
+	Function
+end
+
+record RecoveryManagedFieldLayout
+	name: String
+	value_type: RecoveryManagedValueType
+	offset: Integer
+	size: Integer
+	alignment: Integer
+	managed: Boolean
+end
+
+record RecoveryManagedVariantLayout
+	name: String
+	tag: Integer
+	fields: Array<RecoveryManagedFieldLayout>
+	payload_size: Integer
+	payload_alignment: Integer
+end
+
+record RecoveryManagedLayout
+	type_id: String
+	kind: RecoveryManagedLayoutKind
+	size: Integer
+	alignment: Integer
+	payload_offset: Integer
+	fields: Array<RecoveryManagedFieldLayout>
+	variants: Array<RecoveryManagedVariantLayout>
+	managed: Boolean
+end
+
+record RecoveryManagedSizeAlignment
+	size: Integer
+	alignment: Integer
+	managed: Boolean
+end
+
+def recovery_managed_value_types_equal(left: RecoveryManagedValueType, right: RecoveryManagedValueType): Boolean
+	case left
+	when RecoveryManagedValueType::Scalar(left_scalar)
+		case right
+		when RecoveryManagedValueType::Scalar(right_scalar)
+			return left_scalar == right_scalar
+		when RecoveryManagedValueType::Aggregate(_right_id)
+			return false
+		end
+	when RecoveryManagedValueType::Aggregate(left_id)
+		case right
+		when RecoveryManagedValueType::Scalar(_right_scalar)
+			return false
+		when RecoveryManagedValueType::Aggregate(right_id)
+			return left_id == right_id
+		end
+	end
+end
+
+def verify_recovery_managed_layouts(definitions: Array<RecoveryManagedTypeDefinition>): Result<Boolean, Diagnostic>
+	if definitions.size() > MANAGED_RECOVERY_MAX_TYPE_DEFINITIONS
+		return Result<Boolean, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0005", "/types", "type definition count exceeds the Managed recovery limit")
+		)
+	end
+	mut type_ids: Hash<String, Boolean> := {}
+	mut index := 0
+	while index < definitions.size()
+		type_id := _recovery_managed_definition_id(definitions[index])
+		if type_id.empty?()
+			return Result<Boolean, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0004", "/types/" + index.to_s() + "/id", "type identifier must not be empty")
+			)
+		end
+		if type_ids.key?(type_id)
+			return Result<Boolean, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0004", "/types/" + index.to_s() + "/id", "type identifier is duplicated")
+			)
+		end
+		type_ids[type_id] = true
+		index += 1
+	end
+	index = 0
+	while index < definitions.size()
+		try compute_recovery_managed_layout(definitions, _recovery_managed_definition_id(definitions[index]))
+		index += 1
+	end
+	return Result<Boolean, Diagnostic>::Ok(true)
+end
+
+def compute_recovery_managed_layout(
+		definitions: Array<RecoveryManagedTypeDefinition>,
+		type_id: String,
+	): Result<RecoveryManagedLayout, Diagnostic>
+	return _recovery_managed_compute_layout(definitions, type_id, [], "/types/" + type_id)
+end
+
+def _recovery_managed_compute_layout(
+		definitions: Array<RecoveryManagedTypeDefinition>,
+		type_id: String,
+		visiting: Array<String>,
+		path: String,
+	): Result<RecoveryManagedLayout, Diagnostic>
+	if visiting.include?(type_id)
+		return Result<RecoveryManagedLayout, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0004", path, "recursive by-value aggregate layout is unsupported")
+		)
+	end
+	definition := _recovery_managed_definition(definitions, type_id)
+	if definition == nil
+		return Result<RecoveryManagedLayout, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0004", path, "aggregate type does not exist")
+		)
+	end
+	mut next_visiting: Array<String> := []
+	mut visiting_index := 0
+	while visiting_index < visiting.size()
+		next_visiting.push(visiting[visiting_index])
+		visiting_index += 1
+	end
+	next_visiting.push(type_id)
+	case definition
+	when RecoveryManagedTypeDefinition::Record(_id, fields)
+		return _recovery_managed_record_layout(definitions, type_id, fields, next_visiting, path)
+	when RecoveryManagedTypeDefinition::Tagged(_id, variants)
+		return _recovery_managed_tagged_layout(definitions, type_id, variants, next_visiting, path)
+	when RecoveryManagedTypeDefinition::String(_id)
+		return _recovery_managed_managed_reference_layout(type_id, RecoveryManagedLayoutKind::String)
+	when RecoveryManagedTypeDefinition::Hash(_id)
+		if type_id != "Hash<String, Integer>"
+			return Result<RecoveryManagedLayout, Diagnostic>::Err(boundary_diagnostic("TRBN0004", path, "unsupported Hash type"))
+		end
+		key_definition := _recovery_managed_definition(definitions, "String")
+		if key_definition != nil
+			case key_definition
+			when RecoveryManagedTypeDefinition::String(_key_id)
+				return _recovery_managed_managed_reference_layout(type_id, RecoveryManagedLayoutKind::Hash)
+			else
+			end
+		end
+		return Result<RecoveryManagedLayout, Diagnostic>::Err(boundary_diagnostic("TRBN0004", path + "/key", "Hash requires the canonical String type"))
+	when RecoveryManagedTypeDefinition::Array(_id, element_type)
+		try _recovery_managed_verify_storable_type(definitions, element_type, path + "/element")
+		try _recovery_managed_verify_array_element(definitions, element_type, path + "/element")
+		return _recovery_managed_managed_reference_layout(type_id, RecoveryManagedLayoutKind::Array)
+	when RecoveryManagedTypeDefinition::Function(_id, parameter_types, result_type)
+		if parameter_types.size() > MANAGED_RECOVERY_MAX_FIELDS
+			return Result<RecoveryManagedLayout, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0005", path + "/parameters", "function parameter count exceeds the Managed recovery limit")
+			)
+		end
+		mut parameter_index := 0
+		while parameter_index < parameter_types.size()
+			try _recovery_managed_verify_storable_type(
+				definitions,
+				parameter_types[parameter_index],
+				path + "/parameters/" + parameter_index.to_s(),
+			)
+			parameter_index += 1
+		end
+		if result_type != nil
+			try _recovery_managed_verify_storable_type(definitions, result_type, path + "/result")
+		end
+		return _recovery_managed_managed_reference_layout(type_id, RecoveryManagedLayoutKind::Function)
+	end
+end
+
+def _recovery_managed_verify_array_element(
+		definitions: Array<RecoveryManagedTypeDefinition>,
+		value_type: RecoveryManagedValueType,
+		path: String,
+	): Result<Boolean, Diagnostic>
+	case value_type
+	when RecoveryManagedValueType::Scalar(scalar)
+		if scalar == ScalarType::Integer
+			return Result<Boolean, Diagnostic>::Ok(true)
+		end
+		if scalar == ScalarType::Boolean
+			return Result<Boolean, Diagnostic>::Ok(true)
+		end
+	when RecoveryManagedValueType::Aggregate(type_id)
+		definition := _recovery_managed_definition(definitions, type_id)
+		if definition != nil
+			case definition
+			when RecoveryManagedTypeDefinition::String(_id)
+				return Result<Boolean, Diagnostic>::Ok(true)
+			when RecoveryManagedTypeDefinition::Array(_id, _element_type)
+				return Result<Boolean, Diagnostic>::Ok(true)
+			when RecoveryManagedTypeDefinition::Function(_id, _parameters, _result)
+				return Result<Boolean, Diagnostic>::Ok(true)
+			when RecoveryManagedTypeDefinition::Record(_id, _fields)
+				return Result<Boolean, Diagnostic>::Ok(true)
+			else
+			end
+		end
+	end
+	return Result<Boolean, Diagnostic>::Err(
+		boundary_diagnostic("TRBN0004", path, "unsupported Managed recovery Array element type")
+	)
+end
+
+def _recovery_managed_managed_reference_layout(
+		type_id: String,
+		kind: RecoveryManagedLayoutKind,
+	): Result<RecoveryManagedLayout, Diagnostic>
+	return Result<RecoveryManagedLayout, Diagnostic>::Ok(
+		RecoveryManagedLayout.new(
+			type_id: type_id,
+			kind: kind,
+			size: 8,
+			alignment: 8,
+			payload_offset: 0,
+			fields: [],
+			variants: [],
+			managed: true,
+		)
+	)
+end
+
+# Array slots retain managed references. Use one representation for each record
+# throughout the module, including function results and nested aggregate fields.
+def _recovery_managed_record_is_array_element(definitions: Array<RecoveryManagedTypeDefinition>, type_id: String): Boolean
+	mut index := 0
+	while index < definitions.size()
+		case definitions[index]
+		when RecoveryManagedTypeDefinition::Array(_id, element_type)
+			if recovery_managed_value_types_equal(element_type, RecoveryManagedValueType::Aggregate(type_id))
+				return true
+			end
+		else
+		end
+		index += 1
+	end
+	return false
+end
+
+def _recovery_managed_record_layout(
+		definitions: Array<RecoveryManagedTypeDefinition>,
+		type_id: String,
+		fields: Array<RecoveryManagedField>,
+		visiting: Array<String>,
+		path: String,
+	): Result<RecoveryManagedLayout, Diagnostic>
+	if fields.size() > MANAGED_RECOVERY_MAX_FIELDS
+		return Result<RecoveryManagedLayout, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0005", path + "/fields", "field count exceeds the Managed recovery limit")
+		)
+	end
+	field_layouts := try _recovery_managed_fields_layout(definitions, fields, visiting, path + "/fields", 0)
+	mut alignment := 1
+	mut end_offset := 0
+	mut managed := _recovery_managed_record_is_array_element(definitions, type_id)
+	mut index := 0
+	while index < field_layouts.size()
+		field := field_layouts[index]
+		alignment = _recovery_managed_max(alignment, field.alignment)
+		end_offset = field.offset + field.size
+		managed = managed || field.managed
+		index += 1
+	end
+	mut size := _recovery_managed_align_up(end_offset, alignment)
+	if size == 0
+		size = 1
+	end
+	try _recovery_managed_require_layout_size(size, path)
+	return Result<RecoveryManagedLayout, Diagnostic>::Ok(
+		RecoveryManagedLayout.new(
+			type_id: type_id,
+			kind: RecoveryManagedLayoutKind::Record,
+			size: size,
+			alignment: alignment,
+			payload_offset: 0,
+			fields: field_layouts,
+			variants: [],
+			managed: managed,
+		)
+	)
+end
+
+def _recovery_managed_tagged_layout(
+		definitions: Array<RecoveryManagedTypeDefinition>,
+		type_id: String,
+		variants: Array<RecoveryManagedVariant>,
+		visiting: Array<String>,
+		path: String,
+	): Result<RecoveryManagedLayout, Diagnostic>
+	if variants.empty?()
+		return Result<RecoveryManagedLayout, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0004", path + "/variants", "tagged type must declare at least one variant")
+		)
+	end
+	if variants.size() > MANAGED_RECOVERY_MAX_VARIANTS
+		return Result<RecoveryManagedLayout, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0005", path + "/variants", "variant count exceeds the Managed recovery limit")
+		)
+	end
+	mut names: Hash<String, Boolean> := {}
+	mut payload_alignment := 1
+	mut index := 0
+	while index < variants.size()
+		variant := variants[index]
+		variant_path := path + "/variants/" + index.to_s()
+		try _recovery_managed_require_name(names, variant.name, variant_path + "/name", "variant")
+		if variant.fields.size() > MANAGED_RECOVERY_MAX_FIELDS
+			return Result<RecoveryManagedLayout, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0005", variant_path + "/fields", "field count exceeds the Managed recovery limit")
+			)
+		end
+		probe := try _recovery_managed_fields_layout(definitions, variant.fields, visiting, variant_path + "/fields", 0)
+		mut field_index := 0
+		while field_index < probe.size()
+			payload_alignment = _recovery_managed_max(payload_alignment, probe[field_index].alignment)
+			field_index += 1
+		end
+		index += 1
+	end
+	payload_offset := _recovery_managed_align_up(4, payload_alignment)
+	mut variant_layouts: Array<RecoveryManagedVariantLayout> := []
+	mut payload_size := 0
+	mut managed := false
+	index = 0
+	while index < variants.size()
+		variant := variants[index]
+		variant_path := path + "/variants/" + index.to_s()
+		fields := try _recovery_managed_fields_layout(
+			definitions,
+			variant.fields,
+			visiting,
+			variant_path + "/fields",
+			payload_offset,
+		)
+		mut variant_end := payload_offset
+		mut variant_alignment := 1
+		mut field_index := 0
+		while field_index < fields.size()
+			field := fields[field_index]
+			variant_end = field.offset + field.size
+			variant_alignment = _recovery_managed_max(variant_alignment, field.alignment)
+			managed = managed || field.managed
+			field_index += 1
+		end
+		current_payload_size := variant_end - payload_offset
+		payload_size = _recovery_managed_max(payload_size, current_payload_size)
+		variant_layouts.push(
+			RecoveryManagedVariantLayout.new(
+				name: variant.name,
+				tag: index,
+				fields: fields,
+				payload_size: current_payload_size,
+				payload_alignment: variant_alignment,
+			)
+		)
+		index += 1
+	end
+	alignment := _recovery_managed_max(4, payload_alignment)
+	size := _recovery_managed_align_up(payload_offset + payload_size, alignment)
+	try _recovery_managed_require_layout_size(size, path)
+	return Result<RecoveryManagedLayout, Diagnostic>::Ok(
+		RecoveryManagedLayout.new(
+			type_id: type_id,
+			kind: RecoveryManagedLayoutKind::Tagged,
+			size: size,
+			alignment: alignment,
+			payload_offset: payload_offset,
+			fields: [],
+			variants: variant_layouts,
+			managed: managed,
+		)
+	)
+end
+
+def _recovery_managed_fields_layout(
+		definitions: Array<RecoveryManagedTypeDefinition>,
+		fields: Array<RecoveryManagedField>,
+		visiting: Array<String>,
+		path: String,
+		start_offset: Integer,
+	): Result<Array<RecoveryManagedFieldLayout>, Diagnostic>
+	mut names: Hash<String, Boolean> := {}
+	mut layouts: Array<RecoveryManagedFieldLayout> := []
+	mut offset := start_offset
+	mut index := 0
+	while index < fields.size()
+		field := fields[index]
+		field_path := path + "/" + index.to_s()
+		try _recovery_managed_require_name(names, field.name, field_path + "/name", "field")
+		size_alignment := try _recovery_managed_size_alignment(definitions, field.value_type, visiting, field_path + "/type")
+		offset = _recovery_managed_align_up(offset, size_alignment.alignment)
+		if offset + size_alignment.size > MANAGED_RECOVERY_MAX_LAYOUT_BYTES
+			return Result<Array<RecoveryManagedFieldLayout>, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0005", field_path, "aggregate layout exceeds the Managed recovery byte limit")
+			)
+		end
+		layouts.push(
+			RecoveryManagedFieldLayout.new(
+				name: field.name,
+				value_type: field.value_type,
+				offset: offset,
+				size: size_alignment.size,
+				alignment: size_alignment.alignment,
+				managed: size_alignment.managed,
+			)
+		)
+		offset += size_alignment.size
+		index += 1
+	end
+	return Result<Array<RecoveryManagedFieldLayout>, Diagnostic>::Ok(layouts)
+end
+
+def _recovery_managed_size_alignment(
+		definitions: Array<RecoveryManagedTypeDefinition>,
+		value_type: RecoveryManagedValueType,
+		visiting: Array<String>,
+		path: String,
+	): Result<RecoveryManagedSizeAlignment, Diagnostic>
+	case value_type
+	when RecoveryManagedValueType::Scalar(scalar)
+		if scalar == ScalarType::Boolean
+			return Result<RecoveryManagedSizeAlignment, Diagnostic>::Ok(
+				RecoveryManagedSizeAlignment.new(size: 1, alignment: 1, managed: false)
+			)
+		end
+		if scalar == ScalarType::Integer || scalar == ScalarType::Float
+			return Result<RecoveryManagedSizeAlignment, Diagnostic>::Ok(
+				RecoveryManagedSizeAlignment.new(size: 8, alignment: 8, managed: false)
+			)
+		end
+		return Result<RecoveryManagedSizeAlignment, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0004", path, "Void is not a storable Managed recovery value")
+		)
+	when RecoveryManagedValueType::Aggregate(type_id)
+		layout := try _recovery_managed_compute_layout(definitions, type_id, visiting, path)
+		if layout.managed
+			return Result<RecoveryManagedSizeAlignment, Diagnostic>::Ok(
+				RecoveryManagedSizeAlignment.new(size: 8, alignment: 8, managed: true)
+			)
+		end
+		return Result<RecoveryManagedSizeAlignment, Diagnostic>::Ok(
+			RecoveryManagedSizeAlignment.new(size: layout.size, alignment: layout.alignment, managed: false)
+		)
+	end
+end
+
+def _recovery_managed_verify_storable_type(
+		definitions: Array<RecoveryManagedTypeDefinition>,
+		value_type: RecoveryManagedValueType,
+		path: String,
+	): Result<Boolean, Diagnostic>
+	case value_type
+	when RecoveryManagedValueType::Scalar(scalar)
+		if scalar == ScalarType::Void
+			return Result<Boolean, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0004", path, "Void is not a storable Managed recovery value")
+			)
+		end
+	when RecoveryManagedValueType::Aggregate(type_id)
+		if _recovery_managed_definition(definitions, type_id) == nil
+			return Result<Boolean, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0004", path, "aggregate type does not exist")
+			)
+		end
+	end
+	return Result<Boolean, Diagnostic>::Ok(true)
+end
+
+def _recovery_managed_require_name(
+		mut names: Hash<String, Boolean>,
+		name: String,
+		path: String,
+		kind: String,
+	): Result<Boolean, Diagnostic>
+	if name.empty?()
+		return Result<Boolean, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0004", path, kind + " name must not be empty")
+		)
+	end
+	if names.key?(name)
+		return Result<Boolean, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0004", path, kind + " name is duplicated")
+		)
+	end
+	names[name] = true
+	return Result<Boolean, Diagnostic>::Ok(true)
+end
+
+def _recovery_managed_require_layout_size(size: Integer, path: String): Result<Boolean, Diagnostic>
+	if size > MANAGED_RECOVERY_MAX_LAYOUT_BYTES
+		return Result<Boolean, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0005", path, "aggregate layout exceeds the Managed recovery byte limit")
+		)
+	end
+	return Result<Boolean, Diagnostic>::Ok(true)
+end
+
+def _recovery_managed_definition_id(definition: RecoveryManagedTypeDefinition): String
+	case definition
+	when RecoveryManagedTypeDefinition::Record(type_id, _fields)
+		return type_id
+	when RecoveryManagedTypeDefinition::Tagged(type_id, _variants)
+		return type_id
+	when RecoveryManagedTypeDefinition::Hash(type_id)
+		return type_id
+	when RecoveryManagedTypeDefinition::String(type_id)
+		return type_id
+	when RecoveryManagedTypeDefinition::Array(type_id, _element_type)
+		return type_id
+	when RecoveryManagedTypeDefinition::Function(type_id, _parameter_types, _result_type)
+		return type_id
+	end
+end
+
+def _recovery_managed_definition(
+		definitions: Array<RecoveryManagedTypeDefinition>,
+		type_id: String,
+	): RecoveryManagedTypeDefinition?
+	mut index := 0
+	while index < definitions.size()
+		definition := definitions[index]
+		if _recovery_managed_definition_id(definition) == type_id
+			return definition
+		end
+		index += 1
+	end
+	return nil
+end
+
+def recovery_managed_type_definition(
+		definitions: Array<RecoveryManagedTypeDefinition>,
+		type_id: String,
+	): RecoveryManagedTypeDefinition?
+	return _recovery_managed_definition(definitions, type_id)
+end
+
+def recovery_managed_value_is_managed(
+		definitions: Array<RecoveryManagedTypeDefinition>,
+		value_type: RecoveryManagedValueType,
+	): Result<Boolean, Diagnostic>
+	case value_type
+	when RecoveryManagedValueType::Scalar(_scalar)
+		return Result<Boolean, Diagnostic>::Ok(false)
+	when RecoveryManagedValueType::Aggregate(type_id)
+		layout := try compute_recovery_managed_layout(definitions, type_id)
+		return Result<Boolean, Diagnostic>::Ok(layout.managed)
+	end
+end
+
+def recovery_managed_field_layout(layout: RecoveryManagedLayout, name: String): RecoveryManagedFieldLayout?
+	mut index := 0
+	while index < layout.fields.size()
+		if layout.fields[index].name == name
+			return layout.fields[index]
+		end
+		index += 1
+	end
+	return nil
+end
+
+def recovery_managed_variant_layout(layout: RecoveryManagedLayout, name: String): RecoveryManagedVariantLayout?
+	mut index := 0
+	while index < layout.variants.size()
+		if layout.variants[index].name == name
+			return layout.variants[index]
+		end
+		index += 1
+	end
+	return nil
+end
+
+def recovery_managed_variant_field_layout(variant: RecoveryManagedVariantLayout, name: String): RecoveryManagedFieldLayout?
+	mut index := 0
+	while index < variant.fields.size()
+		if variant.fields[index].name == name
+			return variant.fields[index]
+		end
+		index += 1
+	end
+	return nil
+end
+
+def _recovery_managed_align_up(value: Integer, alignment: Integer): Integer
+	return ((value + alignment - 1) / alignment) * alignment
+end
+
+def _recovery_managed_max(left: Integer, right: Integer): Integer
+	if left > right
+		return left
+	end
+	return right
+end

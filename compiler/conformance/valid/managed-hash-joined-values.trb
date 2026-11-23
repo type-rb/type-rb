@@ -1,0 +1,52 @@
+def scalar(flag: Boolean)
+	mut values := {}
+	if flag
+		values[1] = 2
+	else
+		values[1] = "word"
+	end
+	case values[1]
+	when Integer(number)
+		puts(number)
+	when String(word)
+		puts(word)
+	end
+end
+
+def mixed(selector: Integer)
+	mut values := {}
+	case selector
+	when 1
+		values[1] = 2
+	when 2
+		values[1] = 4.5
+	else
+		values[1] = "word"
+	end
+	case values[1]
+	when Float(number)
+		puts(number)
+	when String(word)
+		puts(word)
+	end
+end
+
+def managed(flag: Boolean)
+	mut values := {}
+	if flag
+		values[1] = ["kept"]
+	else
+		values[1] = [2.5]
+	end
+	puts(values.size())
+end
+
+def main()
+	scalar(true)
+	scalar(false)
+	mixed(1)
+	mixed(2)
+	mixed(3)
+	managed(true)
+	managed(false)
+end

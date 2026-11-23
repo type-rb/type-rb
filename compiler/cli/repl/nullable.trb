@@ -1,0 +1,58 @@
+import { union_parts } from frontend/types/union_types
+import { repl_type } from repl/model
+import { nullable_element } from frontend/types/nullable_types
+import { ReplStore, repl_value } from repl/model
+import { CompilerState } from state/state
+import { sparse_string_at } from support/storage
+
+def repl_none(mut store: ReplStore, type_name: String): Integer
+	return repl_value(store, type_name, 0, 0.0, "", store.children[0])
+end
+
+def repl_absent(store: ReplStore, id: Integer): Boolean
+	if store.types[id] == "Nil"
+		return true
+	end
+	if nullable_element(store.types[id]) != ""
+		return store.children[id].size() == 0
+	end
+	return false
+end
+
+def repl_payload(mut store: ReplStore, id: Integer): Integer
+	if nullable_element(store.types[id]) == ""
+		return id
+	end
+	if store.children[id].size() == 0
+		store.error[0] = "panic: nil payload is unavailable"
+		return 0
+	end
+	return store.children[id][0]
+end
+
+# A checked source read, not the runtime value, authorizes a narrowed view.
+# Stored bindings keep the declared optional type for later assignments.
+def repl_nullable_read(state: CompilerState, mut store: ReplStore, id: Integer, origin: Integer): Integer
+	flow := sparse_string_at(state.callables.checked[0].nullable_reads, origin)
+	if flow == ""
+		return id
+	end
+	if union_parts(repl_type(store, id)).size() > 0
+		payload := store.children[id][0]
+		if union_parts(flow).size() > 0
+			return repl_value(store, flow, 0, 0.0, "", [payload])
+		end
+		if repl_type(store, payload) != flow
+			store.error[0] = "checked union payload disagrees with its narrowed type"
+			return 0
+		end
+		return payload
+	end
+	if flow == "Nil"
+		if !repl_absent(store, id)
+			store.error[0] = "checked nil value is present"
+		end
+		return repl_none(store, "Nil")
+	end
+	return repl_payload(store, id)
+end

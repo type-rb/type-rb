@@ -34,126 +34,66 @@ jobs:
         with:
           fetch-depth: 2
 
-      - name: Classify test scope
-        id: test-scope
-        shell: bash
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-        run: |
-          set -euo pipefail
-          if [ "$EVENT_NAME" = workflow_dispatch ] || ! git rev-parse HEAD^ >/dev/null 2>&1; then
-            full_tests=true
-          else
-            full_tests="$(git diff --name-only HEAD^ HEAD | ./scripts/pages-full-tests-required.sh)"
-          fi
-          echo "full-tests=$full_tests" >> "$GITHUB_OUTPUT"
-          echo "Full compiler tests required: $full_tests"
+      - name: Check out the exact site generator source
+        uses: actions/checkout@v6
+        with:
+          repository: type-rb/type-rb-go
+          ref: 942dcc763678f0c7e315014690f095c5ef6e7876
+          path: .site-generator
+          persist-credentials: false
 
       - uses: actions/setup-go@v6
         with:
-          go-version-file: go.mod
-          cache: true
-
-      - uses: ruby/setup-ruby@v1
-        if: steps.test-scope.outputs.full-tests == 'true'
-
-      - name: Install Jobs SQLite runtime dependencies
-        if: steps.test-scope.outputs.full-tests == 'true'
-        run: gem install --no-document sequel:5.107.0 sqlite3:2.9.5 fiddle:1.1.8
+          go-version-file: .site-generator/go.mod
+          cache-dependency-path: .site-generator/go.sum
 
       - uses: actions/setup-node@v6
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: |
-            tools/textmate/package-lock.json
-            tools/site/package-lock.json
+          cache-dependency-path: .site-generator/tools/site/package-lock.json
 
-      - name: Install TypeScript compiler
-        if: steps.test-scope.outputs.full-tests == 'true'
-        run: npm install --global typescript@7.0.2
-
-      - uses: oven-sh/setup-bun@v2
-        if: steps.test-scope.outputs.full-tests == 'true'
-        with:
-          bun-version: 1.4.2
-
-      - name: Verify compiler and tour
-        if: steps.test-scope.outputs.full-tests == 'true'
-        run: go test ./... -timeout 20m
-
-      - name: Verify workflow tooling
+      - name: Verify site and published contract tooling
         run: |
-          ./scripts/extract-release-notes_test.sh
-          ./scripts/pages-full-tests-required_test.sh
-          ./scripts/render-homebrew-formula_test.sh
+          (cd .site-generator && go test ./internal/site ./internal/releasecontract ./tools/release-contract)
+          (cd .site-generator && go run ./tools/release-contract --check)
+          cmp contracts/v0.5/manifest.json .site-generator/contracts/v0.5/manifest.json
+          cmp docs/v0.5-feature-contract.md .site-generator/docs/v0.5-feature-contract.md
+          npm ci --prefix .site-generator/tools/site
+          npm test --prefix .site-generator/tools/site
 
-      - name: Verify website Go packages
-        run: go test ./internal/site ./internal/playground ./cmd/trb-site
+      - name: Verify the published release before deployment
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release view "v$(cat NATIVE_VERSION)" --json isDraft --jq '.isDraft' | grep -x false
 
-      - name: Verify shared release contract
-        run: |
-          go test ./internal/releasecontract ./tools/release-contract
-          go run ./tools/release-contract --check
-
-      - name: Verify TextMate grammar
-        run: |
-          npm ci --prefix tools/textmate
-          npm test --prefix tools/textmate
-
-      - name: Verify website build tools
-        run: |
-          npm ci --prefix tools/site
-          npm test --prefix tools/site
-
-      - name: Verify documentation-only transition build
-        shell: bash
-        run: |
-          ./scripts/build-site.sh "$RUNNER_TEMP/docs-only-site" v0.5-scope-check docs-only
-          test -s "$RUNNER_TEMP/docs-only-site/docs/getting-started/index.html"
-          grep -F 'temporarily paused' "$RUNNER_TEMP/docs-only-site/play/index.html"
-          grep -F 'temporarily paused' "$RUNNER_TEMP/docs-only-site/tour/index.html"
-          test ! -e "$RUNNER_TEMP/docs-only-site/assets/trb.wasm"
-          test ! -e "$RUNNER_TEMP/docs-only-site/assets/wasm_exec.js"
-          test ! -e "$RUNNER_TEMP/docs-only-site/assets/playground-worker.js"
-          test ! -e "$RUNNER_TEMP/docs-only-site/runtime.json"
-
-      - name: Build TypeRB website
+      - name: Build the canonical documentation site
         shell: bash
         run: |
           set -euo pipefail
-          version="$(go run ./cmd/trb version)"
-          ./scripts/build-site.sh dist/site "$version"
-          test -s dist/site/index.html
-          test -s dist/site/docs/index.html
+          (cd .site-generator && go build -trimpath -buildvcs=false -o "$RUNNER_TEMP/trb-site" ./cmd/trb-site)
+          "$RUNNER_TEMP/trb-site" --out dist/site --docs docs --version "$(cat NATIVE_VERSION)" --docs-only
+          node .site-generator/tools/site/highlight.mjs dist/site syntaxes/typerb.tmLanguage.json
+          cp llms.txt dist/site/llms.txt
+          cp -R docs/capabilities/dependencies dist/site/dependencies
           test -s dist/site/docs/getting-started/index.html
-          test -s dist/site/docs/capabilities/index.html
-          test -s dist/site/docs/guides/linting/index.html
-          test -s dist/site/docs/lint-rules/index.html
-          test -s dist/site/docs/lint-rules/prefer-conditional-transfer/index.html
-          test -s dist/site/play/index.html
-          test -s dist/site/tour/index.html
-          test -s dist/site/llms.txt
-          test -s dist/site/assets/trb.wasm
-          test -s dist/site/assets/wasm_exec.js
-          grep -F 'href="/docs/"' dist/site/index.html
-          grep -F 'href="/tour/"' dist/site/index.html
-          grep -F 'href="/play/"' dist/site/index.html
-          grep -F 'class="shiki github-dark-default"' dist/site/docs/getting-started/index.html
-          if grep -R -F 'class="language-trb"' dist/site/docs; then
-            echo "TypeRB documentation fences were not statically highlighted" >&2
-            exit 1
-          fi
-          grep -F 'url=/' dist/site/type-rb/index.html
-          grep -F 'url=/tour/' dist/site/type-rb/tour/index.html
-          grep -F 'url=/play/' dist/site/type-rb/play/index.html
-          grep -F '"transport": "wasm"' dist/site/runtime.json
-          grep -F '"version": "'"$version"'"' dist/site/runtime.json
-          grep -F '# TypeRB' dist/site/llms.txt
-          grep -F 'https://type-rb.github.io/docs/specification/' dist/site/llms.txt
+          test -s dist/site/docs/native-cli/index.html
+          test -s dist/site/dependencies/index.html
+          grep -F 'temporarily paused' dist/site/play/index.html
+          grep -F 'temporarily paused' dist/site/tour/index.html
+          test ! -e dist/site/assets/trb.wasm
+          test ! -e dist/site/assets/wasm_exec.js
+          test ! -e dist/site/assets/playground-worker.js
+          test ! -e dist/site/runtime.json
+          {
+            git -C .site-generator rev-parse HEAD
+            go version
+            sha256sum .site-generator/go.mod .site-generator/go.sum "$RUNNER_TEMP/trb-site"
+          } > dist/site/site-build.txt
 
       - name: Prepare legacy Pages redirects
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
         shell: bash
         run: |
           set -euo pipefail
@@ -162,22 +102,23 @@ jobs:
           cp dist/site/type-rb/play/index.html dist/legacy-pages/play/index.html
           cp dist/site/type-rb/tour/index.html dist/legacy-pages/tour/index.html
 
-      - name: Publish organization Pages branch
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+      - name: Publish the organization Pages branch
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
         shell: bash
         env:
           PAGES_DEPLOY_KEY: ${{ secrets.PAGES_DEPLOY_KEY }}
         run: |
           set -euo pipefail
           if [ -z "$PAGES_DEPLOY_KEY" ]; then
-            echo "PAGES_DEPLOY_KEY must be configured to publish type-rb/type-rb.github.io" >&2
+            echo "PAGES_DEPLOY_KEY must be configured to publish the organization site" >&2
             exit 1
           fi
 
           key_file="$RUNNER_TEMP/type-rb-pages-deploy-key"
           known_hosts_file="$RUNNER_TEMP/type-rb-pages-known-hosts"
           site_dir="$RUNNER_TEMP/type-rb-github-io"
-          site_repository="git@github.com:type-rb/type-rb.github.io.git"
+          site_owner="$GITHUB_REPOSITORY_OWNER"
+          site_repository="git@github.com:$site_owner/$site_owner.github.io.git"
 
           umask 077
           printf '%s\n' "$PAGES_DEPLOY_KEY" > "$key_file"
@@ -205,17 +146,17 @@ jobs:
           git -C "$site_dir" push origin HEAD:site
 
       - name: Configure legacy GitHub Pages
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
         uses: actions/configure-pages@v6
 
       - name: Upload legacy Pages redirects
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
         uses: actions/upload-pages-artifact@v5
         with:
           path: dist/legacy-pages
 
   deploy-legacy-redirects:
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     needs: build
     runs-on: ubuntu-latest
     environment:

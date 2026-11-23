@@ -1,0 +1,48 @@
+import { lex_module } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { discover_web_routes } from project/web_routes
+import { official_source_kind } from project/official_catalog
+import { CompilerState, add_module, compiler_new } from state/state
+import { store_integer } from support/storage
+import { expect_compiler_phase } from testing/pipeline
+
+# Shared synthetic fixture for declaration checking and document generation.
+# Tests select the phase under observation; this helper does not assert success.
+def web_endpoint_test_state(body: String, declarations: String = "", path: String = "items", additional_imports: String = "", namespace: String = ""): CompilerState
+	mut names := "Context, Response, Endpoint"
+	if body.include?("handles(")
+		names += ", handles"
+	end
+	if body.include?("input<")
+		names += ", input"
+	end
+	if body.include?("response<")
+		names += ", response"
+	end
+	mut contract := "class ItemsEndpoint < Endpoint\n" + body + "\nend\n"
+	if namespace != ""
+		contract = "module " + namespace + "\n" + contract + "end\n"
+	end
+	source := "import { " + names + " } from trb/web\n" + additional_imports + "\n" + declarations + "\ndef get(_context: Context): Response\nreturn Response.new()\nend\n" + contract
+	# Minimal owned declarations avoid exercising byte adapters in the Go-hosted
+	# unit runner. Ordinary CLI cases load and execute the exact pinned package.
+	owned := "class Context\nend\nclass Response\nend\nclass Endpoint\nend\ndef handles(handler: (Context) -> Response)\nreturn\nend\ndef input<T>()\nreturn\nend\ndef response<T>(*, status: Integer)\nreturn\nend\n"
+	modules := ["main", "routes/" + path, "trb/web/index"]
+	sources := ["def main()\nputs(\"ready\")\nend\n", source, owned]
+	mut state := compiler_new(1048576)
+	modules.each do |name|
+		add_module(state, name, "/project/src/" + name + ".trb")
+	end
+	mut index := 0
+	while index < modules.size()
+		state.module_graph.active_module[0] = index
+		start := state.source_tokens.token_count[0]
+		expect_compiler_phase(state, "lex", lex_module(state, sources[index], index))
+		expect_compiler_phase(state, "parse", parse_module(state, start, index))
+		index += 1
+	end
+	store_integer(state.standard_modules, 2, official_source_kind("trb/web"))
+	expect_compiler_phase(state, "routes", discover_web_routes(state, [-1, -1, 0]))
+	state.module_graph.active_module[0] = 0
+	return state
+end

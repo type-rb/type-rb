@@ -1,0 +1,119 @@
+import { check, emit_qbe } from compiler
+import { CompilerState, has_diagnostic } from state/state
+import { mir_op_string_literal } from mir/model/instructions
+import { mir_root_plan_equal } from mir/analysis/roots
+import { optimize_verified_mir } from mir/passes/optimize
+import { verify_mir } from mir/verify/module
+import { logical_checked_source } from testing/pipeline
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { control_test_output } from testing/mir/control
+import { logical_run_qbe } from testing/qbe_runner
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+def literal_root_state(source: String): CompilerState
+	mut state := logical_checked_source(source)
+	expect(check(state)).to_be_true()
+	expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	return state
+end
+
+def literal_root_forced_run(state: CompilerState, expected: String)
+	qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+	if qbe != nil
+		output := control_test_output(emit_qbe(state))
+		expect(has_diagnostic(state)).to_be_false()
+		marker := "\t%result =l call $trbn_gc_alloc(l $trbn_desc_string, l %size, l 0)"
+		parts := output.split(marker)
+		expect(parts.size()).to_equal(2)
+		forced := parts[0] + "\tcall $trbn_gc_collect(w 0)\n" + marker + parts[1]
+		case logical_run_qbe(qbe, forced)
+		when Result::Ok(actual)
+			expect(actual).to_equal(expected)
+		when Result::Err(error)
+			puts(error)
+			expect(false).to_be_true()
+		end
+	end
+end
+
+describe("MIR permanent String roots") do
+	test("omits exact literal definitions and retains allocated concat inputs") do
+		mut state := literal_root_state("def decorate(input: String): String\nprefix := \"prefix:\"\npart := input + \"!\"\nputs(part.size())\nreturn prefix + part\nend\ndef main()\nputs(decorate(17.to_s()))\nend\n")
+		plan := state.scalar_mir.root_plans[0]
+		expect(plan.instructions.size()).to_equal(3)
+		expect(plan.capacity).to_equal(1)
+		expect(plan.roots[0]).to_equal([0])
+		expect(plan.roots[1].size()).to_equal(1)
+		function := state.scalar_mir.functions[0]
+		mut block_index := function.block_start
+		while block_index < function.block_start + function.block_count
+			block := state.scalar_mir.blocks[block_index]
+			mut position := block.instruction_start
+			while position < block.instruction_start + block.instruction_count
+				instruction := state.scalar_mir.instructions[position]
+				if instruction.kind == mir_op_string_literal()
+					plan.roots.each do |roots|
+						expect(roots.include?(instruction.result)).to_be_false()
+					end
+				end
+				position += 1
+			end
+			block_index += 1
+		end
+		literal_root_forced_run(state, "3\nprefix:17!\n")
+		state.scalar_mir.root_plans[0].roots[0] = []
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR live root plan differs")
+	end
+
+	test("retains merged parameters that can hold either permanent or allocated text") do
+		source := "def retain(input: String, literal: Boolean): String\nmut text := input\nif literal\ntext = \"fixed\"\nend\nsuffix := 23.to_s()\nreturn text + suffix\nend\ndef main()\nputs(retain(17.to_s(), false))\nputs(retain(17.to_s(), true))\nend\n"
+		mut state := literal_root_state(source)
+		before := state.scalar_mir.root_plans[0]
+		expect(before.capacity).to_equal(2)
+		expect(before.roots[0].size()).to_equal(1)
+		literal_root_forced_run(state, "1723\nfixed23\n")
+		intrinsic_mir_erase(state)
+		function := state.scalar_mir.functions[0]
+		mut left := function.block_start
+		mut right := left + function.block_count - 1
+		while left < right
+			saved := state.scalar_mir.blocks[left]
+			state.scalar_mir.blocks[left] = state.scalar_mir.blocks[right]
+			state.scalar_mir.blocks[right] = saved
+			left += 1
+			right -= 1
+		end
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(mir_root_plan_equal(before, state.scalar_mir.root_plans[0])).to_be_true()
+		literal_root_forced_run(state, "1723\nfixed23\n")
+	end
+
+	test("keeps independent empty safe points after filtering permanent values") do
+		state := literal_root_state("def keep(): String\nsaved := \"kept\"\nputs(1.to_s())\nputs(2.to_s())\nreturn saved\nend\ndef main()\nputs(keep())\nend\n")
+		plan := state.scalar_mir.root_plans[0]
+		expect(plan.capacity).to_equal(0)
+		expect(plan.instructions.size()).to_equal(2)
+		literal_root_forced_run(state, "1\n2\nkept\n")
+		mut first := plan.roots[0]
+		first.push(12345)
+		expect(plan.roots[0]).to_equal([12345])
+		expect(plan.roots[1].size()).to_equal(0)
+	end
+
+	test("preserves compressed literals across repeated forced collection") do
+		mut compressed := ""
+		mut index := 0
+		while index < 24
+			compressed += "abcdefghijklmnop"
+			index += 1
+		end
+		source := "def keep(): String\nlarge := \"" + compressed + "\"\nwide := \"tail\"\nmut index := 0\nmut text := \"\"\nwhile index < 30\ntext = index.to_s()\nindex += 1\nend\nreturn large + wide + text\nend\ndef main()\nputs(keep())\nend\n"
+		state := literal_root_state(source)
+		output := control_test_output(emit_qbe(state))
+		expect(output.include?("call $trbn_static_string_decode")).to_be_true()
+		literal_root_forced_run(state, compressed + "tail29\n")
+	end
+end

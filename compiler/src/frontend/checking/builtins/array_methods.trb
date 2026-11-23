@@ -1,0 +1,106 @@
+import { mir_array_mutate_unshift, mir_guard_array_not_empty } from mir/model/operation_modes
+import { array_method_concat, array_method_count, array_method_dup, array_method_empty, array_method_first, array_method_include, array_method_index, array_method_join, array_method_last, array_method_none, array_method_pop, array_method_reverse, array_method_shift, array_method_slice, array_method_sort, array_method_sort_descending, array_method_uniq, array_method_unshift } from frontend/types/method_kinds
+import { mir_state_failure_block_slot } from state/local_slots
+import { mir_op_array_copy, mir_op_array_join, mir_op_array_load, mir_op_array_mutate, mir_op_array_size, mir_op_guard } from mir/model/instructions
+import { mir_array_query } from frontend/checking/builtins/array_queries
+import { mir_array_sort } from frontend/checking/builtins/array_sorting
+import { mir_checked_string_operation } from mir/lowering/strings
+import { CheckedValue, checked_mir_value, checked_value, scalar_mir_binary, scalar_mir_instruction, scalar_mir_literal } from frontend/checking/body/values
+import { mir_checked_array_operation } from mir/lowering/arrays
+import { mir_nullable_coerce } from mir/lowering/nullable
+import { mir_control_active, mir_control_prepare } from mir/build/control
+import { array_element_type } from frontend/resolution/type_resolution
+import { CompilerState } from state/state
+import { CheckedLocals } from state/local_state
+import { load_integer } from support/storage
+
+def array_method_kind(name: String): Integer
+	if name == "empty?"
+		return array_method_empty()
+	elsif name == "first"
+		return array_method_first()
+	elsif name == "last"
+		return array_method_last()
+	elsif name == "dup"
+		return array_method_dup()
+	elsif name == "reverse"
+		return array_method_reverse()
+	elsif name == "slice"
+		return array_method_slice()
+	elsif name == "unshift"
+		return array_method_unshift()
+	elsif name == "pop"
+		return array_method_pop()
+	elsif name == "shift"
+		return array_method_shift()
+	elsif name == "include?"
+		return array_method_include()
+	elsif name == "count"
+		return array_method_count()
+	elsif name == "index"
+		return array_method_index()
+	elsif name == "uniq"
+		return array_method_uniq()
+	elsif name == "concat"
+		return array_method_concat()
+	elsif name == "join"
+		return array_method_join()
+	elsif name == "sort"
+		return array_method_sort()
+	elsif name == "sort_descending"
+		return array_method_sort_descending()
+	end
+	return array_method_none()
+end
+
+def array_method_arity(kind: Integer): Integer
+	if kind == array_method_slice() || kind == array_method_unshift() || (kind >= array_method_include() && kind <= array_method_index()) || kind == array_method_concat() || kind == array_method_join()
+		return 1
+	end
+	return 0
+end
+
+def mir_array_method(mut state: CompilerState, mut locals: CheckedLocals, kind: Integer, receiver: CheckedValue, argument: CheckedValue, origin: Integer): CheckedValue
+	if kind >= array_method_sort()
+		return mir_array_sort(state, locals, receiver, kind == array_method_sort_descending(), origin)
+	end
+	if kind == array_method_join()
+		return mir_checked_string_operation(state, locals, mir_op_array_join(), checked_mir_value(receiver), checked_mir_value(argument), 0, "String", origin)
+	end
+	if kind >= array_method_include()
+		return mir_array_query(state, locals, kind, receiver, argument, origin)
+	end
+	if kind >= array_method_unshift()
+		element := array_element_type(receiver.type_name)
+		if kind == array_method_unshift()
+			value := mir_nullable_coerce(state, locals, argument, element, origin)
+			return mir_checked_array_operation(state, locals, mir_op_array_mutate(), checked_mir_value(receiver), checked_mir_value(value), mir_array_mutate_unshift(), "Void", origin)
+		end
+		result := mir_checked_array_operation(state, locals, mir_op_array_mutate(), checked_mir_value(receiver), -1, kind - array_method_unshift(), element, origin)
+		return checked_value(result.type_name, result.category, origin, 1)
+	end
+	if kind >= array_method_dup()
+		mut bounds := -1
+		if kind == array_method_slice()
+			bounds = checked_mir_value(argument)
+		end
+		return mir_checked_array_operation(state, locals, mir_op_array_copy(), checked_mir_value(receiver), bounds, kind - array_method_dup(), receiver.type_name, origin)
+	end
+	mir_control_prepare(state, locals)
+	zero := scalar_mir_literal(state, locals, "Integer", origin, "0")
+	size := mir_checked_array_operation(state, locals, mir_op_array_size(), checked_mir_value(receiver), -1, 0, "Integer", origin)
+	if kind == array_method_empty()
+		return scalar_mir_binary(state, locals, "==", size, zero, "Boolean", origin)
+	end
+	present := scalar_mir_binary(state, locals, ">", size, zero, "Boolean", origin)
+	if mir_control_active(locals)
+		scalar_mir_instruction(state, locals, mir_op_guard(), -1, checked_mir_value(present), -1, mir_guard_array_not_empty(), locals.mir_state[mir_state_failure_block_slot()], load_integer(state.source_tokens.token_lines, origin))
+	end
+	mut index := checked_mir_value(zero)
+	if kind == array_method_last()
+		one := scalar_mir_literal(state, locals, "Integer", origin, "1")
+		index = checked_mir_value(scalar_mir_binary(state, locals, "-", size, one, "Integer", origin))
+	end
+	result := mir_checked_array_operation(state, locals, mir_op_array_load(), checked_mir_value(receiver), index, 0, array_element_type(receiver.type_name), origin)
+	return checked_value(result.type_name, result.category, origin, 1)
+end

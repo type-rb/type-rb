@@ -1,0 +1,142 @@
+import { declare_json_codecs, json_provider_kind, json_provider_request, json_provider_response } from frontend/providers/json_declarations
+import { generic_program_fork } from frontend/checking/program/generic_fork
+import { instantiate_generic_function } from frontend/resolution/generic_functions
+import { find_record_in_module } from frontend/resolution/declaration_lookup
+import { record_type } from frontend/resolution/type_resolution
+import { GenericFunction } from frontend/types/generic_model
+import { check, emit_qbe } from compiler
+import { resolve } from frontend/checking/program/resolution
+import { lex } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { standard_source_json } from state/standard_source_kinds
+import { official_source_kind } from project/official_catalog
+import { CompilerState, compiler_new } from state/state
+import { store_integer } from support/storage
+import { expect_compiler_phase } from testing/pipeline
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { control_test_output } from testing/mir/control
+import { verify_mir } from mir/verify/module
+import { MirSignature } from mir/model/module
+import { describe, expect, test } from trb/std/test
+
+# This owned fixture isolates typed schema generation from the byte decoder.
+# CLI cases separately execute the unchanged JSON wrappers and native adapter.
+def json_provider_test_state(owned: Boolean, fields: String = "id: Integer", probe: String = "puts(value.id)"): CompilerState
+	source := "import trb/std/result\nmodule JSON\nenum ErrorKind\nSyntax\nDecode\nEncode\nend\nrecord Error\nkind: JSON::ErrorKind\nmessage: String\npath: String\nline: Integer?\ncolumn: Integer?\nend\nenum Value\nNull\nBoolean(value: Boolean)\nInteger(value: Integer)\nFloat(value: Float)\nString(value: String)\nArray(value: Array<JSON::Value>)\nObject(value: Hash<String, JSON::Value>)\nend\nend\ndef parse(_source: String): Result<JSON::Value, JSON::Error>\nreturn Result<JSON::Value, JSON::Error>::Ok(JSON::Value::Object({\"id\" => JSON::Value::Integer(7)}))\nend\ndef stringify(_value: JSON::Value): Result<String, JSON::Error>\nreturn Result<String, JSON::Error>::Ok(\"encoded\")\nend\nrecord Payload\n" + fields + "\nend\ndef main()\ncase decode<Payload>(\"input\")\nwhen Result::Ok(value)\n" + probe + "\ncase encode(value)\nwhen Result::Ok(encoded)\nputs(encoded)\nwhen Result::Err(error)\nputs(error.message)\nend\nwhen Result::Err(error)\nputs(error.message)\nend\nend\n"
+	mut state := compiler_new(1048576)
+	expect_compiler_phase(state, "lex", lex(state, source))
+	if owned
+		store_integer(state.standard_modules, 0, standard_source_json())
+	end
+	expect_compiler_phase(state, "parse", parse_module(state, 0, 0))
+	declare_json_codecs(state, 0)
+	if owned
+		expect_compiler_phase(state, "resolve", resolve(state))
+	end
+	return state
+end
+
+describe("Checked JSON codec providers") do
+	test("produces independently verified MIR that survives source erasure") do
+		mut state := json_provider_test_state(true)
+		expect_compiler_phase(state, "check", check(state))
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		before := control_test_output(emit_qbe(state))
+		intrinsic_mir_erase(state)
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+	end
+
+	test("joins nullable schemas through their canonical optional types") do
+		["Integer?", "Array<Integer?>", "Array<Hash<String, Integer?>>", "Hash<String, Array<String?>>"].each do |field|
+			mut state := json_provider_test_state(true, "id: " + field, "")
+			expect_compiler_phase(state, "check", check(state))
+			expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		end
+	end
+
+	test("decodes empty records without an unused object pattern binding") do
+		mut state := json_provider_test_state(true, "", "")
+		expect_compiler_phase(state, "check", check(state))
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	end
+
+	test("rejects a forged typed result independently of the provider source") do
+		mut state := json_provider_test_state(true)
+		expect_compiler_phase(state, "check", check(state))
+		mut changed := 0
+		state.type_resolution.generic_function_instances.each do |instance|
+			if json_provider_kind(state, instance.definition) > 0
+				row := state.scalar_mir.signatures[instance.function]
+				state.scalar_mir.signatures[instance.function] = MirSignature.new(id: row.id, kind: row.kind, name: row.name, adapter: row.adapter, source_id: row.source_id, line: row.line, parameter_types: row.parameter_types, parameter_mutable: row.parameter_mutable, result_type: "Integer")
+				changed += 1
+			end
+		end
+		expect(changed).to_equal(2)
+		expect(verify_mir(state.scalar_mir, true) != "").to_be_true()
+	end
+
+	test("requires loader ownership and complete canonical signatures") do
+		mut authored := json_provider_test_state(false)
+		expect(authored.type_resolution.generic_functions.size()).to_equal(0)
+		mut state := json_provider_test_state(true)
+		mut count := 0
+		mut index := 0
+		while index < state.type_resolution.generic_functions.size()
+			if json_provider_kind(state, index) > 0
+				row := state.type_resolution.generic_functions[index]
+				state.type_resolution.generic_functions[index] = GenericFunction.new(receiver_type: row.receiver_type, name: row.name, source_id: row.source_id, line: row.line, type_parameters: row.type_parameters, parameters: row.parameters, result_type: "Integer", body_start: row.body_start, body_finish: row.body_finish)
+				expect(json_provider_kind(state, index)).to_equal(0)
+				count += 1
+			end
+			index += 1
+		end
+		expect(count).to_equal(2)
+	end
+
+	test("keeps the response factory static and the request decoder instance-bound") do
+		mut state := compiler_new(1048576)
+		expect_compiler_phase(state, "lex", lex(state, "class Request\nend\nclass Response\nend\n"))
+		store_integer(state.standard_modules, 0, official_source_kind("trb/web"))
+		expect_compiler_phase(state, "parse", parse_module(state, 0, 0))
+		declare_json_codecs(state, 0)
+		mut checked := 0
+		mut index := 0
+		while index < state.type_resolution.generic_functions.size()
+			row := state.type_resolution.generic_functions[index]
+			kind := json_provider_kind(state, index)
+			if kind == json_provider_request()
+				expect(row.receiver_type).to_equal("Request")
+				checked += 1
+			elsif kind == json_provider_response()
+				expect(row.receiver_type).to_equal("")
+				state.type_resolution.generic_functions[index] = GenericFunction.new(receiver_type: "Response", name: row.name, source_id: row.source_id, line: row.line, type_parameters: row.type_parameters, parameters: row.parameters, result_type: row.result_type, body_start: row.body_start, body_finish: row.body_finish)
+				expect(json_provider_kind(state, index)).to_equal(0)
+				checked += 1
+			end
+			index += 1
+		end
+		expect(checked).to_equal(2)
+	end
+
+	test("keeps speculative schemas from mutating borrowed source syntax") do
+		parent := json_provider_test_state(true)
+		tokens := parent.source_tokens.token_count[0]
+		aliases := parent.type_resolution.type_aliases.size()
+		controls := parent.parsed.controls.size()
+		mut fork := generic_program_fork(parent)
+		mut index := 0
+		mut count := 0
+		while index < fork.type_resolution.generic_functions.size()
+			if json_provider_kind(fork, index) > 0
+				target := record_type(find_record_in_module(fork, 0, "Payload"))
+				expect(instantiate_generic_function(fork, index, [target], 0) >= 0).to_be_true()
+				count += 1
+			end
+			index += 1
+		end
+		expect(count).to_equal(2)
+		expect(parent.source_tokens.token_count[0]).to_equal(tokens)
+		expect(parent.type_resolution.type_aliases.size()).to_equal(aliases)
+		expect(parent.parsed.controls.size()).to_equal(controls)
+	end
+end

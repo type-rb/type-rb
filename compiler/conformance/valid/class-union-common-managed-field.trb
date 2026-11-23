@@ -1,0 +1,16 @@
+class First
+	@padding: Integer := 10
+	@items: Array<String> := ["first" + "!"]
+end
+class Second
+	@items: Array<String> := ["second" + "!"]
+end
+alias Items = First | Second
+def read(value: Items): String
+	return value.items[0]
+end
+
+def main()
+	puts(read(First.new()))
+	puts(read(Second.new()))
+end

@@ -1,0 +1,140 @@
+import { check } from compiler
+import { logical_checked_source } from testing/pipeline
+import { CompilerState } from state/state
+import { MirRootPlan, mir_function_index } from mir/model/module
+import { mir_function_roots, mir_root_plan_equal } from mir/analysis/roots
+import { mir_managed_type } from mir/model/types
+import { verify_mir } from mir/verify/module
+import { describe, expect, test } from trb/std/test
+
+def empty_root_test_state(): CompilerState
+	source := "def relay(flag: Boolean): Integer\nmut count := 0\nif flag\ncount = allocate(10)\nelse\ncount = allocate(20)\nend\nreturn count + allocate(30)\nend\ndef allocate(value: Integer): Integer\ntext := value.to_s()\nreturn text.size()\nend\ndef main()\nputs(relay(true))\nend\n"
+	mut state := logical_checked_source(source)
+	expect(check(state)).to_be_true()
+	expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	return state
+end
+
+def empty_root_test_managed_state(): CompilerState
+	mut state := logical_checked_source("def keep(value: String): String\nfirst := value + \"first\"\nreturn value + first\nend\ndef main()\nputs(keep(\"held\"))\nend\n")
+	expect(check(state)).to_be_true()
+	expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	return state
+end
+
+describe("MIR empty root sets") do
+	test("keeps scalar loop control free of safe points") do
+		mut state := logical_checked_source("def walk(value: Integer): Integer\nmut count := 0\nmut total := 0\nwhile count < value\ntotal += count\ncount += 1\nend\nreturn total\nend\ndef main()\nputs(walk(3))\nend\n")
+		expect(check(state)).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		index := mir_function_index(state.scalar_mir, 0)
+		expect(state.scalar_mir.functions[index].kind).to_equal(3)
+		state.scalar_mir.values.each do |value|
+			if value.function_id == 0
+				expect(mir_managed_type(state.scalar_mir, value.type_id)).to_be_false()
+			end
+		end
+		plan := state.scalar_mir.root_plans[index]
+		expect(plan.capacity).to_equal(0)
+		expect(plan.instructions.size()).to_equal(0)
+		expect(plan.roots.size()).to_equal(0)
+	end
+
+	test("retains empty safe points for scalar callers of allocating functions") do
+		state := empty_root_test_state()
+		index := mir_function_index(state.scalar_mir, 0)
+		expect(state.scalar_mir.functions[index].kind).to_equal(3)
+		state.scalar_mir.values.each do |value|
+			if value.function_id == 0
+				expect(mir_managed_type(state.scalar_mir, value.type_id)).to_be_false()
+			end
+		end
+		plan := state.scalar_mir.root_plans[index]
+		expect(plan.capacity).to_equal(0)
+		expect(plan.instructions.size()).to_equal(3)
+		expect(plan.roots.size()).to_equal(3)
+		plan.instructions.each do |point|
+			instruction := state.scalar_mir.instructions[point]
+			expect(instruction.kind).to_equal(11)
+			expect(state.scalar_mir.calls[instruction.payload].callee).to_equal(1)
+		end
+		plan.roots.each do |roots|
+			expect(roots.size()).to_equal(0)
+		end
+	end
+
+	test("keeps retained empty root lists independent") do
+		mut state := empty_root_test_state()
+		index := mir_function_index(state.scalar_mir, 0)
+		plan := state.scalar_mir.root_plans[index]
+		mut first := plan.roots[0]
+		first.push(12345)
+		expect(plan.roots[0]).to_equal([12345])
+		expect(plan.roots[1].size()).to_equal(0)
+		expect(plan.roots[2].size()).to_equal(0)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR live root plan differs")
+	end
+
+	test("preserves empty point identities after physical block reordering") do
+		mut state := empty_root_test_state()
+		index := mir_function_index(state.scalar_mir, 0)
+		function := state.scalar_mir.functions[index]
+		before := state.scalar_mir.root_plans[index]
+		mut left := function.block_start
+		mut right := left + function.block_count - 1
+		while left < right
+			saved := state.scalar_mir.blocks[left]
+			state.scalar_mir.blocks[left] = state.scalar_mir.blocks[right]
+			state.scalar_mir.blocks[right] = saved
+			left += 1
+			right -= 1
+		end
+		after := mir_function_roots(state.scalar_mir, function)
+		expect(mir_root_plan_equal(before, after)).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	end
+
+	test("retains managed parameters across allocating operations") do
+		state := empty_root_test_managed_state()
+		index := mir_function_index(state.scalar_mir, 0)
+		function := state.scalar_mir.functions[index]
+		parameter := state.scalar_mir.arguments[function.parameter_start]
+		plan := state.scalar_mir.root_plans[index]
+		expect(plan.capacity > 0).to_be_true()
+		expect(plan.instructions.size() > 0).to_be_true()
+		mut retained := false
+		plan.roots.each do |roots|
+			if roots.include?(parameter)
+				retained = true
+			end
+		end
+		expect(retained).to_be_true()
+	end
+
+	test("rejects forged empty plans and stale plans for managed functions") do
+		mut mode := 0
+		while mode < 5
+			mut state := empty_root_test_state()
+			index := mir_function_index(state.scalar_mir, 0)
+			mut plan := state.scalar_mir.root_plans[index]
+			if mode == 0
+				plan = MirRootPlan.new(function_id: plan.function_id + 1, instructions: plan.instructions, roots: plan.roots, capacity: 0)
+			elsif mode == 1
+				plan = MirRootPlan.new(function_id: plan.function_id, instructions: plan.instructions, roots: plan.roots, capacity: 1)
+			elsif mode == 2
+				plan.roots[0] = [12345]
+			elsif mode == 3
+				plan.instructions[0] = plan.instructions[1]
+			else
+				plan = MirRootPlan.new(function_id: plan.function_id, instructions: [], roots: [], capacity: 0)
+			end
+			state.scalar_mir.root_plans[index] = plan
+			expect(verify_mir(state.scalar_mir, true)).to_equal("MIR live root plan differs")
+			mode += 1
+		end
+		scalar := empty_root_test_state()
+		mut managed := empty_root_test_managed_state()
+		managed.scalar_mir.root_plans[mir_function_index(managed.scalar_mir, 0)] = scalar.scalar_mir.root_plans[mir_function_index(scalar.scalar_mir, 0)]
+		expect(verify_mir(managed.scalar_mir, true)).to_equal("MIR live root plan differs")
+	end
+end

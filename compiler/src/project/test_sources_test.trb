@@ -1,0 +1,46 @@
+import { CompilerProjectSources, check, load_package_project_sources_with_tests } from compiler
+import { project_packages_new } from project/packages
+import { CompilerState, has_diagnostic } from state/state
+import { resolve } from frontend/checking/program/resolution
+import { expect_compiler_phase } from testing/pipeline
+import { load_string } from support/storage
+import { describe, expect, test } from trb/std/test
+
+def selected_source_fixture(selected: Array<String>, owner: Integer = -1): CompilerState
+	return load_package_project_sources_with_tests("/project/trbconfig.jsonc", CompilerProjectSources.new(paths: ["/project/src/main.trb", "/project/src/suite_test.trb"], sources: ["def main()\nputs(1)\nend\n", "import { describe, test } from trb/std/test\ndescribe(\"Selected\") do\ntest(\"body\") do\nputs(42)\nend\nend\n"], error: ""), ["main", "suite_test"], [-1, owner], project_packages_new(""), true, false, selected)
+end
+
+describe("Selected test source loading") do
+	test("parses selected application test declarations and checks their bodies") do
+		mut state := selected_source_fixture(["/project/src/suite_test.trb"])
+		expect_compiler_phase(state, "load", !has_diagnostic(state))
+		expect(state.parsed.tests.size()).to_equal(2)
+		expect(state.parsed.tests[1].full_name).to_equal("Selected / body")
+		expect_compiler_phase(state, "resolve", resolve(state))
+		expect_compiler_phase(state, "check", check(state))
+	end
+
+	test("does not enable test syntax for an unselected module or a dependency") do
+		unselected := selected_source_fixture([])
+		expect(has_diagnostic(unselected)).to_be_true()
+		dependency := selected_source_fixture(["/project/src/suite_test.trb"], 0)
+		expect(has_diagnostic(dependency)).to_be_true()
+		expect(dependency.parsed.tests.size()).to_equal(0)
+	end
+
+	test("keeps authored imports outside the private capture boundary") do
+		state := load_package_project_sources_with_tests("/project/trbconfig.jsonc", CompilerProjectSources.new(paths: ["/project/src/main.trb"], sources: ["import { capture } from trb/internal/test\ndef main()\nreturn\nend\n"], error: ""), ["main"], [-1], project_packages_new(""), true, false, [])
+		expect(has_diagnostic(state)).to_be_true()
+		expect(load_string(state.diagnostics.messages, 0)).to_equal("internal test operations are reserved for verified standard sources")
+	end
+
+	test("rejects ordinary calls and function values for the test declaration bindings") do
+		["describe(\"ordinary\")", "_callback := describe"].each do |body|
+			mut state := load_package_project_sources_with_tests("/project/trbconfig.jsonc", CompilerProjectSources.new(paths: ["/project/src/main.trb"], sources: ["import { describe } from trb/std/test\ndef main()\n" + body + "\nend\n"], error: ""), ["main"], [-1], project_packages_new(""), true, false, [])
+			expect_compiler_phase(state, "load", !has_diagnostic(state))
+			expect_compiler_phase(state, "resolve", resolve(state))
+			expect(check(state)).to_be_false()
+			expect(load_string(state.diagnostics.messages, 0)).to_equal("test declarations are only valid in a selected test file")
+		end
+	end
+end

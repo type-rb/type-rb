@@ -1,0 +1,58 @@
+{
+  "backend": {
+    "builds": [
+      {
+        "binarySha256": "8e6a433091aa7c85e6ecab54c3f53495a3ee5962c58f1e49b1f4367828af17ae",
+        "binarySize": 404192,
+        "runnerImage": "macos-15"
+      },
+      {
+        "binarySha256": "510f15a1c724c204141d0b7531fe1641b983fe41dd008f5806470709a79a746c",
+        "binarySize": 714640,
+        "runnerImage": "ubuntu-24.04-arm"
+      }
+    ],
+    "name": "QBE",
+    "sourceSha256": "d587905d620dc5e1d2bfa7c2cc642b9b837aa89a3188c6e37b53d756cf66e320",
+    "sourceUrl": "https://c9x.me/compile/release/qbe-1.3.tar.xz",
+    "version": "1.3"
+  },
+  "nativeRevision": "0058818314977633c50393796ef9b9f8f1fda50f",
+  "releaseTag": "bootstrap-seed-2026-08-30",
+  "root": {
+    "asset": "type-rb-native-bootstrap-root-qbe-v1.ssa",
+    "kind": "gate6k-fixed-point-qbe",
+    "sha256": "62db3c31527a670c3050051a9fa27bf142b6c5deaab81ef8234104bd467aa95a",
+    "size": 658639
+  },
+  "schemaVersion": 1,
+  "status": "experimental",
+  "targets": [
+    {
+      "architecture": "arm64",
+      "asset": "type-rb-native-bootstrap-darwin-arm64",
+      "attestationSubjectSha256": "ef438d13598c534766334b408a39715c56ff1b69db528910ebf7d90ec7720b65",
+      "ccBoundary": "system-cc",
+      "mode": "0755",
+      "os": "darwin",
+      "profile": "darwin-arm64-v0",
+      "qbeTarget": "arm64_apple",
+      "runnerImage": "macos-15",
+      "sha256": "ef438d13598c534766334b408a39715c56ff1b69db528910ebf7d90ec7720b65",
+      "size": 259032
+    },
+    {
+      "architecture": "arm64",
+      "asset": "type-rb-native-bootstrap-linux-arm64",
+      "attestationSubjectSha256": "b4307c244edc9e4da620f2a7c1b03a733e575da032efefae615f9edf75048a37",
+      "ccBoundary": "system-cc",
+      "mode": "0755",
+      "os": "linux",
+      "profile": "linux-arm64-v0",
+      "qbeTarget": "arm64",
+      "runnerImage": "ubuntu-24.04-arm",
+      "sha256": "b4307c244edc9e4da620f2a7c1b03a733e575da032efefae615f9edf75048a37",
+      "size": 241488
+    }
+  ]
+}

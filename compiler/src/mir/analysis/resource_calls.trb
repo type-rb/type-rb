@@ -1,0 +1,71 @@
+# A positive synchronous-call proof is separate from mutation/allocation effects.
+# Frontend template checking and independent MIR checking can feed this graph.
+record ScopedCallGraph
+	enabled: Array<Boolean>
+	checked: Array<Integer>
+	forbidden: Array<Integer>
+	callers: Array<Integer>
+	callees: Array<Integer>
+end
+
+def scoped_call_graph(enabled: Boolean): ScopedCallGraph
+	return ScopedCallGraph.new(enabled: [enabled], checked: [], forbidden: [], callers: [], callees: [])
+end
+
+def scoped_call_node(mut graph: ScopedCallGraph, function: Integer)
+	while graph.checked.size() <= function
+		graph.checked.push(0)
+		graph.forbidden.push(0)
+	end
+end
+
+# Reverse propagation terminates for recursive strongly connected components.
+# Missing bodies and opaque edges are unsafe; a cycle alone is not unsafe.
+def scoped_call_failures(graph: ScopedCallGraph, count: Integer): Array<Integer>
+	mut failures: Array<Integer> := []
+	mut first: Array<Integer> := []
+	mut next_edge: Array<Integer> := []
+	mut pending: Array<Integer> := []
+	mut function := 0
+	while function < count
+		mut failure := 0
+		if function >= graph.checked.size() || graph.checked[function] == 0 || graph.forbidden[function] > 0
+			failure = function + 1
+			pending.push(function)
+		end
+		failures.push(failure)
+		first.push(-1)
+		function += 1
+	end
+	mut edge := 0
+	while edge < graph.callers.size()
+		callee := graph.callees[edge]
+		caller := graph.callers[edge]
+		next_edge.push(-1)
+		if caller >= 0 && caller < count
+			if callee >= 0 && callee < count
+				next_edge[edge] = first[callee]
+				first[callee] = edge
+			elsif failures[caller] == 0
+				failures[caller] = caller + 1
+				pending.push(caller)
+			end
+		end
+		edge += 1
+	end
+	mut position := 0
+	while position < pending.size()
+		callee := pending[position]
+		edge = first[callee]
+		while edge >= 0
+			caller := graph.callers[edge]
+			if failures[caller] == 0
+				failures[caller] = failures[callee]
+				pending.push(caller)
+			end
+			edge = next_edge[edge]
+		end
+		position += 1
+	end
+	return failures
+end

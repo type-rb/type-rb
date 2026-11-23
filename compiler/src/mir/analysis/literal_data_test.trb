@@ -1,0 +1,97 @@
+import { check, emit_qbe } from compiler
+import { mir_literal_data, mir_string_literal_data } from mir/analysis/literal_data
+import { MirLiteralData, mir_module_new } from mir/model/module
+import { verify_mir } from mir/verify/module
+import { logical_checked_source } from testing/pipeline
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { output_source } from testing/compiler
+import { describe, expect, test } from trb/std/test
+
+describe("Verified MIR literal data") do
+	test("owns String and singleton data without materializing scalar pool entries") do
+		mut state := logical_checked_source("def read(value: \"held\"): String\nreturn value\nend\ndef main()\nnumber: 201 := 201\nputs(number + 1)\nputs(read(\"held\"))\nputs(\"\")\nend\n")
+		expect(check(state)).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(state.scalar_mir.literal_data.size()).to_equal(state.scalar_mir.literal_texts.size())
+		mut strings := 0
+		mut singletons := 0
+		mut empty := 0
+		mut scalars := 0
+		state.scalar_mir.instructions.each do |instruction|
+			if instruction.kind == 12 || (instruction.kind == 57 && instruction.first == 8)
+				data := state.scalar_mir.literal_data[instruction.payload]
+				text := state.scalar_mir.literal_texts[instruction.payload]
+				expect(data.points).to_equal(text.size())
+				if text == "held"
+					expect(data.bytes).to_equal([104, 101, 108, 100])
+				end
+				if instruction.kind == 12
+					strings += 1
+				else
+					singletons += 1
+				end
+				if text.empty?()
+					expect(data.bytes.empty?()).to_be_true()
+					empty += 1
+				end
+			elsif instruction.kind == 6 || (instruction.kind == 57 && instruction.first == 1)
+				data := state.scalar_mir.literal_data[instruction.payload]
+				expect(data.points).to_equal(-1)
+				expect(data.bytes.empty?()).to_be_true()
+				scalars += 1
+			end
+		end
+		expect(strings > 0 && singletons > 0 && empty > 0 && scalars > 0).to_be_true()
+		before := output_source(emit_qbe(state))
+		intrinsic_mir_erase(state)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(output_source(emit_qbe(state))).to_equal(before)
+	end
+
+	test("rejects supplied raw plans and forged byte count contents and point count") do
+		mut raw := mir_module_new()
+		raw.literal_data.push(MirLiteralData.new(bytes: [], points: -1))
+		expect(verify_mir(raw, false)).to_equal("MIR input cannot supply literal data")
+		mut state := logical_checked_source("def main()\nputs(\"held\")\nputs(\"\")\nputs(201)\nend\n")
+		expect(check(state)).to_be_true()
+		mut tested := 0
+		state.scalar_mir.literal_data.each.with_index do |data, index|
+			if data.points >= 0
+				state.scalar_mir.literal_data[index] = MirLiteralData.new(bytes: data.bytes, points: data.points + 1)
+				expect(verify_mir(state.scalar_mir, true)).to_equal("MIR literal data differs")
+				state.scalar_mir.literal_data[index] = MirLiteralData.new(bytes: [255], points: data.points)
+				expect(verify_mir(state.scalar_mir, true)).to_equal("MIR literal data differs")
+				if data.bytes.size() > 0
+					state.scalar_mir.literal_data[index] = MirLiteralData.new(bytes: [105, 101, 108, 100], points: data.points)
+					expect(verify_mir(state.scalar_mir, true)).to_equal("MIR literal data differs")
+				end
+				tested += 1
+			else
+				state.scalar_mir.literal_data[index] = MirLiteralData.new(bytes: [65], points: -1)
+				expect(verify_mir(state.scalar_mir, true)).to_equal("MIR literal data differs")
+			end
+			state.scalar_mir.literal_data[index] = data
+		end
+		expect(tested > 0).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		state.scalar_mir.literal_data.push(MirLiteralData.new(bytes: [], points: -1))
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR literal data count differs")
+	end
+
+	test("derives fresh data and preserves unavailable reference-host bytes") do
+		mut state := logical_checked_source("def main()\nputs(\"held\")\nend\n")
+		expect(check(state)).to_be_true()
+		derived := mir_literal_data(state.scalar_mir)
+		state.scalar_mir.literal_data.each.with_index do |data, index|
+			if data.bytes.size() > 0
+				data.bytes[0] = 1
+				expect(derived[index].bytes[0]).to_equal(104)
+			end
+		end
+		# The reference-host byte accessor cannot represent this String. Retain
+		# that state for the existing emit-phase diagnostic, never a check error.
+		unavailable := mir_string_literal_data("é")
+		expect(unavailable.points).to_equal(1)
+		expect(unavailable.bytes.empty?()).to_be_true()
+	end
+end

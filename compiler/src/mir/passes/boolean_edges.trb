@@ -1,0 +1,268 @@
+import { mir_function_control, mir_terminator_branch, mir_terminator_jump } from mir/model/control
+import { mir_op_scalar_literal } from mir/model/instructions
+import { mir_type_boolean } from mir/model/type_ids
+import { MirBlock, MirFunction, MirModule, MirValue, mir_value_type } from mir/model/module
+import { mir_build_flow_with_values, mir_flow_alias, mir_flow_aliases, mir_flow_blocks } from mir/analysis/flow
+import { mir_live_add, mir_managed_contains } from mir/analysis/liveness
+import { mir_rewrite_confined_values } from mir/passes/rewrite
+import { integer_string } from support/literals
+
+record MirThreadedEdge
+	target: Integer
+	arguments: Array<Integer>
+	resolved: Boolean
+end
+
+record MirBooleanLiterals
+	values: Hash<String, Integer>
+	present: Boolean
+end
+
+def mir_boolean_edge_literals(native_module: MirModule, function: MirFunction): MirBooleanLiterals
+	mut literals: Hash<String, Integer> := {}
+	mut present := false
+	mut block_index := function.block_start
+	while block_index < function.block_start + function.block_count
+		block := native_module.blocks[block_index]
+		mut index := block.instruction_start
+		while index < block.instruction_start + block.instruction_count
+			instruction := native_module.instructions[index]
+			if instruction.kind == mir_op_scalar_literal()
+				text := native_module.literal_texts[instruction.payload]
+				if (text == "true" || text == "false") && mir_value_type(native_module, function.id, instruction.result) == mir_type_boolean()
+					literals[integer_string(instruction.result)] = instruction.payload
+					present = true
+				end
+			end
+			index += 1
+		end
+		block_index += 1
+	end
+	return MirBooleanLiterals.new(values: literals, present: present)
+end
+
+# Reuse the identity lattice rather than treating an unresolved loop input as
+# a constant. Entry parameters stay unknown; a converged literal identity has
+# the same Boolean value on every incoming path, including cyclic forwarding.
+def mir_boolean_edge_known_literals(native_module: MirModule, function: MirFunction, blocks: Hash<String, Integer>, values: Array<MirValue>): MirBooleanLiterals
+	facts := mir_boolean_edge_literals(native_module, function)
+	if !facts.present
+		return facts
+	end
+	flow := mir_build_flow_with_values(native_module, function, blocks, values)
+	entry := native_module.blocks[function.block_start + blocks[integer_string(function.entry_block)]]
+	aliases := mir_flow_aliases(native_module, function, flow, entry)
+	mut literals := facts.values
+	mut index := function.block_start
+	while index < function.block_start + function.block_count
+		block := native_module.blocks[index]
+		mut position := block.parameter_start
+		while position < block.parameter_start + block.parameter_count
+			value := native_module.arguments[position]
+			key := integer_string(mir_flow_alias(aliases, value))
+			if literals.key?(key)
+				literals[integer_string(value)] = literals[key]
+			end
+			position += 1
+		end
+		index += 1
+	end
+	return MirBooleanLiterals.new(values: literals, present: true)
+end
+
+def mir_boolean_edge_value(native_module: MirModule, block: MirBlock, arguments: Array<Integer>, value: Integer): Integer
+	mut index := 0
+	while index < block.parameter_count
+		if native_module.arguments[block.parameter_start + index] == value
+			return arguments[index]
+		end
+		index += 1
+	end
+	return value
+end
+
+def mir_boolean_edge_arguments(native_module: MirModule, block: MirBlock, incoming: Array<Integer>, start: Integer, count: Integer): Array<Integer>
+	mut arguments: Array<Integer> := []
+	mut index := 0
+	while index < count
+		arguments.push(mir_boolean_edge_value(native_module, block, incoming, native_module.arguments[start + index]))
+		index += 1
+	end
+	return arguments
+end
+
+# Do not publish speculative argument spans. Each visited block has no
+# instructions, so substitution skips no effect, checked failure or definition.
+def mir_boolean_edge_path(native_module: MirModule, function: MirFunction, blocks: Hash<String, Integer>, literals: Hash<String, Integer>, original: MirThreadedEdge): MirThreadedEdge
+	mut target := original.target
+	mut arguments := original.arguments
+	mut resolved := false
+	mut visited: Array<Integer> := []
+	mut skipped: Array<Integer> := []
+	while !mir_managed_contains(visited, target)
+		mir_live_add(visited, target)
+		block := native_module.blocks[function.block_start + blocks[integer_string(target)]]
+		if block.instruction_count != 0
+			break
+		end
+		mut first := true
+		if block.terminator == mir_terminator_branch()
+			condition := mir_boolean_edge_value(native_module, block, arguments, block.condition)
+			key := integer_string(condition)
+			if !literals.key?(key)
+				break
+			end
+			first = native_module.literal_texts[literals[key]] == "true"
+			resolved = true
+		elsif block.terminator != mir_terminator_jump()
+			break
+		end
+		skipped.push(blocks[integer_string(target)])
+		if first
+			arguments = mir_boolean_edge_arguments(native_module, block, arguments, block.first_argument_start, block.first_argument_count)
+			target = block.first_target
+		else
+			arguments = mir_boolean_edge_arguments(native_module, block, arguments, block.second_argument_start, block.second_argument_count)
+			target = block.second_target
+		end
+		if mir_managed_contains(visited, target)
+			return original
+		end
+	end
+	if !resolved || target == original.target
+		return original
+	end
+	# Substitution handles each block's outgoing arguments. A direct use of
+	# its parameters in another block would lose that dominating definition.
+	mut index := 0
+	while index < skipped.size()
+		block := native_module.blocks[function.block_start + skipped[index]]
+		if block.parameter_count > 0 && mir_rewrite_confined_values(native_module, function, [skipped[index]]).size() == 0
+			return original
+		end
+		index += 1
+	end
+	return MirThreadedEdge.new(target: target, arguments: arguments, resolved: true)
+end
+
+# Another incoming edge can belong to an otherwise unreachable cycle. Check
+# reachability from entry with exactly this edge removed, rather than counting
+# predecessors, so every skipped parameter block keeps a real incoming path.
+def mir_boolean_edge_target_retained(native_module: MirModule, function: MirFunction, blocks: Hash<String, Integer>, source: Integer, first_edge: Boolean, target: Integer): Boolean
+	mut pending := [function.entry_block]
+	mut visited: Array<Integer> := []
+	mut cursor := 0
+	while cursor < pending.size()
+		id := pending[cursor]
+		cursor += 1
+		if id == target
+			return true
+		end
+		if !mir_managed_contains(visited, id)
+			mir_live_add(visited, id)
+			block := native_module.blocks[function.block_start + blocks[integer_string(id)]]
+			if block.terminator == mir_terminator_jump() || block.terminator == mir_terminator_branch()
+				if id != source || !first_edge
+					pending.push(block.first_target)
+				end
+			end
+			if block.terminator == mir_terminator_branch()
+				if id != source || first_edge
+					pending.push(block.second_target)
+				end
+			end
+			mut index := block.instruction_start
+			while index < block.instruction_start + block.instruction_count
+				failure := native_module.instructions[index].failure
+				if failure >= 0
+					pending.push(failure)
+				end
+				index += 1
+			end
+		end
+	end
+	return false
+end
+
+def mir_boolean_edge_block(mut native_module: MirModule, function: MirFunction, blocks: Hash<String, Integer>, literals: Hash<String, Integer>, block: MirBlock, first: Boolean): MirBlock
+	mut target := block.first_target
+	mut start := block.first_argument_start
+	mut count := block.first_argument_count
+	if !first
+		target = block.second_target
+		start = block.second_argument_start
+		count = block.second_argument_count
+	end
+	mut arguments: Array<Integer> := []
+	mut index := 0
+	while index < count
+		arguments.push(native_module.arguments[start + index])
+		index += 1
+	end
+	original := MirThreadedEdge.new(target: target, arguments: arguments, resolved: false)
+	threaded := mir_boolean_edge_path(native_module, function, blocks, literals, original)
+	if !threaded.resolved
+		return block
+	end
+	if !mir_boolean_edge_target_retained(native_module, function, blocks, block.id, first, target)
+		return block
+	end
+	replacement := native_module.arguments.size()
+	threaded.arguments.each do |value|
+		native_module.arguments.push(value)
+	end
+	if first
+		return MirBlock.new(id: block.id, source_id: block.source_id, line: block.line, parameter_start: block.parameter_start, parameter_count: block.parameter_count, instruction_start: block.instruction_start, instruction_count: block.instruction_count, terminator: block.terminator, condition: block.condition, first_target: threaded.target, second_target: block.second_target, first_argument_start: replacement, first_argument_count: threaded.arguments.size(), second_argument_start: block.second_argument_start, second_argument_count: block.second_argument_count, return_value: block.return_value)
+	end
+	return MirBlock.new(id: block.id, source_id: block.source_id, line: block.line, parameter_start: block.parameter_start, parameter_count: block.parameter_count, instruction_start: block.instruction_start, instruction_count: block.instruction_count, terminator: block.terminator, condition: block.condition, first_target: block.first_target, second_target: threaded.target, first_argument_start: block.first_argument_start, first_argument_count: block.first_argument_count, second_argument_start: replacement, second_argument_count: threaded.arguments.size(), return_value: block.return_value)
+end
+
+# Rebuild plans after the rewrite. Blocks and definitions retain their identities;
+# only proved normal edges receive private substituted argument spans.
+def mir_thread_boolean_edges(mut native_module: MirModule, function_values: Array<Array<MirValue>>): Boolean
+	mut rewritten := false
+	mut function_index := 0
+	while function_index < native_module.functions.size()
+		function := native_module.functions[function_index]
+		if function.kind == mir_function_control()
+			facts := mir_boolean_edge_literals(native_module, function)
+			if facts.present
+				blocks := mir_flow_blocks(native_module, function)
+				mut identities: Array<Integer> := []
+				mut index := function.block_start
+				while index < function.block_start + function.block_count
+					mir_live_add(identities, native_module.blocks[index].id)
+					index += 1
+				end
+				# Stable identity order makes the retained path independent of
+				# physical storage. Revisit until no edge can be shortened:
+				# earlier rewrites may expose another constant parameter.
+				mut changed := true
+				while changed
+					changed = false
+					# A removed exit edge can make a carried parameter constant.
+					# Derive identities from the current graph on each round.
+					known := mir_boolean_edge_known_literals(native_module, function, blocks, function_values[function_index])
+					literals := known.values
+					identities.each do |id|
+						position := function.block_start + blocks[integer_string(id)]
+						block := native_module.blocks[position]
+						if block.terminator == mir_terminator_jump() || block.terminator == mir_terminator_branch()
+							native_module.blocks[position] = mir_boolean_edge_block(native_module, function, blocks, literals, block, true)
+						end
+						if block.terminator == mir_terminator_branch()
+							native_module.blocks[position] = mir_boolean_edge_block(native_module, function, blocks, literals, native_module.blocks[position], false)
+						end
+						updated := native_module.blocks[position]
+						if updated.first_target != block.first_target || updated.second_target != block.second_target
+							changed = true
+							rewritten = true
+						end
+					end
+				end
+			end
+		end
+		function_index += 1
+	end
+	return rewritten
+end

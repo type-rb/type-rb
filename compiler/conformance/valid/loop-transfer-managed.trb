@@ -1,0 +1,23 @@
+def allocate(value: String): String
+	return value + "x"
+end
+
+def main()
+	mut kept := ["start"]
+	mut index := 0
+	while index < 70000
+		index += 1
+		local := allocate("value")
+		if index == 70000
+			kept[0] = local
+			break
+		end
+		if index % 2 == 0
+			kept[0] = local
+			next
+		end
+		kept[0] = local
+	end
+	puts(index)
+	puts(kept[0])
+end

@@ -1,0 +1,84 @@
+import { web_openapi_document } from frontend/checking/program/web_openapi
+import { resolve } from frontend/checking/program/resolution
+import { find_import_binding } from frontend/resolution/declaration_lookup
+import { lex_module } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { check } from compiler
+import { add_module, has_diagnostic } from state/state
+import { ProjectWebEndpoint, ProjectWebResponse } from state/web_routes
+import { load_string, store_integer } from support/storage
+import { expect_compiler_phase } from testing/pipeline
+import { web_endpoint_test_state } from testing/web_endpoints
+import { describe, expect, test } from trb/std/test
+
+describe("Checked Web OpenAPI generation") do
+	test("keeps imported namespace schema rejection separate from local qualified types") do
+		declaration := "module Models\nrecord Item\nid: Integer\nend\nend\n"
+		mut local := web_endpoint_test_state("handles(get)\nresponse<Models::Item>(status: 200)", declaration)
+		expect_compiler_phase(local, "resolve", resolve(local))
+		expect_compiler_phase(local, "check", check(local))
+		expect(web_openapi_document(local, "API", "1.0").include?("#/components/schemas/Models::Item")).to_be_true()
+		expect(has_diagnostic(local)).to_be_false()
+		mut imported := web_endpoint_test_state("handles(get)\nresponse<Models::Item>(status: 200)", "", "items", "import { Models } from contracts/models")
+		module_index := add_module(imported, "contracts/models", "/project/src/contracts/models.trb")
+		imported.module_graph.active_module[0] = module_index
+		start := imported.source_tokens.token_count[0]
+		expect_compiler_phase(imported, "lex", lex_module(imported, declaration, module_index))
+		expect_compiler_phase(imported, "parse", parse_module(imported, start, module_index))
+		# Supply the loader's selected target in this synthetic checked-program
+		# fixture; ordinary CLI cases exercise actual project import discovery.
+		binding := find_import_binding(imported, 1, "Models")
+		expect(binding >= 0).to_be_true()
+		store_integer(imported.module_graph.import_targets, binding, module_index)
+		expect_compiler_phase(imported, "resolve", resolve(imported))
+		expect_compiler_phase(imported, "check", check(imported))
+		expect(web_openapi_document(imported, "API", "1.0")).to_equal("")
+		expect(load_string(imported.diagnostics.messages, 0).include?("JSON schema type Models::Item")).to_be_true()
+	end
+
+	test("rejects forged catalog identities before dereferencing source facts") do
+		mut state := web_endpoint_test_state("handles(get)\nresponse<String>(status: 200)")
+		expect_compiler_phase(state, "resolve", resolve(state))
+		expect_compiler_phase(state, "check", check(state))
+		state.module_graph.web_endpoints[0] = ProjectWebEndpoint.new(object_id: 999999, route_index: 0, input_type: "", input_name: "", responses: [])
+		expect(web_openapi_document(state, "API", "1.0")).to_equal("")
+		expect(load_string(state.diagnostics.messages, 0).include?("catalog identity")).to_be_true()
+	end
+
+	test("rejects a response whose canonical type disagrees with its declaration") do
+		mut state := web_endpoint_test_state("handles(get)\nresponse<String>(status: 200)")
+		expect_compiler_phase(state, "resolve", resolve(state))
+		expect_compiler_phase(state, "check", check(state))
+		row := state.module_graph.web_endpoints[0].responses[0]
+		state.module_graph.web_endpoints[0].responses[0] = ProjectWebResponse.new(status: row.status, type_name: "Integer", authored_type: row.authored_type, origin: row.origin)
+		expect(web_openapi_document(state, "API", "1.0")).to_equal("")
+		expect(load_string(state.diagnostics.messages, 0).include?("response type")).to_be_true()
+	end
+
+	test("separates recursive schema rejection from ordinary program validity") do
+		mut state := web_endpoint_test_state("handles(get)\nresponse<Node>(status: 200)", "record Node\nnext: Node?\nend")
+		expect_compiler_phase(state, "resolve", resolve(state))
+		expect_compiler_phase(state, "check", check(state))
+		expect(web_openapi_document(state, "API", "1.0")).to_equal("")
+		expect(load_string(state.diagnostics.messages, 0).include?("recursive OpenAPI")).to_be_true()
+	end
+
+	test("emits a reused nominal component once with required fields in declaration order") do
+		mut state := web_endpoint_test_state("handles(get)\nresponse<Item>(status: 200)\nresponse<Item>(status: 201)", "record Item\nz: String\na: Integer?\nend")
+		expect_compiler_phase(state, "resolve", resolve(state))
+		expect_compiler_phase(state, "check", check(state))
+		first := web_openapi_document(state, "API", "1.0")
+		expect(has_diagnostic(state)).to_be_false()
+		expect(first.include?("\"$ref\": \"#/components/schemas/Item\"")).to_be_true()
+		expect(first.include?("\"required\": [\n          \"z\"\n        ]")).to_be_true()
+		expect(web_openapi_document(state, "API", "1.0")).to_equal(first)
+	end
+
+	test("does not permit a declared body for a bodyless response status") do
+		mut state := web_endpoint_test_state("handles(get)\nresponse<String>(status: 204)")
+		expect_compiler_phase(state, "resolve", resolve(state))
+		expect_compiler_phase(state, "check", check(state))
+		expect(web_openapi_document(state, "API", "1.0")).to_equal("")
+		expect(load_string(state.diagnostics.messages, 0).include?("use Unit")).to_be_true()
+	end
+end

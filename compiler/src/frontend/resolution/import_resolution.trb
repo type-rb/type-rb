@@ -1,0 +1,420 @@
+import { import_kind_module } from state/import_kinds
+import { standard_source_internal_json, standard_source_oidc, standard_source_oidc_json, standard_source_root } from state/standard_source_kinds
+import { declaration_global, declaration_namespace } from frontend/types/declaration_kinds
+import { find_object_in_module } from frontend/types/object_types
+import { find_newtype_in_module } from frontend/types/newtype_types
+import { find_alias_in_module, find_declaration_in_module, find_function_in_module, find_generic_function_in_module, find_generic_in_module, find_import_binding, find_record_in_module } from frontend/resolution/declaration_lookup
+import { find_enum_in_module } from frontend/types/enum_types
+import { path_basename, path_directory, string_without_suffix } from support/path
+import { CompilerState, diagnostic, has_diagnostic } from state/state
+import { load_integer, load_string, sparse_integer_at, store_integer, store_string } from support/storage
+
+def import_path_value(raw: String): String
+	mut path := string_without_suffix(raw, ".trb")
+	if path == ""
+		return ""
+	end
+	if path[0] == "/"
+		return ""
+	end
+	mut simple := true
+	mut simple_index := 0
+	while simple_index < path.size()
+		character := path[simple_index]
+		if character == ":"
+			simple = false
+		end
+		if character == "/"
+			simple = false
+		end
+		if character == "."
+			simple = false
+		end
+		simple_index += 1
+	end
+	if simple
+		return path
+	end
+	mut segments: Array<String> := []
+	mut segment := ""
+	mut index := 0
+	while index <= path.size()
+		mut character := "/"
+		if index < path.size()
+			character = path[index]
+		end
+		if character == ":"
+			return ""
+		end
+		if character == "/"
+			if segment == ".."
+				return ""
+			end
+			if segment != ""
+				if segment != "."
+					segments.push(segment)
+				end
+			end
+			segment = ""
+		else
+			segment += character
+		end
+		index += 1
+	end
+	if segments.size() == 0
+		return ""
+	end
+	mut normalized := ""
+	index = 0
+	while index < segments.size()
+		if normalized != ""
+			normalized += "/"
+		end
+		normalized += segments[index]
+		index += 1
+	end
+	return normalized
+end
+
+def normalize_import_path(mut state: CompilerState, raw: String, line: Integer): String
+	normalized := import_path_value(raw)
+	if normalized == ""
+		diagnostic(state, "TRBN4003", line, "invalid project import path " + raw)
+	end
+	return normalized
+end
+
+def ascii_fold(value: String): String
+	upper := "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	mut result := ""
+	mut index := 0
+	while index < value.size()
+		character := value[index]
+		mut folded := character
+		mut letter := 0
+		while letter < upper.size()
+			if upper[letter] == character
+				folded = "abcdefghijklmnopqrstuvwxyz"[letter]
+				letter = upper.size()
+			else
+				letter += 1
+			end
+		end
+		result += folded
+		index += 1
+	end
+	return result
+end
+
+def path_root_key(name: String): String
+	mut without_underscores := ""
+	mut index := 0
+	while index < name.size()
+		if name[index] != "_"
+			without_underscores += name[index]
+		end
+		index += 1
+	end
+	return ascii_fold(without_underscores)
+end
+
+# Math is a virtual receiver before its ordinary source package is loaded.
+def standard_package_target(path: String): Integer
+	if path == "trb/std/math"
+		return -3
+	end
+	return -1
+end
+
+def standard_package_root(_target: Integer): String
+	return "Math"
+end
+
+def standard_package_import(
+		mut state: CompilerState,
+		module_index: Integer,
+		name: String,
+	): Integer
+	import_index := find_import_binding(state, module_index, name)
+	if import_index < 0
+		return -1
+	end
+	target := load_integer(state.module_graph.import_targets, import_index)
+	if target < -1
+		store_integer(state.module_graph.import_used, import_index, 1)
+	end
+	return target
+end
+
+def resolve_bare_imports(mut state: CompilerState): Boolean
+	mut import_index := 0
+	while import_index < state.module_graph.import_count[0]
+		if load_integer(state.module_graph.import_kinds, import_index) == import_kind_module()
+			module_index := load_integer(state.module_graph.import_modules, import_index)
+			state.module_graph.active_module[0] = module_index
+			mut target := load_integer(state.module_graph.import_targets, import_index)
+			line := load_integer(state.module_graph.import_lines, import_index)
+			if target == -1
+				target = standard_package_target(
+					import_path_value(load_string(state.module_graph.import_paths, import_index)),
+				)
+				if target < -1
+					store_integer(state.module_graph.import_targets, import_index, target)
+				end
+			end
+			if target < 0
+				if target < -1
+					declaration := standard_package_root(target)
+					store_string(state.module_graph.import_declarations, import_index, declaration)
+					if load_string(state.module_graph.import_symbols, import_index) == ""
+						store_string(state.module_graph.import_symbols, import_index, declaration)
+					end
+				else
+					diagnostic(state, "TRBN4003", line, "bare import target is unresolved")
+					return false
+				end
+			else
+				mut segment := load_string(state.module_graph.module_names, target)
+				if path_basename(segment) == "index"
+					segment = path_directory(segment)
+				end
+				segment = path_basename(segment)
+				wanted := path_root_key(segment)
+				mut matches := 0
+				mut declaration := ""
+				mut candidates := ""
+				state.global_bindings.globals.each do |definition|
+					if definition.constant && definition.source_id == target && ascii_fold(definition.name) == wanted
+						if candidates != ""
+							candidates += ", "
+						end
+						candidates += definition.name
+						declaration = definition.name
+						matches += 1
+					end
+				end
+				state.global_bindings.namespaces.each do |definition|
+					if definition.source_id == target && ascii_fold(definition.name) == wanted
+						if candidates != ""
+							candidates += ", "
+						end
+						candidates += definition.name
+						declaration = definition.name
+						matches += 1
+					end
+				end
+				mut record_index := 0
+				while record_index < state.declarations.record_count[0]
+					if load_integer(state.declarations.record_modules, record_index) == target
+						name := load_string(state.declarations.record_names, record_index)
+						if ascii_fold(name) == wanted
+							if candidates != ""
+								candidates += ", "
+							end
+							candidates += name
+							declaration = name
+							matches += 1
+						end
+					end
+					record_index += 1
+				end
+				state.nominal.objects.each do |definition|
+					if definition.source_id == target && ascii_fold(definition.name) == wanted
+						if candidates != ""
+							candidates += ", "
+						end
+						candidates += definition.name
+						declaration = definition.name
+						matches += 1
+					end
+				end
+				state.nominal.enums.each do |definition|
+					if definition.source_id == target && ascii_fold(definition.name) == wanted
+						if candidates != ""
+							candidates += ", "
+						end
+						candidates += definition.name
+						declaration = definition.name
+						matches += 1
+					end
+				end
+				state.type_resolution.generic_definitions.each do |definition|
+					if definition.source_id == target && ascii_fold(definition.name) == wanted
+						if candidates != ""
+							candidates += ", "
+						end
+						candidates += definition.name
+						declaration = definition.name
+						matches += 1
+					end
+				end
+				state.nominal.newtypes.each do |definition|
+					if definition.source_id == target && ascii_fold(definition.name) == wanted
+						if candidates != ""
+							candidates += ", "
+						end
+						candidates += definition.name
+						declaration = definition.name
+						matches += 1
+					end
+				end
+				state.type_resolution.type_aliases.each do |definition|
+					if definition.source_id == target && ascii_fold(definition.name) == wanted
+						if candidates != ""
+							candidates += ", "
+						end
+						candidates += definition.name
+						declaration = definition.name
+						matches += 1
+					end
+				end
+				raw_path := load_string(state.module_graph.import_paths, import_index)
+				if matches == 0
+					mut matching_function := false
+					mut function_index := 0
+					while function_index < state.declarations.function_count[0]
+						if load_integer(state.declarations.function_modules, function_index) == target
+							name := load_string(state.declarations.function_names, function_index)
+							if ascii_fold(name) == wanted
+								matching_function = true
+							end
+						end
+						function_index += 1
+					end
+					state.type_resolution.generic_functions.each do |definition|
+						if definition.source_id == target && ascii_fold(definition.name) == wanted
+							matching_function = true
+						end
+					end
+					if matching_function
+						diagnostic(
+							state,
+							"TRBN4003",
+							line,
+							"import " + raw_path + " matches only a top-level function; use an exact named import",
+						)
+					else
+						diagnostic(
+							state,
+							"TRBN4003",
+							line,
+							"import " + raw_path + " has no record root declaration matching " + segment,
+						)
+					end
+					return false
+				end
+				if matches > 1
+					diagnostic(
+						state,
+						"TRBN4003",
+						line,
+						"import " + raw_path + " has multiple record root declarations matching " + segment + ": " + candidates + "; use an exact named import",
+					)
+					return false
+				end
+				store_string(state.module_graph.import_declarations, import_index, declaration)
+				if load_string(state.module_graph.import_symbols, import_index) == ""
+					store_string(state.module_graph.import_symbols, import_index, declaration)
+				end
+			end
+		end
+		import_index += 1
+	end
+	return true
+end
+
+def validate_import_bindings(mut state: CompilerState): Boolean
+	mut import_index := 0
+	while import_index < state.module_graph.import_count[0]
+		module_index := load_integer(state.module_graph.import_modules, import_index)
+		state.module_graph.active_module[0] = module_index
+		name := load_string(state.module_graph.import_symbols, import_index)
+		declaration := load_string(state.module_graph.import_declarations, import_index)
+		line := load_integer(state.module_graph.import_lines, import_index)
+		target := load_integer(state.module_graph.import_targets, import_index)
+		if target >= 0
+			owned := sparse_integer_at(state.standard_modules, target)
+			caller := sparse_integer_at(state.standard_modules, module_index)
+			root := standard_source_root(owned)
+			mut provider_import := false
+			if owned == standard_source_internal_json() && (caller == standard_source_oidc() || caller == standard_source_oidc_json())
+				if declaration == "JsonNode" || declaration == "JsonParser" || declaration == "_next_token_byte" || declaration == "_node" || declaration == "_string"
+					provider_import = true
+				end
+			end
+			if root != "" && declaration != root && !provider_import
+				diagnostic(state, "TRBN4003", line, "standard " + root + " package exports only the " + root + " root declaration")
+				return false
+			end
+		end
+		mut other := load_integer(state.module_graph.module_import_starts, module_index)
+		while other < import_index
+			other_target := load_integer(state.module_graph.import_targets, other)
+			other_declaration := load_string(state.module_graph.import_declarations, other)
+			if target >= 0
+				if other_target == target
+					if other_declaration == declaration
+						diagnostic(
+							state,
+							"TRBN4003",
+							line,
+							"declaration " + declaration + " from " + load_string(state.module_graph.module_names, target) + " is already imported as " + load_string(state.module_graph.import_symbols, other),
+						)
+					end
+				end
+			end
+			if !has_diagnostic(state)
+				if load_string(state.module_graph.import_symbols, other) == name
+					diagnostic(state, "TRBN4003", line, "duplicate import binding " + name)
+				end
+			end
+			other += 1
+		end
+		if target != module_index || declaration != name
+			if find_record_in_module(state, module_index, name) >= 0 || find_enum_in_module(state, module_index, name) >= 0 || find_generic_in_module(state, module_index, name) >= 0 || find_alias_in_module(state, module_index, name) >= 0 || find_newtype_in_module(state, module_index, name) >= 0 || find_object_in_module(state, module_index, name) >= 0
+				diagnostic(state, "TRBN4003", line, "import binding conflicts with local declaration " + name)
+			end
+			if find_function_in_module(state, module_index, name) >= 0 || find_generic_function_in_module(state, module_index, name) >= 0
+				diagnostic(state, "TRBN4003", line, "import binding conflicts with local declaration " + name)
+			end
+			if find_declaration_in_module(state, module_index, name, declaration_namespace()) >= 0 || find_declaration_in_module(state, module_index, name, declaration_global()) >= 0
+				diagnostic(state, "TRBN4003", line, "import binding conflicts with local declaration " + name)
+			end
+		end
+		mut exported := target < -1
+		if target >= 0
+			global := find_declaration_in_module(state, target, declaration, declaration_global())
+			if find_declaration_in_module(state, target, declaration, declaration_namespace()) >= 0 || (global >= 0 && state.global_bindings.globals[global].constant)
+				exported = true
+			end
+			if find_record_in_module(state, target, declaration) >= 0 || find_enum_in_module(state, target, declaration) >= 0 || find_generic_in_module(state, target, declaration) >= 0 || find_alias_in_module(state, target, declaration) >= 0 || find_newtype_in_module(state, target, declaration) >= 0 || find_object_in_module(state, target, declaration) >= 0
+				exported = true
+			end
+			if find_function_in_module(state, target, declaration) >= 0 || find_generic_function_in_module(state, target, declaration) >= 0
+				exported = true
+			end
+		end
+		if !exported
+			diagnostic(state, "TRBN4003", line, "module does not export " + declaration)
+		end
+		import_index += 1
+	end
+	return !has_diagnostic(state)
+end
+
+def validate_import_usage(mut state: CompilerState): Boolean
+	mut import_index := 0
+	while import_index < state.module_graph.import_count[0]
+		if load_integer(state.module_graph.import_used, import_index) == 0
+			state.module_graph.active_module[0] = load_integer(state.module_graph.import_modules, import_index)
+			diagnostic(
+				state,
+				"TRBN4003",
+				load_integer(state.module_graph.import_lines, import_index),
+				"unused import " + load_string(state.module_graph.import_symbols, import_index),
+			)
+		end
+		import_index += 1
+	end
+	return !has_diagnostic(state)
+end

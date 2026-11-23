@@ -1,0 +1,9 @@
+.representative-intro { max-width:70ch; line-height:1.7; color:#53665c; }
+.workload-family { border-top:1px solid var(--border); margin-top:1rem; padding-top:.8rem; }
+.workload-family summary { cursor:pointer; padding:.5rem 0; }
+.family-title { font-size:1.15rem; font-weight:650; }
+.family-counts { display:flex; flex-wrap:wrap; gap:.4rem; margin:.65rem 0 .3rem; }
+.family-description { color:#53665c; font-size:.9rem; line-height:1.6; }
+.input-name { overflow-wrap:anywhere; }
+#attempt[hidden] { display:none; }
+#coverage-summary { line-height:1.6; }

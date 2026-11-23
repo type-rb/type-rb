@@ -1,0 +1,269 @@
+import { mir_type_composite_start } from mir/model/type_ids
+import { mir_type_kind_callable } from mir/model/type_kinds
+import { mir_signature_ordinary } from mir/model/call_kinds
+import { mir_function_fixture, mir_terminator_branch, mir_terminator_jump } from mir/model/control
+import { mir_op_callable_new, mir_op_direct_call, mir_op_indirect_call } from mir/model/instructions
+import { mir_effect_conservative, mir_effect_none } from mir/model/effects
+import { mir_unused_callable_allocations } from mir/analysis/callable_allocations
+import { mir_call_effect_summaries, mir_instruction_effects } from mir/analysis/call_effects
+import { integer_string } from support/literals
+import { mir_identity_key } from mir/analysis/identities
+import { MirCallablePlan, MirInstruction, MirModule, mir_block_index } from mir/model/module
+
+# Only callable SSA values need vertices. Edges represent ordinary argument
+# forwarding; -1 is unresolved and -2 is unknown. A vertex increases at most
+# twice, so cycles terminate without a depth or workload-size heuristic.
+record MirCallableFlow
+	values: Hash<String, Integer>
+	edges: Array<Array<Integer>>
+	callees: Array<Integer>
+	captures: Array<Integer>
+	pending: Array<Integer>
+end
+
+def mir_callable_join(mut flow: MirCallableFlow, target: Integer, callee: Integer, captures: Integer)
+	if target < 0 || callee == -1 || flow.callees[target] == -2
+		return
+	end
+	previous := flow.callees[target]
+	if previous == -1
+		flow.callees[target] = callee
+		flow.captures[target] = captures
+	elsif previous == callee && flow.captures[target] == captures
+		return
+	else
+		flow.callees[target] = -2
+		flow.captures[target] = 0
+	end
+	flow.pending.push(target)
+end
+
+def mir_callable_vertex(flow: MirCallableFlow, function: Integer, value: Integer): Integer
+	key := mir_identity_key(function, value)
+	if flow.values.key?(key)
+		return flow.values[key]
+	end
+	return -1
+end
+
+def mir_callable_edge(mut flow: MirCallableFlow, source: Integer, target: Integer)
+	if target < 0
+		return
+	end
+	if source < 0
+		mir_callable_join(flow, target, -2, 0)
+		return
+	end
+	mut successors := flow.edges[source]
+	successors.push(target)
+end
+
+def mir_callable_block_edge(native_module: MirModule, function_index: Integer, target: Integer, start: Integer, count: Integer, mut flow: MirCallableFlow)
+	function := native_module.functions[function_index]
+	block := native_module.blocks[mir_block_index(native_module, function, target)]
+	mut index := 0
+	while index < count
+		source := mir_callable_vertex(flow, function.id, native_module.arguments[start + index])
+		destination := mir_callable_vertex(flow, function.id, native_module.arguments[block.parameter_start + index])
+		mir_callable_edge(flow, source, destination)
+		index += 1
+	end
+end
+
+def mir_callable_propagate(mut flow: MirCallableFlow, start: Integer): Integer
+	mut index := start
+	while index < flow.pending.size()
+		source := flow.pending[index]
+		flow.edges[source].each do |target|
+			mir_callable_join(flow, target, flow.callees[source], flow.captures[source])
+		end
+		index += 1
+	end
+	return index
+end
+
+# Called only after structural/type/operand verification. The module is closed
+# over internal ordinary direct calls. entry_function is a storage anchor,
+# not an exported parameterized ABI. Independent fixtures remain open.
+# Functions also reachable through closure or object
+# adapters have unknown incoming parameters, even if direct uses look uniform.
+# Globals, containers, returns and captured callable parameters are unsupported
+# producers and stay unknown. Stored plans are never read by this analysis.
+def mir_callable_plans(native_module: MirModule): Array<MirCallablePlan>
+	mut result: Array<MirCallablePlan> := []
+	mut needed := false
+	native_module.instructions.each do |instruction|
+		if instruction.kind == mir_op_indirect_call() || instruction.kind == mir_op_callable_new()
+			needed = true
+		end
+	end
+	if !needed
+		return result
+	end
+	mut flow := MirCallableFlow.new(values: {}, edges: [], callees: [], captures: [], pending: [])
+	native_module.values.each do |value|
+		if value.type_id >= mir_type_composite_start() && native_module.types[value.type_id - mir_type_composite_start()].kind == mir_type_kind_callable()
+			key := mir_identity_key(value.function_id, value.id)
+			flow.values[key] = flow.callees.size()
+			flow.callees.push(-1)
+			flow.captures.push(0)
+			flow.edges.push([])
+		end
+	end
+	mut bodies: Hash<String, Integer> := {}
+	native_module.functions.each.with_index do |function, index|
+		bodies[integer_string(function.id)] = index
+	end
+	mut indirect: Hash<String, Integer> := {}
+	native_module.instructions.each do |instruction|
+		if instruction.kind == mir_op_callable_new()
+			indirect[integer_string(native_module.signatures[instruction.payload].id)] = 1
+		end
+	end
+	native_module.object_methods.each do |method|
+		indirect[integer_string(native_module.signatures[method.function].id)] = 1
+	end
+	native_module.functions.each.with_index do |function, function_index|
+		if function.kind == mir_function_fixture() || indirect.key?(integer_string(function.id))
+			mut parameter := 0
+			while parameter < function.parameter_count
+				vertex := mir_callable_vertex(flow, function.id, native_module.arguments[function.parameter_start + parameter])
+				mir_callable_join(flow, vertex, -2, 0)
+				parameter += 1
+			end
+		end
+		mut block_index := function.block_start
+		while block_index < function.block_start + function.block_count
+			block := native_module.blocks[block_index]
+			mut index := block.instruction_start
+			while index < block.instruction_start + block.instruction_count
+				instruction := native_module.instructions[index]
+				vertex := mir_callable_vertex(flow, function.id, instruction.result)
+				if instruction.kind == mir_op_callable_new()
+					mir_callable_join(flow, vertex, instruction.payload, instruction.second)
+				else
+					mir_callable_join(flow, vertex, -2, 0)
+				end
+				if instruction.kind == mir_op_direct_call()
+					call := native_module.calls[instruction.payload]
+					signature := native_module.signatures[call.callee]
+					if signature.kind == mir_signature_ordinary() && bodies.key?(integer_string(signature.id))
+						callee := native_module.functions[bodies[integer_string(signature.id)]]
+						mut argument := 0
+						while argument < call.argument_count
+							source := mir_callable_vertex(flow, function.id, native_module.arguments[call.argument_start + argument])
+							target := mir_callable_vertex(flow, callee.id, native_module.arguments[callee.parameter_start + argument])
+							mir_callable_edge(flow, source, target)
+							argument += 1
+						end
+					end
+				end
+				index += 1
+			end
+			if block.terminator == mir_terminator_jump() || block.terminator == mir_terminator_branch()
+				mir_callable_block_edge(native_module, function_index, block.first_target, block.first_argument_start, block.first_argument_count, flow)
+			end
+			if block.terminator == mir_terminator_branch()
+				mir_callable_block_edge(native_module, function_index, block.second_target, block.second_argument_start, block.second_argument_count, flow)
+			end
+			block_index += 1
+		end
+	end
+	consumed := mir_callable_propagate(flow, 0)
+	# Unseeded components are not proofs. Propagate their unknown state too,
+	# including into a join that initially received one known incoming value.
+	mut index := 0
+	while index < flow.callees.size()
+		if flow.callees[index] == -1
+			mir_callable_join(flow, index, -2, 0)
+		end
+		index += 1
+	end
+	mir_callable_propagate(flow, consumed)
+	# Instruction-order output is deterministic regardless of function storage.
+	mut plans: Hash<String, Integer> := {}
+	native_module.functions.each do |function|
+		mut block_index := function.block_start
+		while block_index < function.block_start + function.block_count
+			block := native_module.blocks[block_index]
+			index = block.instruction_start
+			while index < block.instruction_start + block.instruction_count
+				instruction := native_module.instructions[index]
+				if instruction.kind == mir_op_indirect_call()
+					vertex := mir_callable_vertex(flow, function.id, instruction.first)
+					if vertex >= 0 && flow.callees[vertex] >= 0
+						plans[integer_string(index)] = vertex
+					end
+				end
+				index += 1
+			end
+			block_index += 1
+		end
+	end
+	mut effects: Array<Integer> := []
+	allocations := mir_unused_callable_allocations(native_module)
+	mut unused: Hash<String, Integer> := {}
+	allocations.each.with_index do |plan, index|
+		unused[integer_string(plan.instruction)] = index
+	end
+	index = 0
+	while index < native_module.instructions.size()
+		key := integer_string(index)
+		if unused.key?(key)
+			result.push(allocations[unused[key]])
+		elsif plans.key?(key)
+			if effects.size() == 0
+				effects = mir_call_effect_summaries(native_module)
+			end
+			vertex := plans[key]
+			result.push(MirCallablePlan.new(instruction: index, callee: flow.callees[vertex], captures: flow.captures[vertex], effects: effects[flow.callees[vertex]]))
+		end
+		index += 1
+	end
+	return result
+end
+
+def mir_callable_plans_equal(left: Array<MirCallablePlan>, right: Array<MirCallablePlan>): Boolean
+	if left.size() != right.size()
+		return false
+	end
+	mut index := 0
+	while index < left.size()
+		if left[index].instruction != right[index].instruction || left[index].callee != right[index].callee || left[index].captures != right[index].captures || left[index].effects != right[index].effects
+			return false
+		end
+		index += 1
+	end
+	return true
+end
+
+def mir_callable_plan_at(plans: Array<MirCallablePlan>, instruction: Integer): MirCallablePlan
+	mut lower := 0
+	mut upper := plans.size()
+	while lower < upper
+		middle := lower + (upper - lower) / 2
+		if plans[middle].instruction < instruction
+			lower = middle + 1
+		else
+			upper = middle
+		end
+	end
+	if lower < plans.size() && plans[lower].instruction == instruction
+		return plans[lower]
+	end
+	return MirCallablePlan.new(instruction: instruction, callee: -1, captures: 0, effects: mir_effect_conservative())
+end
+
+# Consumers run after canonical plan verification or fresh plan construction.
+# Keep unknown invocation and primitive operation effects with their owner.
+def mir_planned_instruction_effects(native_module: MirModule, instruction: MirInstruction, position: Integer): Integer
+	if native_module.callable_plans.size() == 1
+		if instruction.kind == mir_op_indirect_call()
+			return mir_callable_plan_at(native_module.callable_plans[0], position).effects
+		end
+		if instruction.kind == mir_op_callable_new() && mir_callable_plan_at(native_module.callable_plans[0], position).effects == mir_effect_none()
+			return mir_effect_none()
+		end
+	end
+	return mir_instruction_effects(native_module, instruction)
+end

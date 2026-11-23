@@ -1,0 +1,23 @@
+import { mir_adapter_runtime_deadline, mir_signature_standard } from mir/model/call_kinds
+import { mir_op_direct_call, mir_op_file_scope, mir_op_indirect_call, mir_op_puts } from mir/model/instructions
+import { MirModule } from mir/model/module
+
+# The private checked intrinsic enables cancellation in its complete managed
+# module. It does not affect programs that have no deadline operation.
+def mir_deadlines_enabled(native_module: MirModule): Boolean
+	native_module.signatures.each do |signature|
+		if signature.kind == mir_signature_standard() && signature.adapter == mir_adapter_runtime_deadline()
+			return true
+		end
+	end
+	return false
+end
+
+# Poll after possible callbacks or blocking host operations, before subsequent
+# managed work can observe an already expired enclosing scope.
+def mir_deadline_call_boundary(kind: Integer): Boolean
+	if kind == mir_op_direct_call() || kind == mir_op_indirect_call() || kind == mir_op_file_scope()
+		return true
+	end
+	return kind == mir_op_puts()
+end

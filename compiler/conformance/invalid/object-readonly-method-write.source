@@ -1,0 +1,9 @@
+class Box
+readonly @value: Integer := 1
+def change()
+@value = 2
+end
+end
+def main()
+Box.new().change()
+end

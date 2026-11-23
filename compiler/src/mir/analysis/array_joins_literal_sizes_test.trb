@@ -1,0 +1,62 @@
+import { check, emit_qbe } from compiler
+import { mir_function_index } from mir/model/module
+import { optimize_verified_mir } from mir/passes/optimize
+import { verify_mir } from mir/verify/module
+import { logical_checked_source } from testing/pipeline
+import { control_test_output } from testing/mir/control
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { logical_run_qbe } from testing/qbe_runner
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+describe("MIR literal joined String counts") do
+	test("uses verified byte and point counts while preserving dynamic fragments") do
+		mut state := logical_checked_source("def measure(text: String): Integer\nreturn [\"\", text, \"ab\", \"x\"].join(\"/\").size()\nend\ndef main()\nputs(measure(\"a\"))\nputs([\"ab\"].join(\"\").size())\nputs([\"\"].join(\"\").size())\nend\n")
+		expect(check(state)).to_be_true()
+		index := mir_function_index(state.scalar_mir, 0)
+		plan := state.scalar_mir.array_joins[index][0]
+		expect(plan.element_literals.size()).to_equal(4)
+		expect(plan.element_literals[1]).to_equal(-1)
+		expect(state.scalar_mir.literal_data[plan.element_literals[0]].bytes.size()).to_equal(0)
+		expect(state.scalar_mir.literal_data[plan.element_literals[2]].bytes.size()).to_equal(2)
+		expect(state.scalar_mir.literal_data[plan.element_literals[2]].points).to_equal(2)
+		output := control_test_output(emit_qbe(state))
+		body := output.split("function l $trbnf0(")[1].split("\n}\n")[0]
+		expect(body.split("\n@return\n")[0].split(" =l loadl ").size() - 1).to_equal(2)
+		intrinsic_mir_erase(state)
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(control_test_output(emit_qbe(state))).to_equal(output)
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, output)
+			when Result::Ok(actual)
+				expect(actual).to_equal("7\n2\n0\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("does not invent byte counts unavailable to the reference host") do
+		mut state := logical_checked_source("def measure(text: String): Integer\nreturn [text, \"λ😀\"].join(\"/\").size()\nend\ndef main()\nend\n")
+		expect(check(state)).to_be_true()
+		index := mir_function_index(state.scalar_mir, 0)
+		expect(state.scalar_mir.array_joins[index][0].element_literals).to_equal([-1, -1])
+	end
+
+	test("rejects a forged literal identity before emission") do
+		mut state := logical_checked_source("def measure(text: String): Integer\nreturn [text, \"x\"].join(\"/\").size()\nend\ndef main()\nend\n")
+		expect(check(state)).to_be_true()
+		index := mir_function_index(state.scalar_mir, 0)
+		mut plan := state.scalar_mir.array_joins[index][0]
+		plan.element_literals[0] = plan.element_literals[1]
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR Array join plan differs")
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		state.scalar_mir.array_joins[index][0].element_literals[1] = 999999999999
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR Array join plan differs")
+	end
+end

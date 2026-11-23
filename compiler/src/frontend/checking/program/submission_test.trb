@@ -1,0 +1,170 @@
+import { check, emit_qbe } from compiler
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { logical_run_qbe } from testing/qbe_runner
+import { control_test_output } from testing/mir/control
+import { lex } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { CompilerState, compiler_new_with_mode, has_diagnostic } from state/state
+import { CheckedFlowFact, CheckedSubmission } from state/source_state
+import { integer_storage, load_integer, sparse_string_at, string_storage } from support/storage
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+def submission_test_state(source: String, start_line: Integer, finish_line: Integer, facts: Array<CheckedFlowFact>, reset_line: Integer = -1, captured: Array<String> = []): CompilerState
+	mut state := compiler_new_with_mode(source.size() + 1, true)
+	lex(state, source)
+	parse_module(state, 0, state.module_graph.entry_module[0])
+	resolve(state)
+	mut start := 0
+	while load_integer(state.source_tokens.token_lines, start) < start_line
+		start += 1
+	end
+	mut finish := start
+	while load_integer(state.source_tokens.token_lines, finish) < finish_line
+		finish += 1
+	end
+	mut resets: Array<Integer> := []
+	if reset_line >= 0
+		mut reset := 0
+		while load_integer(state.source_tokens.token_lines, reset) < reset_line
+			reset += 1
+		end
+		resets.push(reset)
+	end
+	state.submissions.push(CheckedSubmission.new(presentations: string_storage(source.size() + 1), retained_presentations: [], start: start, finish: finish, before: facts, after: [], types: string_storage(source.size() + 1), mutable: integer_storage(source.size() + 1), resets: resets, captured: captured))
+	check(state)
+	return state
+end
+
+describe("Checked interactive submissions") do
+	test("preserves widening facts during analysis without emitting MIR") do
+		state := submission_test_state("def main()\nmut number: Float? := nil\nnumber = 3\nnumber.to_i()\nreturn\nend\n", 2, 5, [])
+		expect(has_diagnostic(state)).to_be_false()
+		expect(state.submissions[0].after.size()).to_equal(1)
+		expect(state.submissions[0].after[0].presence).to_equal(2)
+	end
+
+	test("invalidates retained mutable captures across a later submission call") do
+		prefix := "def touch()\nreturn\nend\ndef main()\nmut value: String? := nil\n"
+		facts := [CheckedFlowFact.new(name: "value", field: "", presence: 2)]
+		unsafe := submission_test_state(prefix + "touch()\nputs(value.size())\nreturn\nend\n", 6, 8, facts, -1, ["value"])
+		expect(has_diagnostic(unsafe)).to_be_true()
+		safe := submission_test_state(prefix + "touch()\nif value != nil\nputs(value.size())\nend\nreturn\nend\n", 6, 10, facts, -1, ["value"])
+		expect(has_diagnostic(safe)).to_be_false()
+		ordinary := submission_test_state(prefix + "touch()\nputs(value.size())\nreturn\nend\n", 6, 8, facts)
+		expect(has_diagnostic(ordinary)).to_be_false()
+	end
+
+	test("keeps explicit failure boundaries when checking accepted history") do
+		source := "def main()\nmut value: String? := nil\nvalue = \"kept\"\nputs(value == nil)\nvalue = \"again\"\nputs(value.size())\nreturn\nend\n"
+		state := submission_test_state(source, 2, 7, [], 4)
+		expect(has_diagnostic(state)).to_be_false()
+		expect(state.submissions[0].after.size()).to_equal(1)
+		expect(state.submissions[0].after[0].presence).to_equal(2)
+		invalid := submission_test_state("def main()\nmut value: String? := nil\nvalue = \"kept\"\nvalue.size()\nreturn\nend\n", 2, 5, [], 4)
+		expect(has_diagnostic(invalid)).to_be_true()
+	end
+
+	test("retains checked presence and exports replacement facts independently of QBE") do
+		mut state := submission_test_state("def main()\nmut value: String? := \"kept\"\nputs(value.size())\nvalue = nil\nreturn\nend\n", 3, 5, [CheckedFlowFact.new(name: "value", field: "", presence: 2)])
+		expect(has_diagnostic(state)).to_be_false()
+		expect(state.submissions[0].after.size()).to_equal(1)
+		expect(state.submissions[0].after[0].presence).to_equal(1)
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			before := control_test_output(emit_qbe(state))
+			intrinsic_mir_erase(state)
+			state.callables.checked[0].nullable_reads.used[0] = 0
+			state.submissions[0] = CheckedSubmission.new(presentations: string_storage(1), retained_presentations: [], start: -1, finish: -1, before: [], after: [], types: string_storage(1), mutable: integer_storage(1), resets: [], captured: [])
+			expect(control_test_output(emit_qbe(state))).to_equal(before)
+			case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+			when Result::Ok(output)
+				expect(output).to_equal("4\n")
+			when Result::Err(message)
+				puts(message)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("reads the checked expression type and invalidates repeated writes") do
+		facts := [CheckedFlowFact.new(name: "value", field: "", presence: 2)]
+		state := submission_test_state("def main()\nmut value: String? := \"kept\"\nvalue.size() + 2\nreturn\nend\n", 3, 4, facts)
+		expect(has_diagnostic(state)).to_be_false()
+		expect(sparse_string_at(state.submissions[0].types, state.submissions[0].start)).to_equal("Integer")
+		invalid := submission_test_state("def main()\nmut value: String? := \"kept\"\nwhile true\nputs(value.size())\nvalue = nil\nend\nreturn\nend\n", 3, 7, facts)
+		expect(has_diagnostic(invalid)).to_be_true()
+	end
+
+	test("resolves stable field identities and rejects invalid session facts") do
+		source := "record Cell\nvalue: String?\nend\ndef main()\nmut cell: Cell := Cell.new(value: \"kept\")\nputs(cell.value.size())\nreturn\nend\n"
+		valid := submission_test_state(source, 6, 7, [CheckedFlowFact.new(name: "cell", field: "value", presence: 2)])
+		expect(has_diagnostic(valid)).to_be_false()
+		expect(valid.submissions[0].after[0].field).to_equal("value")
+		facts := [CheckedFlowFact.new(name: "missing", field: "value", presence: 2), CheckedFlowFact.new(name: "cell", field: "missing", presence: 2), CheckedFlowFact.new(name: "cell", field: "value", presence: 0)]
+		facts.each do |fact|
+			invalid := submission_test_state(source, 6, 7, [fact])
+			expect(has_diagnostic(invalid)).to_be_true()
+		end
+	end
+end
+
+def submission_presentation_at(state: CompilerState, line: Integer): String
+	mut origin := 0
+	while load_integer(state.source_tokens.token_lines, origin) < line
+		origin += 1
+	end
+	return sparse_string_at(state.submissions[0].presentations, origin)
+end
+
+describe("Checked enum alias presentation") do
+	test("keeps inferred aliases separate from explicit context and replacement types") do
+		source := "enum Choice\nFirst\nSecond\nend\nalias Pick = Choice\nalias Other = Choice\ndef main()\nmut first := Pick::First\nsaved := first\nexplicit: Pick := first\nfirst = Other::Second\nfirst\nsaved\nexplicit\nreturn\nend\n"
+		state := submission_test_state(source, 8, 15, [])
+		expect(has_diagnostic(state)).to_be_false()
+		expect(submission_presentation_at(state, 8)).to_equal("Pick")
+		expect(submission_presentation_at(state, 9)).to_equal("Pick")
+		expect(submission_presentation_at(state, 10)).to_equal("")
+		expect(submission_presentation_at(state, 12)).to_equal("Pick")
+		expect(submission_presentation_at(state, 13)).to_equal("Pick")
+		expect(submission_presentation_at(state, 14)).to_equal("")
+	end
+
+	test("joins display aliases in containers while indexed reads remain canonical") do
+		source := "enum Choice\nFirst\nSecond\nend\nalias Pick = Choice\nalias Other = Choice\ndef main()\nfirst := Pick::First\nsecond := Other::Second\nvalues := [first, second]\ntable := {\"saved\" => first}\nvalues[0]\ntable[\"saved\"]\nreturn\nend\n"
+		state := submission_test_state(source, 8, 14, [])
+		expect(has_diagnostic(state)).to_be_false()
+		expect(submission_presentation_at(state, 10)).to_equal("Array<Other | Pick>")
+		expect(submission_presentation_at(state, 11)).to_equal("Hash<String, Pick>")
+		expect(submission_presentation_at(state, 12)).to_equal("")
+		expect(submission_presentation_at(state, 13)).to_equal("")
+	end
+
+	test("preserves authored generic argument order and the outer alias declaration") do
+		source := "enum Pair<A, B>\nFirst(value: A)\nSecond(value: B)\nend\nalias Swap<X, Y> = Pair<Y, X>\nalias Again<A, B> = Swap<A, B>\ndef main()\nvalue := Again<Integer, String>::First(\"held\")\nvalue\nreturn\nend\n"
+		state := submission_test_state(source, 8, 10, [])
+		expect(has_diagnostic(state)).to_be_false()
+		expect(submission_presentation_at(state, 8)).to_equal("Again<Integer, String>")
+		expect(submission_presentation_at(state, 9)).to_equal("Again<Integer, String>")
+	end
+
+	test("uses resolved application arguments for literal types and alias arguments") do
+		source := "enum Choice\nFirst\nend\nalias Item = Choice\nenum Box<T>\nSome(value: T)\nend\nalias Pick<T> = Box<T>\ndef main()\nvalue := Pick<Item>::Some(Item::First)\nliteral := Pick<\"held\">::Some(\"held\")\nvalue\nliteral\nreturn\nend\n"
+		state := submission_test_state(source, 10, 14, [])
+		expect(has_diagnostic(state)).to_be_false()
+		expect(submission_presentation_at(state, 10)).to_equal("Pick<Choice>")
+		expect(submission_presentation_at(state, 11)).to_equal("Pick<\"held\">")
+	end
+
+	test("retains a shared alias across completing conditional branches") do
+		source := "enum Choice\nFirst\nSecond\nend\nalias Pick = Choice\nalias Other = Choice\ndef main()\nconditional := if true\nPick::First\nelse\nPick::Second\nend\nselected := case 1\nwhen 1\nPick::First\nelse\nPick::Second\nend\nternary := true ? Pick::First : Pick::Second\nconditional\nselected\nternary\nreturn\nend\n"
+		state := submission_test_state(source, 8, 23, [])
+		expect(has_diagnostic(state)).to_be_false()
+		[8, 13, 19, 20, 21, 22].each do |line|
+			expect(submission_presentation_at(state, line)).to_equal("Pick")
+		end
+	end
+
+end

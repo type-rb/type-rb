@@ -1,0 +1,43 @@
+import { QbeOutput, qbe_output_line } from backend/qbe/output
+import { emit_float_decimal_runtime } from backend/qbe/runtime/float_decimal
+import { emit_decimal_digits } from backend/qbe/runtime/decimal_digits
+
+# Direct shortest binary64 conversion returns integer digits and a decimal power.
+# Expand those digits without converting the binary Float a second time.
+# The digit buffer holds the coefficient. Decimal-point placement determines
+# the exact size of the final ASCII String, including for subnormals.
+def emit_float_string_runtime(mut output: QbeOutput)
+	emit_float_decimal_runtime(output)
+	qbe_output_line(output, "data $trbn_float_zero = align 8 { l 0, l 3, l 3, b \"0.0\", b 0 }\ndata $trbn_float_nan = align 8 { l 0, l 3, l 3, b \"NaN\", b 0 }\ndata $trbn_float_infinity = align 8 { l 0, l 8, l 8, b \"Infinity\", b 0 }\ndata $trbn_float_negative_infinity = align 8 { l 0, l 9, l 9, b \"-Infinity\", b 0 }\ndata $trbn_float_format_error = { b \"panic: Float formatting failed\", b 10 }\nfunction l $trbn_float_to_string(d %value) {\n")
+	qbe_output_line(output, "@start\n %nan =w cned %value, %value\n jnz %nan, @nan, @zero_check\n")
+	qbe_output_line(output, "@nan\n ret $trbn_float_nan\n")
+	qbe_output_line(output, "@zero_check\n %zero =w ceqd %value, d_0.0\n jnz %zero, @zero, @sign\n")
+	qbe_output_line(output, "@zero\n ret $trbn_float_zero\n")
+	qbe_output_line(output, "@sign\n %negative =w cltd %value, d_0.0\n jnz %negative, @negative, @positive\n")
+	qbe_output_line(output, "@negative\n %absolute =d sub d_0.0, %value\n jmp @finite\n")
+	qbe_output_line(output, "@positive\n jmp @finite\n")
+	qbe_output_line(output, "@finite\n %magnitude =d phi @negative %absolute, @positive %value\n %difference =d sub %magnitude, %magnitude\n %infinite =w cned %difference, %difference\n jnz %infinite, @infinite, @prepare\n")
+	qbe_output_line(output, "@infinite\n jnz %negative, @negative_infinity, @positive_infinity\n")
+	qbe_output_line(output, "@negative_infinity\n ret $trbn_float_negative_infinity\n")
+	qbe_output_line(output, "@positive_infinity\n ret $trbn_float_infinity\n")
+	qbe_output_line(output, "@prepare\n %digits =l alloc8 32\n %power_slot =l alloc8 8\n %coefficient =l call $trbn_float_decimal(d %magnitude, l %power_slot)\n %decimal_power =l loadl %power_slot\n %invalid =w ceql %coefficient, 0\n jnz %invalid, @fail, @trim\n")
+	qbe_output_line(output, "@trim\n %remaining =l phi @prepare %coefficient, @trim_more %trimmed\n %power =l phi @prepare %decimal_power, @trim_more %next_power\n %trimmed =l udiv %remaining, 10\n %tens =l mul %trimmed, 10\n %tail =l sub %remaining, %tens\n %trailing_zero =w ceql %tail, 0\n jnz %trailing_zero, @trim_more, @digits_start\n")
+	qbe_output_line(output, "@trim_more\n %next_power =l add %power, 1\n jmp @trim\n")
+	qbe_output_line(output, "@digits_start\n %end =l add %digits, 32\n %decimal_value =l copy %remaining\n %decimal_end =l copy %end\n jmp @decimal_begin\n")
+	emit_decimal_digits(output)
+	qbe_output_line(output, " %count =l sub %end, %decimal_start\n %point =l add %count, %power\n %sign =l extuw %negative\n %result =l call $trbn_decimal_fixed(l %decimal_start, l %count, l %point, l %sign)\n ret %result\n")
+	qbe_output_line(output, "@fail\n call $trbn_fail(l $trbn_float_format_error, l 31)\n hlt\n}\nfunction l $trbn_decimal_fixed(l %digits, l %count, l %point, l %negative) {\n")
+	qbe_output_line(output, "@start\n %fraction =w cslel %point, 0\n %whole =w csgel %point, %count\n jnz %fraction, @leading_zeros, @positive_point\n")
+	qbe_output_line(output, "@leading_zeros\n %prefix =l sub 2, %point\n %fraction_length =l add %prefix, %count\n jmp @allocate\n")
+	qbe_output_line(output, "@positive_point\n jnz %whole, @trailing_zeros, @interior_point\n")
+	qbe_output_line(output, "@trailing_zeros\n %whole_length =l add %point, 2\n jmp @allocate\n")
+	qbe_output_line(output, "@interior_point\n %split_length =l add %count, 1\n jmp @allocate\n")
+	# The three layouts contain only ASCII, so byte and codepoint lengths agree.
+	# A positive number writes its first digit over the reserved sign position.
+	qbe_output_line(output, "@allocate\n %unsigned_length =l phi @leading_zeros %fraction_length, @trailing_zeros %whole_length, @interior_point %split_length\n %length =l add %unsigned_length, %negative\n %size =l add %length, 17\n %result =l call $trbn_string_alloc(l %size)\n %length_address =l add %result, 8\n storel %length, %length_address\n %points_address =l add %result, 16\n storel %length, %points_address\n %data =l add %result, 24\n storeb 45, %data\n %start_digits =l add %data, %negative\n jnz %fraction, @write_fraction, @write_integer_part\n")
+	qbe_output_line(output, "@write_fraction\n storeb 48, %start_digits\n %leading_dot =l add %start_digits, 1\n storeb 46, %leading_dot\n %padding =l add %start_digits, 2\n %zeros =l sub 0, %point\n call $memset(l %padding, w 48, l %zeros)\n %first_digit =l add %padding, %zeros\n call $memcpy(l %first_digit, l %digits, l %count)\n jmp @finish\n")
+	qbe_output_line(output, "@write_integer_part\n jnz %whole, @write_whole, @write_split\n")
+	qbe_output_line(output, "@write_split\n call $memcpy(l %start_digits, l %digits, l %point)\n %middle_dot =l add %start_digits, %point\n storeb 46, %middle_dot\n %tail =l add %middle_dot, 1\n %tail_digits =l add %digits, %point\n %tail_count =l sub %count, %point\n call $memcpy(l %tail, l %tail_digits, l %tail_count)\n jmp @finish\n")
+	qbe_output_line(output, "@write_whole\n call $memcpy(l %start_digits, l %digits, l %count)\n %pad_start =l add %start_digits, %count\n %pad_size =l sub %point, %count\n call $memset(l %pad_start, w 48, l %pad_size)\n %end_dot =l add %start_digits, %point\n storeb 46, %end_dot\n %end_zero =l add %end_dot, 1\n storeb 48, %end_zero\n jmp @finish\n")
+	qbe_output_line(output, "@finish\n %terminator =l add %data, %length\n storeb 0, %terminator\n ret %result\n}\n\n")
+end

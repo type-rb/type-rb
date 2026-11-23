@@ -1,0 +1,107 @@
+import { check, emit_qbe } from compiler
+import { verify_mir } from mir/verify/module
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { output_source } from testing/compiler
+import { expect_compiler_phase, logical_checked_source } from testing/pipeline
+import { logical_run_qbe_arguments } from testing/qbe_runner
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+def directory_values_round_trip(collect: Boolean)
+	source := "import trb/std/dir\nimport trb/std/path\nimport trb/std/result\nimport trb/std/process\nimport { DirEntryKind } from trb/std/dir\nimport { FileSystemErrorKind } from trb/std/errors\ndef main()\n args := Process.argv()\n parent := args[0]\n case Dir.create_all(Path.new(parent + \"/child/deep\"))\n when Result::Ok(_unit)\n  puts(\"created\")\n when Result::Err(error)\n  puts(error.message)\n end\n case Dir.children(Path.new(parent + \"/./\"), max_entries: 1)\n when Result::Ok(entries)\n  puts(entries.size())\n  puts(entries[0].name)\n  puts(entries[0].path.to_s() == parent + \"/./child\")\n  puts(entries[0].kind == DirEntryKind::Directory)\n when Result::Err(error)\n  puts(error.message)\n end\n case Dir.children(Path.new(parent), max_entries: 0)\n when Result::Ok(_entries)\n  puts(\"unexpected\")\n when Result::Err(error)\n  puts(error.operation)\n  puts(error.kind == FileSystemErrorKind::TooLarge)\n end\n case Dir.children(Path.new(\"\"), max_entries: -1)\n when Result::Ok(_entries)\n  puts(\"unexpected\")\n when Result::Err(error)\n  puts(error.kind == FileSystemErrorKind::InvalidLimit)\n end\n case Dir.create_all(Path.new(\"\"))\n when Result::Ok(_unit)\n  puts(\"unexpected\")\n when Result::Err(error)\n  puts(error.kind == FileSystemErrorKind::InvalidPath)\n end\nend\n"
+	mut state := logical_checked_source(source)
+	expect_compiler_phase(state, "public Dir check", check(state))
+	expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	intrinsic_mir_erase(state)
+	mut runtime := output_source(emit_qbe(state))
+	if collect
+		allocation := "function l $trbn_gc_alloc(l %descriptor, l %payload_size, l %reserved_size) {\n@start"
+		expect(runtime.split(allocation).size()).to_equal(2)
+		runtime = runtime.split(allocation).join(allocation + "\n call $trbn_gc_collect(w 0)")
+	end
+	qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+	if qbe == nil
+		return
+	end
+	allocated := case Process.run("/usr/bin/mktemp", ["-d", "/tmp/type-rb-native-directory.XXXXXX"])
+	when Result::Ok(value)
+		value
+	when Result::Err(error)
+		puts(error.message)
+		expect(false).to_be_true()
+		return
+	end
+	expect(allocated.success).to_be_true()
+	workspace := allocated.stdout.strip()
+	executed := logical_run_qbe_arguments(qbe, runtime, [workspace])
+	case Process.run("/bin/rm", ["-r", workspace])
+	when Result::Ok(value)
+		expect(value.success).to_be_true()
+	when Result::Err(error)
+		puts(error.message)
+		expect(false).to_be_true()
+	end
+	case executed
+	when Result::Ok(value)
+		expect(value).to_equal("created\n1\nchild\ntrue\ntrue\nchildren\ntrue\ntrue\ntrue\n")
+	when Result::Err(error)
+		puts(error)
+		expect(false).to_be_true()
+	end
+end
+
+# Controlled readdir output qualifies simultaneous errors on hosts which cannot
+# create an invalid UTF-8 filename. Real filesystem acceptance remains separate.
+def directory_error_order(total: Integer, maximum: Integer, missing: Boolean, repl: Boolean, expected: String)
+	source := "import trb/std/dir\nimport trb/std/path\nimport trb/std/result\nimport { FileSystemErrorKind, FileSystemTarget } from trb/std/errors\ndef main()\ncase Dir.children(Path.new(\".\"), max_entries: FIXTURE_MAXIMUM)\nwhen Result::Ok(_entries)\nputs(\"unexpected\")\nwhen Result::Err(error)\nif error.kind == FileSystemErrorKind::TooLarge\nputs(\"limit\")\nelsif error.kind == FileSystemErrorKind::UnsupportedName\nputs(\"name\")\nelsif error.kind == FileSystemErrorKind::NotFound\nputs(\"metadata\")\ncase error.target\nwhen FileSystemTarget::Host(path)\nputs(path.to_s() == \"./missing\")\nwhen FileSystemTarget::Relative(_path)\nputs(\"wrong relative\")\nwhen FileSystemTarget::Root\nputs(\"wrong root\")\nend\nelse\nputs(error.message)\nend\nend\nend\n".replace_all("FIXTURE_MAXIMUM", maximum.to_s())
+	mut state := logical_checked_source(source)
+	expect_compiler_phase(state, "directory order check", check(state))
+	intrinsic_mir_erase(state)
+	mut runtime := output_source(emit_qbe(state))
+	read := "%entry =l call %readdir_function(l %directory)"
+	expect(runtime.split(read).size()).to_equal(2)
+	runtime = runtime.replace_all(read, "%entry =l call $fixture_directory_next(l %directory)")
+	metadata := "%status =l call $trbn_directory_stat(l %child, l 0, l %kind_out)"
+	expect(runtime.split(metadata).size()).to_equal(2)
+	runtime = runtime.replace_all(metadata, "storel 0, %kind_out\n %status =l copy 2")
+	if repl
+		compiled := "%status =l call $trbn_directory_children(l %path, l %prefix, l %maximum, l %names, l %kinds, l %error_path, w 0)"
+		expect(runtime.split(compiled).size()).to_equal(2)
+		runtime = runtime.replace_all(compiled, "%status =l call $trbn_directory_children(l %path, l %prefix, l %maximum, l %names, l %kinds, l %error_path, w 1)")
+	end
+	mut first := "0"
+	if missing
+		first = "1"
+	end
+	runtime += "data $fixture_count = align 8 { l 0 }\ndata $fixture_invalid = align 8 { z 21, b 255, b 0 }\ndata $fixture_missing = align 8 { z 21, b \"missing\", b 0 }\nfunction l $fixture_directory_next(l %directory) {\n@start\n %count =l loadl $fixture_count\n %done =w cugel %count, FIXTURE_TOTAL\n jnz %done, @done, @entry\n@done\n ret 0\n@entry\n %next =l add %count, 1\n storel %next, $fixture_count\n %first =w ceql %count, 0\n %missing =w and %first, FIXTURE_MISSING\n jnz %missing, @missing, @invalid\n@missing\n jmp @name\n@invalid\n jmp @name\n@name\n %name =l phi @missing $fixture_missing, @invalid $fixture_invalid\n %profile =l loadl $trbn_fs_profile\n %apple =w ceql %profile, 1\n jnz %apple, @apple, @linux\n@apple\n ret %name\n@linux\n %shifted =l add %name, 2\n ret %shifted\n}\n".replace_all("FIXTURE_TOTAL", total.to_s()).replace_all("FIXTURE_MISSING", first)
+	qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+	if qbe != nil
+		case logical_run_qbe_arguments(qbe, runtime, [])
+		when Result::Ok(value)
+			expect(value).to_equal(expected)
+		when Result::Err(error)
+			puts(error)
+			expect(false).to_be_true()
+		end
+	end
+end
+
+describe("Public ambient directory operations") do
+	test("creates parents, preserves spelling and checks bounds and error kinds") do
+		directory_values_round_trip(false)
+	end
+
+	test("preserves pinned compiled and REPL order for simultaneous directory errors") do
+		directory_error_order(2, 1, false, false, "limit\n")
+		directory_error_order(2, 1, false, true, "limit\n")
+		directory_error_order(129, 128, false, false, "name\n")
+		directory_error_order(129, 128, false, true, "limit\n")
+		directory_error_order(2, 2, true, false, "metadata\ntrue\n")
+		directory_error_order(2, 2, true, true, "name\n")
+	end
+
+	test("roots directory names, outputs and errors across collection") do
+		directory_values_round_trip(true)
+	end
+end

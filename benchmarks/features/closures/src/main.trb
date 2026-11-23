@@ -1,0 +1,37 @@
+# Function values, captured state and block-based collection operations.
+
+def apply(values: Array<Integer>, transform: (Integer) -> Integer): Integer
+	mut total := 0
+	values.each do |value|
+		total += transform(value)
+	end
+	return total
+end
+
+def run(rounds: Integer): Integer
+	mut values: Array<Integer> := []
+	mut index := 0
+	while index < 200
+		values.push(index)
+		index += 1
+	end
+	mut checksum := 0
+	mut round := 0
+	while round < rounds
+		offset := round % 17
+		shifted := fn(value: Integer): Integer
+			return value + offset
+		end
+		checksum += apply(values, shifted)
+		evens := values.select { |value| (value + offset) % 2 == 0 }
+		checksum += evens.map { |value| value * 3 }.reduce(0) { |sum, value| sum + value }
+		checksum = checksum % 1000000007
+		round += 1
+	end
+	return checksum
+end
+
+def main()
+	puts(run(60000))
+	return
+end

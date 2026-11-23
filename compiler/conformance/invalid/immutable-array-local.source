@@ -1,0 +1,6 @@
+def main()
+	input := [1]
+	mut copy := (input)
+	puts(copy.size())
+	return
+end

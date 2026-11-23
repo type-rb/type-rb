@@ -1,0 +1,204 @@
+import { checked_category_value } from frontend/types/value_categories
+import { mir_signature_interface, mir_signature_ordinary } from mir/model/call_kinds
+import { mir_op_object_convert } from mir/model/instructions
+import { CheckedValue, checked_mir_value, checked_view, scalar_mir_instruction, scalar_mir_value } from frontend/checking/body/values
+import { integer_string } from support/literals
+import { MirBlock, MirInstruction, MirModule, mir_function_index } from mir/model/module
+import { mir_control_active, mir_control_prepare } from mir/build/control
+import { MirFlow, mir_flow_type, mir_value_available } from mir/analysis/flow
+import { mir_semantic_type_id, mir_semantic_type_name } from mir/model/types
+import { object_dispatch_arguments } from mir/model/object_dispatch
+import { mir_object_id } from mir/model/objects
+import { find_object_type, object_assignable } from frontend/types/object_types
+import { CompilerState, diagnostic } from state/state
+import { CheckedLocals } from state/local_state
+import { load_integer } from support/storage
+
+def mir_object_witness(native_module: MirModule, owner: Integer, contract: Integer): Integer
+	mut index := 0
+	native_module.object_witnesses.each do |witness|
+		if witness.owner == owner && witness.contract == contract
+			return index
+		end
+		index += 1
+	end
+	return -1
+end
+
+# 66 packs a class reference with a statically selected, verified witness.
+# The interface remains a managed word, including in containers and captures.
+def mir_object_coerce(mut state: CompilerState, mut locals: CheckedLocals, value: CheckedValue, expected: String, origin: Integer): CheckedValue
+	if value.type_name == expected || !object_assignable(state, value.type_name, expected)
+		return value
+	end
+	mir_control_prepare(state, locals)
+	if !mir_control_active(locals)
+		return checked_view(value, expected, checked_category_value())
+	end
+	owner := find_object_type(state, value.type_name)
+	contract := find_object_type(state, expected)
+	witness := mir_object_witness(state.scalar_mir, owner, contract)
+	if witness < 0
+		diagnostic(state, "TRBN4004", load_integer(state.source_tokens.token_lines, origin), "interface conversion has no checked implementation")
+		return checked_view(value, expected, checked_category_value())
+	end
+	result := scalar_mir_value(state, locals, mir_semantic_type_id(state.scalar_mir, expected), origin)
+	scalar_mir_instruction(state, locals, mir_op_object_convert(), result, checked_mir_value(value), -1, witness, -1, load_integer(state.source_tokens.token_lines, origin))
+	return checked_view(value, expected, -result - 1)
+end
+
+def mir_object_conversion_error(flow: MirFlow, native_module: MirModule, block: MirBlock, index: Integer, instruction: MirInstruction): String
+	if instruction.second != -1 || instruction.failure != -1 || instruction.payload < 0 || instruction.payload >= native_module.object_witnesses.size()
+		return "MIR interface conversion shape differs"
+	end
+	witness := native_module.object_witnesses[instruction.payload]
+	if !mir_value_available(flow, block, index, instruction.first) || mir_object_id(native_module, mir_flow_type(flow, instruction.first)) != witness.owner || mir_object_id(native_module, mir_flow_type(flow, instruction.result)) != witness.contract
+		return "MIR interface conversion types differ"
+	end
+	return ""
+end
+
+def mir_object_implements(native_module: MirModule, owner: Integer, contract: Integer): Boolean
+	mut current := owner
+	mut remaining := native_module.objects.size()
+	while current >= 0 && remaining > 0
+		row := native_module.objects[current]
+		row.interfaces.each do |type_id|
+			if mir_object_id(native_module, type_id) == contract
+				return true
+			end
+		end
+		current = mir_object_id(native_module, row.superclass)
+		remaining -= 1
+	end
+	return false
+end
+
+# No frontend declarations, token spans or method lookup are consulted here.
+def mir_object_dispatch_error(native_module: MirModule): String
+	mut keys: Hash<String, Integer> := {}
+	mut index := 0
+	while index < native_module.object_methods.size()
+		method := native_module.object_methods[index]
+		if method.owner < 0 || method.owner >= native_module.objects.size() || method.name == "" || method.function < 0 || method.function >= native_module.signatures.size()
+			return "MIR object method identity differs"
+		end
+		key := integer_string(method.owner) + ":" + method.name
+		if keys.key?(key)
+			return "MIR object method is duplicated"
+		end
+		keys[key] = index
+		owner := native_module.objects[method.owner]
+		signature := native_module.signatures[method.function]
+		count := signature.parameter_types.size()
+		if method.parameter_names.size() != count || method.parameter_named.size() != count || method.parameter_optional.size() != count
+			return "MIR object method parameter metadata differs"
+		end
+		if !method.class_member
+			if count == 0
+				return "MIR object method receiver is missing"
+			end
+			if signature.parameter_types[0] != mir_semantic_type_name(native_module, owner.type_id) || method.parameter_names[0] != "self" || method.parameter_named[0] != 0 || method.parameter_optional[0] != 0
+				return "MIR object method receiver differs"
+			end
+		end
+		if owner.interface_type
+			if method.class_member || signature.kind != mir_signature_interface() || signature.adapter != index || mir_function_index(native_module, signature.id) >= 0
+				return "MIR interface method signature ownership differs"
+			end
+		elsif signature.kind != mir_signature_ordinary() || mir_function_index(native_module, signature.id) < 0
+			return "MIR object method body is missing"
+		end
+		mut names: Hash<String, Integer> := {}
+		mut slot := 0
+		mut named := 0
+		while slot < count
+			name := method.parameter_names[slot]
+			if name == "" || names.key?(name) || method.parameter_named[slot] < named || method.parameter_named[slot] > 1 || method.parameter_optional[slot] < 0 || method.parameter_optional[slot] > 1
+				return "MIR object method parameter shape differs"
+			end
+			names[name] = 1
+			named = method.parameter_named[slot]
+			if owner.interface_type && (method.parameter_optional[slot] != 0 || signature.parameter_mutable[slot] != 0)
+				return "MIR interface parameter cannot carry implementation behavior"
+			end
+			slot += 1
+		end
+		index += 1
+	end
+	native_module.signatures.each do |signature|
+		if signature.kind == mir_signature_interface()
+			if signature.adapter < 0 || signature.adapter >= native_module.object_methods.size()
+				return "MIR interface signature method is missing"
+			end
+			method := native_module.object_methods[signature.adapter]
+			if method.function != signature.id || !native_module.objects[method.owner].interface_type
+				return "MIR interface signature method differs"
+			end
+		end
+	end
+	mut witnesses: Hash<String, Integer> := {}
+	native_module.object_witnesses.each do |witness|
+		if witness.owner < 0 || witness.owner >= native_module.objects.size() || witness.contract < 0 || witness.contract >= native_module.objects.size()
+			return "MIR interface witness identity differs"
+		end
+		if native_module.objects[witness.owner].interface_type || !native_module.objects[witness.contract].interface_type || !mir_object_implements(native_module, witness.owner, witness.contract)
+			return "MIR interface witness lacks an explicit implementation edge"
+		end
+		key := integer_string(witness.owner) + ":" + integer_string(witness.contract)
+		if witnesses.key?(key) || witness.methods.size() != witness.arguments.size()
+			return "MIR interface witness shape differs"
+		end
+		witnesses[key] = 1
+		mut slot := 0
+		native_module.object_methods.each do |method|
+			if method.owner == witness.contract
+				if slot >= witness.methods.size()
+					return "MIR interface witness method is missing"
+				end
+				target := witness.methods[slot]
+				if target < 0 || target >= native_module.object_methods.size()
+					return "MIR interface witness target is invalid"
+				end
+				implementation := native_module.object_methods[target]
+				if implementation.owner != witness.owner || implementation.class_member || implementation.name != method.name
+					return "MIR interface witness method identity differs"
+				end
+				arguments := object_dispatch_arguments(method, implementation)
+				contract := native_module.signatures[method.function]
+				callee := native_module.signatures[implementation.function]
+				if arguments.size() != contract.parameter_types.size() || arguments.size() != witness.arguments[slot].size() || contract.result_type != callee.result_type
+					return "MIR interface witness signature differs"
+				end
+				mut parameter := 0
+				while parameter < arguments.size()
+					if arguments[parameter] != witness.arguments[slot][parameter]
+						return "MIR interface witness argument permutation differs"
+					end
+					if parameter > 0 && contract.parameter_types[arguments[parameter]] != callee.parameter_types[parameter]
+						return "MIR interface witness parameter type differs"
+					end
+					parameter += 1
+				end
+				slot += 1
+			end
+		end
+		if slot != witness.methods.size()
+			return "MIR interface witness has extraneous methods"
+		end
+	end
+	mut owner := 0
+	while owner < native_module.objects.size()
+		if !native_module.objects[owner].interface_type
+			mut contract := 0
+			while contract < native_module.objects.size()
+				if native_module.objects[contract].interface_type && mir_object_implements(native_module, owner, contract) && !witnesses.key?(integer_string(owner) + ":" + integer_string(contract))
+					return "MIR implemented interface witness is missing"
+				end
+				contract += 1
+			end
+		end
+		owner += 1
+	end
+	return ""
+end

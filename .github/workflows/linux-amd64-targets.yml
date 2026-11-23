@@ -1,0 +1,908 @@
+name: Linux amd64 targets
+
+on:
+  workflow_call:
+    inputs:
+      cost_mode:
+        description: Strict cost qualification or MIR migration observations
+        type: string
+        default: strict
+      scope:
+        description: complete, or pull-request to leave arm64 regression to main
+        type: string
+        default: complete
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  NATIVE_MIR_COST_MODE: ${{ inputs.cost_mode || 'strict' }}
+  TYPE_RB_REVISION: cc8c734f73f5149464838825cdbb2165058ed26d
+  TYPE_RB_VERSION: 0.4.12-dev
+  QBE_VERSION: "1.3"
+  QBE_ARCHIVE_SHA256: d587905d620dc5e1d2bfa7c2cc642b9b837aa89a3188c6e37b53d756cf66e320
+  ROOT_REPOSITORY: type-rb/type-rb-native
+  ROOT_RELEASE_TAG: bootstrap-seed-2026-08-30
+  ARM64_RELEASE_TAG: bootstrap-seed-2026-09-29-module-cycles
+  AMD64_SETUP_REVISION: 21f507e7ee7de2577f4137f6dfb9f732c14c1640
+  AMD64_LOOP_SETUP_REVISION: 4e1d0b4aee97b9a5bd73a98f918b31d47985da25
+  AMD64_BOOLEAN_SETUP_REVISION: 57cb41ad6be91716e31fa555ed8ea8c8ce7a5f51
+  AMD64_RECORD_SETUP_REVISION: 566d00d67172460df0f57dff6d5fe03db3b67cdc
+  AMD64_HASH_SETUP_REVISION: 8a6d9ff73b14a97bca1b010ddaad6a38972b5373
+  AMD64_ITERATION_SETUP_REVISION: 508f721f8964d67a5893e547d2e2fb3de5b20a63
+  AMD64_NAMES_SETUP_REVISION: 6ca79d22cde2ddba5fe836c66899b6e08a6511dc
+  AMD64_CYCLES_SETUP_REVISION: a0f9147d29d73ad8a0237c7c51a0a5993bbe3a36
+  BOOTSTRAP_SEED_REVISION: 04993b6bf598356a51143edd9dbde1a024c403cc
+  BOOTSTRAP_MANIFEST_ASSET: type-rb-native-bootstrap-manifest-v2.json
+  BOOTSTRAP_CHECKSUM_ASSET: SHA256SUMS
+  ROOT_ASSET_ID: "535828321"
+  ROOT_ASSET_NAME: type-rb-native-bootstrap-root-qbe-v1.ssa
+  ROOT_QBE_SIZE: "658639"
+  ROOT_QBE_SHA256: 62db3c31527a670c3050051a9fa27bf142b6c5deaab81ef8234104bd467aa95a
+  ARM64_ASSET_ID: "598412235"
+  ARM64_ASSET_NAME: type-rb-native-bootstrap-linux-arm64
+  ARM64_SEED_SIZE: "2321904"
+  ARM64_SEED_SHA256: 3627fd8c574a668173ac6bb25eb41371c0f6cf0fa9da1016eebfc08b078d4060
+
+jobs:
+  verify-linux-amd64:
+    name: Verify Ubuntu 24.04 x64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    outputs:
+      fixed_point_qbe_sha256: ${{ steps.target_neutral.outputs.fixed_point_qbe_sha256 }}
+      portable_qbe_sha256: ${{ steps.target_neutral.outputs.portable_qbe_sha256 }}
+      producer_attempt: ${{ steps.target_neutral.outputs.producer_attempt }}
+    steps:
+      - name: Check out the exact Linux target candidate
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+          path: .native-target-candidate
+
+      - name: Check out the exact accepted compatibility bridge source
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ env.AMD64_SETUP_REVISION }}
+          path: .native-target-seed-source
+
+      - name: Check out the exact accepted loop-syntax bridge source
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ env.AMD64_LOOP_SETUP_REVISION }}
+          path: .native-target-loop-source
+
+      - name: Check out the exact accepted Boolean Array bridge source
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ env.AMD64_BOOLEAN_SETUP_REVISION }}
+          path: .native-target-boolean-source
+
+      - name: Check out the exact accepted record Array bridge source
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ env.AMD64_RECORD_SETUP_REVISION }}
+          path: .native-target-record-source
+
+      - name: Check out the exact accepted Hash bridge source
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ env.AMD64_HASH_SETUP_REVISION }}
+          path: .native-target-hash-source
+
+      - name: Check out the exact accepted Array iteration bridge source
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ env.AMD64_ITERATION_SETUP_REVISION }}
+          path: .native-target-iteration-source
+
+      - name: Check out the exact accepted compiler-name bridge source
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ env.AMD64_NAMES_SETUP_REVISION }}
+          path: .native-target-names-source
+
+      - name: Check out the exact accepted module-cycle bridge source
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ env.AMD64_CYCLES_SETUP_REVISION }}
+          path: .native-target-cycles-source
+
+      - name: Check out the pinned TypeRB compiler
+        uses: actions/checkout@v5
+        with:
+          repository: type-rb/type-rb
+          ref: ${{ env.TYPE_RB_REVISION }}
+          path: .type-rb
+
+      - name: Set up Go for the differential oracle
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: .type-rb/go.mod
+          cache-dependency-path: .type-rb/go.sum
+
+      - name: Build and verify the pinned TypeRB compiler
+        run: |
+          test "$(cat .native-target-candidate/TYPE_RB_REVISION)" = "$TYPE_RB_REVISION"
+          test "$(git -C .type-rb rev-parse HEAD)" = "$TYPE_RB_REVISION"
+          test -z "$(git -C .type-rb status --porcelain)"
+          python3 .native-target-candidate/tools/build-reference.py .type-rb "$RUNNER_TEMP/trb"
+          test "$("$RUNNER_TEMP/trb" version)" = "$TYPE_RB_VERSION"
+
+      - name: Verify Linux evidence tools
+        run: python3 .native-target-candidate/tools/ci-linux-prerequisites.py targets --bin-dir "$RUNNER_TEMP/native-ci-bin" --receipt "$RUNNER_TEMP/linux-prerequisites.json"
+      - name: Retain Linux prerequisite evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: linux-prerequisites-target-amd64
+          path: ${{ runner.temp }}/linux-prerequisites.json
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Build the pinned Native QBE variant
+        id: qbe
+        run: |
+          python3 .native-target-candidate/tools/qbe_toolchain.py "$RUNNER_TEMP/qbe-$QBE_VERSION"
+          python3 .native-target-candidate/tools/qbe_sqrt_test.py --qbe "$RUNNER_TEMP/qbe-$QBE_VERSION/qbe"
+          python3 .native-target-candidate/tools/qbe_integer_test.py --qbe "$RUNNER_TEMP/qbe-$QBE_VERSION/qbe"
+          python3 .native-target-candidate/tools/qbe_memory_test.py --qbe "$RUNNER_TEMP/qbe-$QBE_VERSION/qbe"
+          python3 .native-target-candidate/tools/qbe_gcm_test.py --qbe "$RUNNER_TEMP/qbe-$QBE_VERSION/qbe"
+          python3 .native-target-candidate/tools/qbe_fma_test.py --qbe "$RUNNER_TEMP/qbe-$QBE_VERSION/qbe"
+          test -x "$RUNNER_TEMP/qbe-$QBE_VERSION/qbe"
+          python3 .native-target-candidate/tools/native-puts-writev-test.py --qbe "$RUNNER_TEMP/qbe-$QBE_VERSION/qbe"
+          python3 .native-target-candidate/tools/native-failure-recovery-test.py --qbe "$RUNNER_TEMP/qbe-$QBE_VERSION/qbe"
+          python3 .native-target-candidate/tools/native-link-path-test.py --qbe "$RUNNER_TEMP/qbe-$QBE_VERSION/qbe"
+          python3 .native-target-candidate/tools/native-runtime-branch-test.py --qbe "$RUNNER_TEMP/qbe-$QBE_VERSION/qbe"
+          printf 'path=%s\n' "$RUNNER_TEMP/qbe-$QBE_VERSION/qbe" >> "$GITHUB_OUTPUT"
+
+      - name: Verify and download the immutable public root QBE
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          release="$RUNNER_TEMP/root-release"
+          mkdir -p "$release"
+          gh api "repos/$ROOT_REPOSITORY/releases/tags/$ROOT_RELEASE_TAG" \
+            > "$release/release.json"
+          jq -e \
+            --arg tag "$ROOT_RELEASE_TAG" \
+            --argjson id "$ROOT_ASSET_ID" \
+            --arg name "$ROOT_ASSET_NAME" \
+            --argjson size "$ROOT_QBE_SIZE" \
+            --arg digest "sha256:$ROOT_QBE_SHA256" \
+            '
+              .immutable == true and
+              .draft == false and
+              .prerelease == true and
+              .tag_name == $tag and
+              ([
+                .assets[]
+                | select(
+                    .id == $id and
+                    .name == $name and
+                    .size == $size and
+                    .digest == $digest
+                  )
+              ] | length == 1)
+            ' "$release/release.json"
+          gh api \
+            -H "Accept: application/octet-stream" \
+            "repos/$ROOT_REPOSITORY/releases/assets/$ROOT_ASSET_ID" \
+            > "$release/$ROOT_ASSET_NAME"
+          test "$(wc -c < "$release/$ROOT_ASSET_NAME" | tr -d ' ')" = "$ROOT_QBE_SIZE"
+          test "$(sha256sum "$release/$ROOT_ASSET_NAME" | awk '{print $1}')" = "$ROOT_QBE_SHA256"
+
+      - name: Run the registered Linux target verification
+        env:
+          QBE: ${{ steps.qbe.outputs.path }}
+        run: |
+          controller="$RUNNER_TEMP/linux-amd64-targets-controller"
+          evidence="$RUNNER_TEMP/linux-amd64-targets-evidence"
+          mkdir -p "$controller"
+          set +e
+          python3 .native-target-candidate/tools/measure-command-test.py \
+            > "$controller/measurement-test.stdout" \
+            2> "$controller/measurement-test.stderr"
+          measurement_test_status=$?
+          /bin/sh .native-target-candidate/tools/bootstrap-seed-arguments-test.sh \
+            > "$controller/bootstrap-arguments-test.stdout" \
+            2> "$controller/bootstrap-arguments-test.stderr"
+          bootstrap_arguments_test_status=$?
+          set -e
+          printf '%s\n' "$measurement_test_status" \
+            > "$controller/measurement-test.status"
+          printf '%s\n' "$bootstrap_arguments_test_status" \
+            > "$controller/bootstrap-arguments-test.status"
+          test "$measurement_test_status" -eq 0
+          test "$bootstrap_arguments_test_status" -eq 0
+          set +e
+          /bin/sh .native-target-candidate/tools/linux-amd64-targets.sh \
+            "$GITHUB_WORKSPACE/.native-target-candidate" \
+            "$RUNNER_TEMP/root-release/$ROOT_ASSET_NAME" \
+            "$QBE" \
+            /usr/bin/cc \
+            "$RUNNER_TEMP/trb" \
+            "$(command -v go)" \
+            "$RUNNER_TEMP/linux-amd64-targets-workspace" \
+            "$evidence" \
+            "$RUNNER_TEMP/linux-amd64-targets-compiler" \
+            "$GITHUB_WORKSPACE/.native-target-seed-source" \
+            "$GITHUB_WORKSPACE/.native-target-loop-source" \
+            "$GITHUB_WORKSPACE/.native-target-boolean-source" \
+            "$GITHUB_WORKSPACE/.native-target-record-source" \
+            "$GITHUB_WORKSPACE/.native-target-hash-source" \
+            "$GITHUB_WORKSPACE/.native-target-iteration-source" \
+            "$GITHUB_WORKSPACE/.native-target-names-source" \
+            "$GITHUB_WORKSPACE/.native-target-cycles-source" \
+            > "$controller/stdout" \
+            2> "$controller/stderr"
+          controller_status=$?
+          set -e
+          printf '%s\n' "$controller_status" > "$controller/status"
+          printf 'linux-amd64-targets: passed\n' > "$controller/expected"
+          mkdir -p "$evidence/controller"
+          cp -R "$controller/." "$evidence/controller/"
+          test "$controller_status" -eq 0
+          cmp "$controller/expected" "$controller/stdout"
+          test ! -s "$controller/stderr"
+
+      - name: Verify emitted String indexing and guarded bounds
+        run: |
+          python3 .native-target-candidate/tools/native-string-index-test.py \
+            --qbe "${{ steps.qbe.outputs.path }}" \
+            --compiler "$RUNNER_TEMP/linux-amd64-targets-compiler" \
+            --output "$RUNNER_TEMP/linux-amd64-targets-evidence/string-index.json"
+
+      - name: Qualify HTTP transport on Linux amd64
+        env:
+          QBE: ${{ steps.qbe.outputs.path }}
+        run: |
+          python3 .native-target-candidate/tools/build-network-dependencies.py \
+            --archives "$RUNNER_TEMP/network-archives" --output "$RUNNER_TEMP/network-libraries"
+          python3 .native-target-candidate/tools/native-network-distribution-test.py \
+            "$RUNNER_TEMP/linux-amd64-targets-compiler" --core --qbe "$QBE" \
+            --target linux-amd64-v0 --libraries "$RUNNER_TEMP/network-libraries" \
+            --receipt "$RUNNER_TEMP/network-distribution.json"
+          python3 .native-target-candidate/tools/native-web-network-test.py \
+            "$RUNNER_TEMP/linux-amd64-targets-compiler" --core --qbe "$QBE" \
+            --target linux-amd64-v0 \
+            --libraries "$RUNNER_TEMP/network-libraries" --gc-stress
+          python3 .native-target-candidate/tools/build-compression-dependencies.py \
+            --archives "$RUNNER_TEMP/compression-archives" --output "$RUNNER_TEMP/compression-libraries"
+          python3 .native-target-candidate/tools/native-web-compression-test.py \
+            "$RUNNER_TEMP/linux-amd64-targets-compiler" --core --qbe "$QBE" \
+            --target linux-amd64-v0 --libraries "$RUNNER_TEMP/network-libraries" \
+            --compression "$RUNNER_TEMP/compression-libraries" --receipt "$RUNNER_TEMP/web-compression.json"
+          python3 .native-target-candidate/tools/build-crypto-dependencies.py \
+            --archives "$RUNNER_TEMP/crypto-archives" --output "$RUNNER_TEMP/crypto-libraries"
+          python3 .native-target-candidate/tools/native-crypto-test.py \
+            "$RUNNER_TEMP/linux-amd64-targets-compiler" --core --qbe "$QBE" \
+            --target linux-amd64-v0 --libraries "$RUNNER_TEMP/crypto-libraries" \
+            --receipt "$RUNNER_TEMP/crypto.json"
+
+      - name: Qualify OIDC HTTPS and foreign cleanup on Linux amd64
+        env:
+          TRBN_QBE: ${{ steps.qbe.outputs.path }}
+          TRBN_NETWORK_LIB_DIR: ${{ runner.temp }}/network-libraries
+          TRBN_CRYPTO_LIB_DIR: ${{ runner.temp }}/crypto-libraries
+          TRBN_OIDC_LIB_DIR: ${{ runner.temp }}/oidc-libraries
+        run: |
+          python3 .native-target-candidate/tools/build-oidc-dependencies.py \
+            --archives "$RUNNER_TEMP/oidc-archives" --crypto-archives "$RUNNER_TEMP/crypto-archives" \
+            --crypto "$TRBN_CRYPTO_LIB_DIR" --output "$TRBN_OIDC_LIB_DIR"
+          python3 .native-target-candidate/tools/native-oidc-test.py \
+            "$RUNNER_TEMP/linux-amd64-targets-compiler" --core --tls --transport \
+            --receipt "$RUNNER_TEMP/oidc-https.json"
+          python3 .native-target-candidate/tools/native-oidc-test.py \
+            "$RUNNER_TEMP/linux-amd64-targets-compiler" --core --tls --transport --stress \
+            --receipt "$RUNNER_TEMP/oidc-stress.json"
+          python3 .native-target-candidate/tools/native-oidc-http2-test.py \
+            "$RUNNER_TEMP/linux-amd64-targets-compiler" --core --receipt "$RUNNER_TEMP/oidc-http2.json"
+          python3 .native-target-candidate/tools/native-oidc-http2-test.py \
+            "$RUNNER_TEMP/linux-amd64-targets-compiler" --core --stress --receipt "$RUNNER_TEMP/oidc-http2-stress.json"
+          python3 .native-target-candidate/tools/native-oidc-hostname-test.py \
+            "$RUNNER_TEMP/linux-amd64-targets-compiler" --core --receipt "$RUNNER_TEMP/oidc-hostnames.json"
+          python3 .native-target-candidate/tools/native-oidc-hostname-test.py \
+            "$RUNNER_TEMP/linux-amd64-targets-compiler" --core --stress --receipt "$RUNNER_TEMP/oidc-hostnames-stress.json"
+
+      - name: Export amd64 target-neutral identities
+        id: target_neutral
+        run: |
+          evidence="$RUNNER_TEMP/linux-amd64-targets-evidence"
+          fixed_point_qbe_sha256=$(awk -F= \
+            '$1 == "candidate_fixed_point_qbe_sha256" {print $2}' \
+            "$evidence/identities.txt")
+          portable_qbe_sha256=$(sha256sum \
+            "$evidence/applications/portable-entry-first.ssa" | \
+            awk '{print $1}')
+          test "$(awk -F= \
+            '$1 == "candidate_fixed_point_qbe_sha256" {count += 1} END {print count + 0}' \
+            "$evidence/identities.txt")" -eq 1
+          for digest in "$fixed_point_qbe_sha256" "$portable_qbe_sha256"; do
+            printf '%s\n' "$digest" | grep -E '^[0-9a-f]{64}$' > /dev/null
+          done
+          {
+            printf 'fixed_point_qbe_sha256=%s\n' "$fixed_point_qbe_sha256"
+            printf 'portable_qbe_sha256=%s\n' "$portable_qbe_sha256"
+            printf 'producer_attempt=%s\n' "$GITHUB_RUN_ATTEMPT"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Record exact workflow and host context
+        if: always()
+        run: |
+          evidence="$RUNNER_TEMP/linux-amd64-targets-evidence"
+          mkdir -p "$evidence/workflow"
+          mkdir -p "$evidence/float-decimal"
+          cp .native-target-candidate/third_party/go-float/LICENSE \
+            .native-target-candidate/third_party/go-float/source.json "$evidence/float-decimal/"
+          if test -f "$RUNNER_TEMP/network-libraries/network-build.json"; then
+            mkdir -p "$evidence/network"
+            cp "$RUNNER_TEMP/network-libraries/network-build.json" "$RUNNER_TEMP/network-distribution.json" "$evidence/network/"
+            cp "$RUNNER_TEMP/network-libraries/libuv-LICENSE" \
+              "$RUNNER_TEMP/network-libraries/llhttp-LICENSE" "$evidence/network/"
+          fi
+          if test -f "$RUNNER_TEMP/compression-libraries/compression-build.json"; then
+            mkdir -p "$evidence/compression"
+            cp "$RUNNER_TEMP/compression-libraries/compression-build.json" \
+              "$RUNNER_TEMP/compression-libraries/libdeflate-LICENSE" "$evidence/compression/"
+            if test -f "$RUNNER_TEMP/web-compression.json"; then
+              cp "$RUNNER_TEMP/web-compression.json" "$evidence/compression/"
+            fi
+          fi
+          if test -f "$RUNNER_TEMP/crypto-libraries/crypto-build.json"; then
+            mkdir -p "$evidence/crypto"
+            cp "$RUNNER_TEMP/crypto-libraries/crypto-build.json" \
+              "$RUNNER_TEMP/crypto-libraries/openssl-LICENSE" "$evidence/crypto/"
+            if test -f "$RUNNER_TEMP/crypto.json"; then
+              cp "$RUNNER_TEMP/crypto.json" "$evidence/crypto/"
+            fi
+          fi
+          if test -f "$RUNNER_TEMP/oidc-libraries/oidc-build.json"; then
+            mkdir -p "$evidence/oidc"
+            cp "$RUNNER_TEMP/oidc-libraries/oidc-build.json" \
+              "$RUNNER_TEMP/oidc-libraries/"*-LICENSE "$evidence/oidc/"
+            for receipt in "$RUNNER_TEMP/oidc-"*.json; do
+              if test -f "$receipt"; then cp "$receipt" "$evidence/oidc/"; fi
+            done
+          fi
+          if test -d "$RUNNER_TEMP/linux-amd64-targets-controller"; then
+            mkdir -p "$evidence/controller"
+            cp -R "$RUNNER_TEMP/linux-amd64-targets-controller/." \
+              "$evidence/controller/"
+          fi
+          {
+            printf 'workflow_revision=%s\n' "$GITHUB_SHA"
+            printf 'workflow_ref=%s\n' "$GITHUB_REF"
+            printf 'workflow_event=%s\n' "$GITHUB_EVENT_NAME"
+            printf 'workflow_run_id=%s\n' "$GITHUB_RUN_ID"
+            printf 'workflow_run_attempt=%s\n' "$GITHUB_RUN_ATTEMPT"
+            printf 'runner_image=ubuntu-24.04\n'
+            printf 'candidate_revision=%s\n' \
+              "$(git -C .native-target-candidate rev-parse HEAD 2>/dev/null || true)"
+            printf 'type_rb_revision=%s\n' "$TYPE_RB_REVISION"
+            printf 'root_repository=%s\n' "$ROOT_REPOSITORY"
+            printf 'root_release_tag=%s\n' "$ROOT_RELEASE_TAG"
+            printf 'root_asset_id=%s\n' "$ROOT_ASSET_ID"
+            uname -a
+            lscpu
+          } > "$evidence/workflow/context.txt" 2>&1
+          {
+            if test -x "$RUNNER_TEMP/trb"; then "$RUNNER_TEMP/trb" version; fi
+            if command -v go > /dev/null 2>&1; then go version; fi
+            python3 --version
+            if command -v /usr/bin/cc > /dev/null 2>&1; then /usr/bin/cc --version; fi
+            if command -v ld.lld > /dev/null 2>&1; then ld.lld --version; fi
+            if test -x "$RUNNER_TEMP/qbe-$QBE_VERSION/qbe"; then
+              "$RUNNER_TEMP/qbe-$QBE_VERSION/qbe" -h || true
+            fi
+          } > "$evidence/workflow/toolchains.txt" 2>&1
+          git -C .native-target-candidate status --porcelain=v1 \
+            > "$evidence/workflow/candidate-status.txt" 2>&1 || true
+          dpkg-query -W -f='${binary:Package}\t${Version}\n' \
+            binutils file jq lld 'lld-*' strace time \
+            > "$evidence/workflow/packages.tsv" 2>&1 || true
+          if test -f "$RUNNER_TEMP/qbe-$QBE_VERSION.tar.xz"; then
+            sha256sum "$RUNNER_TEMP/qbe-$QBE_VERSION.tar.xz" \
+              > "$evidence/workflow/qbe-source-sha256.txt"
+            wc -c "$RUNNER_TEMP/qbe-$QBE_VERSION.tar.xz" \
+              > "$evidence/workflow/qbe-source-size.txt"
+          fi
+          cp "$RUNNER_TEMP/qbe-$QBE_VERSION/build-info.json" "$evidence/workflow/qbe-build-info.json" 2>/dev/null || true
+          if test -x "$RUNNER_TEMP/qbe-$QBE_VERSION/qbe"; then
+            sha256sum "$RUNNER_TEMP/qbe-$QBE_VERSION/qbe" \
+              > "$evidence/workflow/qbe-binary-sha256.txt"
+          fi
+          if test -f "$RUNNER_TEMP/root-release/$ROOT_ASSET_NAME"; then
+            sha256sum "$RUNNER_TEMP/root-release/$ROOT_ASSET_NAME" \
+              > "$evidence/workflow/root-qbe-sha256.txt"
+            wc -c "$RUNNER_TEMP/root-release/$ROOT_ASSET_NAME" \
+              > "$evidence/workflow/root-qbe-size.txt"
+          fi
+          if test -f "$RUNNER_TEMP/root-release/release.json"; then
+            cp "$RUNNER_TEMP/root-release/release.json" \
+              "$evidence/workflow/root-release.json"
+          fi
+
+      - name: Upload all raw Linux target evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: linux-amd64-targets-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/linux-amd64-targets-evidence
+          if-no-files-found: error
+          retention-days: 90
+
+  regress-linux-arm64:
+    name: Regress Ubuntu 24.04 arm64
+    # Tiered PRs leave the arm64 regression and cross-target comparison to main.
+    if: inputs.scope != 'pull-request'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 120
+    outputs:
+      fixed_point_qbe_sha256: ${{ steps.target_neutral.outputs.fixed_point_qbe_sha256 }}
+      portable_qbe_sha256: ${{ steps.target_neutral.outputs.portable_qbe_sha256 }}
+      producer_attempt: ${{ steps.target_neutral.outputs.producer_attempt }}
+    steps:
+      - name: Check out the exact Linux target candidate
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+          path: .native-target-arm64-candidate
+
+      - name: Initialize arm64 evidence
+        run: |
+          test "$(git -C .native-target-arm64-candidate rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git -C .native-target-arm64-candidate status --porcelain)"
+          test "$(tr -d '\n' < .native-target-arm64-candidate/TYPE_RB_REVISION)" = \
+            "$TYPE_RB_REVISION"
+          mkdir -p "$RUNNER_TEMP/native-target-linux-arm64-evidence/workflow"
+          {
+            printf 'workflow_revision=%s\n' "$GITHUB_SHA"
+            printf 'workflow_ref=%s\n' "$GITHUB_REF"
+            printf 'workflow_event=%s\n' "$GITHUB_EVENT_NAME"
+            printf 'runner_image=ubuntu-24.04-arm\n'
+          } > "$RUNNER_TEMP/native-target-linux-arm64-evidence/workflow/invocation.txt"
+
+      - name: Verify Linux regression evidence tools
+        run: python3 .native-target-arm64-candidate/tools/ci-linux-prerequisites.py targets --bin-dir "$RUNNER_TEMP/native-ci-bin" --receipt "$RUNNER_TEMP/linux-prerequisites.json"
+      - name: Retain Linux prerequisite evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: linux-prerequisites-target-arm64
+          path: ${{ runner.temp }}/linux-prerequisites.json
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Build the pinned Native QBE variant for arm64
+        id: arm64_qbe
+        run: |
+          python3 .native-target-arm64-candidate/tools/qbe_toolchain.py "$RUNNER_TEMP/qbe-$QBE_VERSION"
+          python3 .native-target-arm64-candidate/tools/qbe_sqrt_test.py --qbe "$RUNNER_TEMP/qbe-$QBE_VERSION/qbe"
+          python3 .native-target-arm64-candidate/tools/qbe_integer_test.py --qbe "$RUNNER_TEMP/qbe-$QBE_VERSION/qbe"
+          python3 .native-target-arm64-candidate/tools/qbe_memory_test.py --qbe "$RUNNER_TEMP/qbe-$QBE_VERSION/qbe"
+          python3 .native-target-arm64-candidate/tools/qbe_gcm_test.py --qbe "$RUNNER_TEMP/qbe-$QBE_VERSION/qbe"
+          python3 .native-target-arm64-candidate/tools/qbe_fma_test.py --qbe "$RUNNER_TEMP/qbe-$QBE_VERSION/qbe"
+          test -x "$RUNNER_TEMP/qbe-$QBE_VERSION/qbe"
+          printf 'path=%s\n' "$RUNNER_TEMP/qbe-$QBE_VERSION/qbe" >> "$GITHUB_OUTPUT"
+
+      - name: Verify and download the immutable public Linux arm64 seed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          release="$RUNNER_TEMP/native-target-linux-arm64-release"
+          evidence="$RUNNER_TEMP/native-target-linux-arm64-evidence/release"
+          /bin/sh .native-target-arm64-candidate/tools/bootstrap-seed-download.sh \
+            "$ARM64_RELEASE_TAG" "$BOOTSTRAP_SEED_REVISION" "$ARM64_ASSET_NAME" "$release"
+          jq -e --argjson id "$ARM64_ASSET_ID" --arg name "$ARM64_ASSET_NAME" \
+            '[.assets[] | select(.id == $id and .name == $name)] | length == 1' "$release/release.json"
+          test "$(wc -c < "$release/$ARM64_ASSET_NAME" | tr -d ' ')" = "$ARM64_SEED_SIZE"
+          test "$(sha256sum "$release/$ARM64_ASSET_NAME" | awk '{print $1}')" = "$ARM64_SEED_SHA256"
+          mkdir -p "$evidence"
+          cp "$release/release.json" "$release/$BOOTSTRAP_MANIFEST_ASSET" \
+            "$release/$BOOTSTRAP_CHECKSUM_ASSET" "$evidence/"
+          cp "$release/"*.attestation.json "$evidence/"
+          wc -c "$release/$ARM64_ASSET_NAME" > "$evidence/seed-size.txt"
+          sha256sum "$release/$ARM64_ASSET_NAME" > "$evidence/seed-sha256.txt"
+
+      - name: Build exact setup-only current-source transitions
+        env:
+          QBE: ${{ steps.arm64_qbe.outputs.path }}
+        run: |
+          candidate="$GITHUB_WORKSPACE/.native-target-arm64-candidate"
+          compiler_entry="$candidate/compiler/src/compiler.trb"
+          seed="$RUNNER_TEMP/native-target-linux-arm64-release/$ARM64_ASSET_NAME"
+          transition="$RUNNER_TEMP/native-target-linux-arm64-transition"
+          evidence="$RUNNER_TEMP/native-target-linux-arm64-evidence/transition"
+          mkdir -p \
+            "$transition/first" \
+            "$transition/current-runtime" \
+            "$evidence"
+
+          set +e
+          strace -f -e trace=process -o "$evidence/first-process.trace" \
+            "$seed" build "$compiler_entry" \
+              --output "$transition/first/compiler" \
+              --qbe "$QBE" \
+              --cc /usr/bin/cc \
+              --target linux-arm64-v0 \
+              > "$evidence/first.stdout" \
+              2> "$evidence/first.stderr"
+          first_status=$?
+          set -e
+          printf '%s\n' "$first_status" > "$evidence/first.status"
+          test "$first_status" -eq 0
+          test -x "$transition/first/compiler"
+          test ! -s "$evidence/first.stdout"
+          test ! -s "$evidence/first.stderr"
+
+          set +e
+          strace -f -e trace=process \
+            -o "$evidence/current-runtime-process.trace" \
+            "$transition/first/compiler" build "$compiler_entry" \
+              --output "$transition/current-runtime/compiler" \
+              --qbe "$QBE" \
+              --cc /usr/bin/cc \
+              --target linux-arm64-v0 \
+              > "$evidence/current-runtime.stdout" \
+              2> "$evidence/current-runtime.stderr"
+          current_runtime_status=$?
+          set -e
+          printf '%s\n' "$current_runtime_status" \
+            > "$evidence/current-runtime.status"
+          test "$current_runtime_status" -eq 0
+          test -x "$transition/current-runtime/compiler"
+          test ! -s "$evidence/current-runtime.stdout"
+          test ! -s "$evidence/current-runtime.stderr"
+
+          {
+            grep execve "$evidence/first-process.trace"
+            grep execve "$evidence/current-runtime-process.trace"
+          } > "$evidence/process-inventory.txt"
+          if grep -E \
+            'execve\("[^"]*/(go|trb|sh|bash|dash|zsh)"|compiler-recovery' \
+            "$evidence/first-process.trace" \
+            "$evidence/current-runtime-process.trace" > /dev/null; then
+            printf 'setup transition launched a forbidden executable\n' >&2
+            exit 1
+          fi
+          grep -F "execve(\"$QBE\"" "$evidence/first-process.trace" > /dev/null
+          grep -F 'execve("/usr/bin/cc"' "$evidence/first-process.trace" > /dev/null
+          grep -E 'execve\("[^"]*/(as|aarch64-linux-gnu-as)"' \
+            "$evidence/first-process.trace" > /dev/null
+          grep -F "execve(\"$QBE\"" \
+            "$evidence/current-runtime-process.trace" > /dev/null
+          grep -F 'execve("/usr/bin/cc"' \
+            "$evidence/current-runtime-process.trace" > /dev/null
+          grep -E 'execve\("[^"]*/(as|aarch64-linux-gnu-as)"' \
+            "$evidence/current-runtime-process.trace" > /dev/null
+
+          {
+            printf 'candidate_revision=%s\n' "$(git -C "$candidate" rev-parse HEAD)"
+            printf 'profile=linux-arm64-v0\n'
+            printf 'published_seed_size=%s\n' \
+              "$(wc -c < "$seed" | tr -d ' ')"
+            printf 'first_transition_size=%s\n' \
+              "$(wc -c < "$transition/first/compiler" | tr -d ' ')"
+            printf 'current_runtime_transition_size=%s\n' \
+              "$(wc -c < "$transition/current-runtime/compiler" | tr -d ' ')"
+          } > "$evidence/identities.txt"
+          sha256sum \
+            "$seed" \
+            "$transition/first/compiler" \
+            "$transition/current-runtime/compiler" \
+            > "$evidence/SHA256SUMS"
+
+      - name: Close the current arm64 fixed point and check corpus
+        env:
+          QBE: ${{ steps.arm64_qbe.outputs.path }}
+        run: |
+          candidate="$GITHUB_WORKSPACE/.native-target-arm64-candidate"
+          transition="$RUNNER_TEMP/native-target-linux-arm64-transition/current-runtime/compiler"
+          evidence="$RUNNER_TEMP/native-target-linux-arm64-evidence"
+          controller="$evidence/controller/bootstrap"
+          mkdir -p "$controller"
+          set +e
+          /bin/sh "$candidate/tools/bootstrap-seed.sh" \
+            --mode previous \
+            --input "$transition" \
+            --input-role transition \
+            --qbe "$QBE" \
+            --cc /usr/bin/cc \
+            --profile linux-arm64-v0 \
+            --runner-image ubuntu-24.04-arm \
+            --workspace "$RUNNER_TEMP/native-target-linux-arm64-bootstrap-workspace" \
+            --output "$RUNNER_TEMP/native-target-linux-arm64-compiler" \
+            --evidence "$evidence/bootstrap" \
+            --metadata "$evidence/bootstrap-metadata.json" \
+            --asset-name native-target-regression-linux-arm64 \
+            --repository-root "$candidate" \
+            > "$controller/stdout" \
+            2> "$controller/stderr"
+          controller_status=$?
+          set -e
+          printf '%s\n' "$controller_status" > "$controller/status"
+          printf 'bootstrap-seed: previous linux-arm64-v0 passed\n' \
+            > "$controller/expected-marker"
+          sed -n '$p' "$controller/stdout" > "$controller/actual-marker"
+          test "$controller_status" -eq 0
+          cmp "$controller/expected-marker" "$controller/actual-marker"
+          test ! -s "$controller/stderr"
+          test -x "$RUNNER_TEMP/native-target-linux-arm64-compiler"
+
+      - name: Verify deterministic portable application behavior
+        env:
+          QBE: ${{ steps.arm64_qbe.outputs.path }}
+        run: |
+          candidate="$GITHUB_WORKSPACE/.native-target-arm64-candidate"
+          compiler="$RUNNER_TEMP/native-target-linux-arm64-compiler"
+          config="$candidate/corpus/portable-entry/portable-entry/trbconfig.jsonc"
+          workspace="$RUNNER_TEMP/native-target-linux-arm64-portable-workspace"
+          evidence="$RUNNER_TEMP/native-target-linux-arm64-evidence/portable"
+          first="$workspace/first/program"
+          second="$workspace/second/program"
+          mkdir -p "$workspace/first" "$workspace/second" "$evidence"
+
+          "$compiler" check "$config" \
+            > "$evidence/check.stdout" \
+            2> "$evidence/check.stderr"
+          printf 'ok\n' > "$evidence/check.expected"
+          cmp "$evidence/check.expected" "$evidence/check.stdout"
+          test ! -s "$evidence/check.stderr"
+
+          "$compiler" emit-qbe "$config" \
+            > "$evidence/first.ssa" \
+            2> "$evidence/first-emit.stderr"
+          "$compiler" emit-qbe "$config" \
+            > "$evidence/second.ssa" \
+            2> "$evidence/second-emit.stderr"
+          test ! -s "$evidence/first-emit.stderr"
+          test ! -s "$evidence/second-emit.stderr"
+          cmp "$evidence/first.ssa" "$evidence/second.ssa"
+
+          "$compiler" build "$config" \
+            --output "$first" \
+            --qbe "$QBE" \
+            --cc /usr/bin/cc \
+            --target linux-arm64-v0 \
+            > "$evidence/first-build.stdout" \
+            2> "$evidence/first-build.stderr"
+          test ! -s "$evidence/first-build.stdout"
+          test ! -s "$evidence/first-build.stderr"
+          test -x "$first"
+
+          strace -f -e trace=process -o "$evidence/second-build-process.trace" \
+            "$compiler" build "$config" \
+              --output "$second" \
+              --qbe "$QBE" \
+              --cc /usr/bin/cc \
+              --target linux-arm64-v0 \
+              > "$evidence/second-build.stdout" \
+              2> "$evidence/second-build.stderr"
+          test ! -s "$evidence/second-build.stdout"
+          test ! -s "$evidence/second-build.stderr"
+          test -x "$second"
+          cmp "$first" "$second"
+
+          grep execve "$evidence/second-build-process.trace" \
+            > "$evidence/second-build-process-inventory.txt"
+          if grep -E \
+            'execve\("[^"]*/(go|trb|sh|bash|dash|zsh)"|compiler-recovery' \
+            "$evidence/second-build-process.trace" > /dev/null; then
+            printf 'portable build launched a forbidden executable\n' >&2
+            exit 1
+          fi
+          grep -F "execve(\"$QBE\"" \
+            "$evidence/second-build-process.trace" > /dev/null
+          grep -F 'execve("/usr/bin/cc"' \
+            "$evidence/second-build-process.trace" > /dev/null
+          grep -E 'execve\("[^"]*/(as|aarch64-linux-gnu-as)"' \
+            "$evidence/second-build-process.trace" > /dev/null
+          grep -E 'execve\("[^"]*/ld\.lld"' \
+            "$evidence/second-build-process.trace" > /dev/null
+
+          cat > "$evidence/runtime.expected" <<'EOF'
+          2
+          1
+          144
+          12
+          0
+          0
+          0
+          9007199254740991
+          -9007199254740991
+          -2
+          nan
+          EOF
+          "$first" 144 \
+            > "$evidence/runtime.stdout" \
+            2> "$evidence/runtime.stderr"
+          cmp "$evidence/runtime.expected" "$evidence/runtime.stdout"
+          test ! -s "$evidence/runtime.stderr"
+
+          file "$first" > "$evidence/file.txt"
+          readelf -W -h "$first" > "$evidence/elf-header.txt"
+          readelf -W -l "$first" > "$evidence/elf-segments.txt"
+          readelf -W -d "$first" > "$evidence/elf-dependencies.txt"
+          readelf -W -n "$first" > "$evidence/elf-notes.txt"
+          nm -D -u "$first" > "$evidence/undefined-symbols.txt"
+          ldd "$first" > "$evidence/ldd.txt"
+          grep -Eq 'Machine:[[:space:]]+AArch64' "$evidence/elf-header.txt"
+          grep -Eq '=d sqrt ' "$evidence/first.ssa"
+          objdump -d "$first" > "$evidence/disassembly.txt"
+          grep -Eq '[[:space:]]fsqrt[[:space:]]' "$evidence/disassembly.txt"
+          {
+            printf 'candidate_revision=%s\n' "$(git -C "$candidate" rev-parse HEAD)"
+            printf 'compiler_sha256=%s\n' "$(sha256sum "$compiler" | awk '{print $1}')"
+            printf 'portable_qbe_sha256=%s\n' \
+              "$(sha256sum "$evidence/first.ssa" | awk '{print $1}')"
+            printf 'portable_executable_sha256=%s\n' \
+              "$(sha256sum "$first" | awk '{print $1}')"
+            printf 'portable_executable_size=%s\n' \
+              "$(wc -c < "$first" | tr -d ' ')"
+          } > "$evidence/identities.txt"
+          test "$(git -C "$candidate" rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git -C "$candidate" status --porcelain)"
+
+      - name: Export arm64 target-neutral identities
+        id: target_neutral
+        run: |
+          evidence="$RUNNER_TEMP/native-target-linux-arm64-evidence"
+          fixed_point_qbe_sha256=$(awk -F= \
+            '$1 == "fixed_point_qbe_sha256" {print $2}' \
+            "$evidence/bootstrap/identities.txt")
+          portable_qbe_sha256=$(sha256sum "$evidence/portable/first.ssa" | \
+            awk '{print $1}')
+          test "$(awk -F= \
+            '$1 == "fixed_point_qbe_sha256" {count += 1} END {print count + 0}' \
+            "$evidence/bootstrap/identities.txt")" -eq 1
+          for digest in "$fixed_point_qbe_sha256" "$portable_qbe_sha256"; do
+            printf '%s\n' "$digest" | grep -E '^[0-9a-f]{64}$' > /dev/null
+          done
+          {
+            printf 'fixed_point_qbe_sha256=%s\n' "$fixed_point_qbe_sha256"
+            printf 'portable_qbe_sha256=%s\n' "$portable_qbe_sha256"
+            printf 'producer_attempt=%s\n' "$GITHUB_RUN_ATTEMPT"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Record exact arm64 workflow and host context
+        if: always()
+        env:
+          QBE: ${{ steps.arm64_qbe.outputs.path }}
+        run: |
+          candidate="$GITHUB_WORKSPACE/.native-target-arm64-candidate"
+          evidence="$RUNNER_TEMP/native-target-linux-arm64-evidence/workflow"
+          mkdir -p "$evidence"
+          {
+            printf 'workflow_revision=%s\n' "$GITHUB_SHA"
+            printf 'workflow_ref=%s\n' "$GITHUB_REF"
+            printf 'workflow_event=%s\n' "$GITHUB_EVENT_NAME"
+            printf 'workflow_run_id=%s\n' "$GITHUB_RUN_ID"
+            printf 'workflow_run_attempt=%s\n' "$GITHUB_RUN_ATTEMPT"
+            printf 'runner_image=ubuntu-24.04-arm\n'
+            printf 'candidate_revision=%s\n' \
+              "$(git -C "$candidate" rev-parse HEAD 2>/dev/null || true)"
+            printf 'type_rb_revision=%s\n' "$TYPE_RB_REVISION"
+            printf 'seed_repository=%s\n' "$ROOT_REPOSITORY"
+            printf 'seed_release_tag=%s\n' "$ARM64_RELEASE_TAG"
+            printf 'seed_asset_id=%s\n' "$ARM64_ASSET_ID"
+            uname -a
+            lscpu
+          } > "$evidence/context.txt" 2>&1
+          {
+            if command -v /usr/bin/cc > /dev/null 2>&1; then /usr/bin/cc --version; fi
+            if command -v ld.lld > /dev/null 2>&1; then ld.lld --version; fi
+            if test -n "$QBE" && test -x "$QBE"; then "$QBE" -h || true; fi
+          } > "$evidence/toolchains.txt" 2>&1
+          git -C "$candidate" status --porcelain=v1 \
+            > "$evidence/candidate-status.txt" 2>&1 || true
+          dpkg-query -W -f='${binary:Package}\t${Version}\n' \
+            binutils file jq lld 'lld-*' strace time \
+            > "$evidence/packages.tsv" 2>&1 || true
+          cp "$RUNNER_TEMP/qbe-$QBE_VERSION/build-info.json" "$evidence/qbe-build-info.json" 2>/dev/null || true
+          archive="$RUNNER_TEMP/qbe-$QBE_VERSION.tar.xz"
+          if test -f "$archive"; then
+            sha256sum "$archive" > "$evidence/qbe-source-sha256.txt"
+            wc -c "$archive" > "$evidence/qbe-source-size.txt"
+          fi
+          if test -n "$QBE" && test -x "$QBE"; then
+            sha256sum "$QBE" > "$evidence/qbe-binary-sha256.txt"
+            wc -c "$QBE" > "$evidence/qbe-binary-size.txt"
+          fi
+
+      - name: Upload all raw arm64 regression evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: native-target-linux-arm64-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/native-target-linux-arm64-evidence
+          if-no-files-found: error
+          retention-days: 90
+
+  compare-target-neutral-evidence:
+    name: Compare target-neutral QBE
+    if: inputs.scope != 'pull-request'
+    needs:
+      - verify-linux-amd64
+      - regress-linux-arm64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Initialize cross-target evidence
+        run: |
+          evidence="$RUNNER_TEMP/native-target-cross-target/evidence"
+          mkdir -p "$evidence"
+          {
+            printf 'candidate_revision=%s\n' "$GITHUB_SHA"
+            printf 'workflow_run_id=%s\n' "$GITHUB_RUN_ID"
+            printf 'workflow_run_attempt=%s\n' "$GITHUB_RUN_ATTEMPT"
+          } > "$evidence/invocation.txt"
+
+      - name: Require identical target-neutral compiler and application QBE
+        env:
+          AMD64_FIXED: ${{ needs['verify-linux-amd64'].outputs.fixed_point_qbe_sha256 }}
+          AMD64_PORTABLE: ${{ needs['verify-linux-amd64'].outputs.portable_qbe_sha256 }}
+          AMD64_ATTEMPT: ${{ needs['verify-linux-amd64'].outputs.producer_attempt }}
+          ARM64_FIXED: ${{ needs['regress-linux-arm64'].outputs.fixed_point_qbe_sha256 }}
+          ARM64_PORTABLE: ${{ needs['regress-linux-arm64'].outputs.portable_qbe_sha256 }}
+          ARM64_ATTEMPT: ${{ needs['regress-linux-arm64'].outputs.producer_attempt }}
+        run: |
+          root="$RUNNER_TEMP/native-target-cross-target"
+          evidence="$root/evidence"
+          mkdir -p "$evidence"
+          {
+            printf 'candidate_revision=%s\n' "$GITHUB_SHA"
+            printf 'amd64_profile=linux-amd64-v0\n'
+            printf 'arm64_profile=linux-arm64-v0\n'
+            printf 'amd64_producer_attempt=%s\n' "$AMD64_ATTEMPT"
+            printf 'arm64_producer_attempt=%s\n' "$ARM64_ATTEMPT"
+            printf 'amd64_artifact=linux-amd64-targets-%s-%s\n' \
+              "$GITHUB_RUN_ID" "$AMD64_ATTEMPT"
+            printf 'arm64_artifact=native-target-linux-arm64-%s-%s\n' \
+              "$GITHUB_RUN_ID" "$ARM64_ATTEMPT"
+            printf 'amd64_fixed_point_qbe_sha256=%s\n' "$AMD64_FIXED"
+            printf 'arm64_fixed_point_qbe_sha256=%s\n' "$ARM64_FIXED"
+            printf 'amd64_portable_entry_qbe_sha256=%s\n' "$AMD64_PORTABLE"
+            printf 'arm64_portable_entry_qbe_sha256=%s\n' "$ARM64_PORTABLE"
+          } > "$evidence/observed-identities.txt"
+
+          compare_target_neutral_qbe() {
+            for digest in \
+              "$AMD64_FIXED" "$AMD64_PORTABLE" \
+              "$ARM64_FIXED" "$ARM64_PORTABLE"; do
+              printf '%s\n' "$digest" | grep -E '^[0-9a-f]{64}$' > /dev/null || \
+                return 1
+            done
+            for attempt in "$AMD64_ATTEMPT" "$ARM64_ATTEMPT"; do
+              case "$attempt" in
+                '' | *[!0-9]*) return 1 ;;
+              esac
+              test "$attempt" -ge 1 || return 1
+              test "$attempt" -le "$GITHUB_RUN_ATTEMPT" || return 1
+            done
+            test "$AMD64_FIXED" = "$ARM64_FIXED" || return 1
+            test "$AMD64_PORTABLE" = "$ARM64_PORTABLE" || return 1
+            {
+              printf 'fixed_point_qbe_sha256=%s\n' "$AMD64_FIXED"
+              printf 'portable_entry_qbe_sha256=%s\n' "$AMD64_PORTABLE"
+            } > "$evidence/identities.txt"
+          }
+
+          set +e
+          compare_target_neutral_qbe \
+            > "$evidence/comparison.stdout" \
+            2> "$evidence/comparison.stderr"
+          comparison_status=$?
+          set -e
+          printf '%s\n' "$comparison_status" > "$evidence/comparison.status"
+          test "$comparison_status" -eq 0
+
+      - name: Upload cross-target evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: native-target-cross-target-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/native-target-cross-target/evidence
+          if-no-files-found: error
+          retention-days: 90

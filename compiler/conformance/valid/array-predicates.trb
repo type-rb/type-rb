@@ -1,0 +1,56 @@
+def main()
+	empty: Array<Integer> := []
+	missing := empty.any? { |item| item > 0 }
+	complete := empty.all? { |item| item > 0 }
+	absent := empty.none? { |item| item > 0 }
+	puts(missing)
+	puts(complete)
+	puts(absent)
+	mut visits := 0
+	found := [1, 2, 3].any? do |item|
+		visits += 1
+		item == 2
+	end
+	puts(found)
+	puts(visits)
+	visits = 0
+	every := [1, 2, 3].all?() do |item|
+		visits += 1
+		item < 2
+	end
+	puts(every)
+	puts(visits)
+	visits = 0
+	no_match := [1, 2, 3].none? do |item|
+		visits += 1
+		item == 2
+	end
+	puts(no_match)
+	puts(visits)
+	all_small := [1, 2].all? { |item| item < 3 }
+	none_small := [1, 2].none? { |item| item > 3 }
+	any_large := [1, 2].any? { |item| item > 3 }
+	puts(all_small)
+	puts(none_small)
+	puts(any_large)
+	maximum := (9007199254740991..9007199254740991).all? { |item| item > 0 }
+	excluded := (9007199254740991...9007199254740991).any? { |item| item > 0 }
+	reversed := (3..1).none? { |item| item > 0 }
+	puts(maximum)
+	puts(excluded)
+	puts(reversed)
+	# The predicate must exit before overflowing the next element.
+	finite := (1..9007199254740991).any? { |item| item == 2 }
+	puts(finite)
+	mut outer := 0
+	nested := [1, 2].all? do |item|
+		outer += 1
+		answer := (1..3).any? { |other| item == other }
+		answer
+	end
+	puts(nested)
+	puts(outer)
+	# Lazy evaluation must skip the zero divisor after the first match.
+	lazy := [1, 0].any? { |item| 10 / item > 0 }
+	puts(lazy)
+end

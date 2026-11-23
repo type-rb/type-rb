@@ -1,0 +1,43 @@
+import { check, emit_qbe } from compiler
+import { lex } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { CompilerState, compiler_new } from state/state
+import { describe, expect, test } from trb/std/test
+import { output_source } from testing/compiler
+
+describe("Native TypeRB frontend") do
+	test("branches on canonical Boolean values without repeated materialization") do
+		# Exercise the ordinary MIR path.
+		source := "def invert(value: Boolean): Boolean\n\treturn !value\nend\n\ndef main()\n\t_retained := {1 => 1}\n\t_owner := [1]\n\tmut index := 0\n\twhile index < 1\n\t\tif invert(false)\n\t\t\tputs(\"ok\")\n\t\tend\n\t\tindex += 1\n\tend\n\tif invert(true)\n\t\tputs(\"bad\")\n\tend\nend\n"
+		mut state := compiler_new(source.size() + 1)
+		expect(lex(state, source)).to_be_true()
+		expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_true()
+		qbe := output_source(emit_qbe(state))
+		scalar_body := qbe.split("function l $trbnf0(")[1].split("\n}\n")[0]
+		# Inner temporary-root scopes also contain closing braces.
+		main_body := qbe.split("function $trbnf1(")[1].split("\nfunction ")[0].split("\nexport function ")[0]
+		expect(scalar_body.include?(" =l ceql ")).to_be_true()
+		expect(main_body.include?(" =l csltl ")).to_be_true()
+		expect(main_body.include?(" =l ceql ")).to_be_true()
+		expect(scalar_body.include?("extuw")).to_be_false()
+		expect(main_body.include?("extuw")).to_be_false()
+		expect(main_body.include?(" =w cnel ")).to_be_false()
+	end
+
+	test("rejects non-Boolean branch conditions") do
+		sources := ["def main()\n\tif 1\n\t\tputs(\"bad\")\n\tend\nend\n", "def main()\n\twhile 4294967296\n\t\tputs(\"bad\")\n\tend\nend\n"]
+		mut index := 0
+		while index < sources.size()
+			source := sources[index]
+			mut state := compiler_new(source.size() + 1)
+			expect(lex(state, source)).to_be_true()
+			expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+			expect(resolve(state)).to_be_true()
+			expect(check(state)).to_be_false()
+			index += 1
+		end
+	end
+end

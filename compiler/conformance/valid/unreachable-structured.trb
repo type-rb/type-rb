@@ -1,0 +1,61 @@
+def stopped()
+	return
+	if true
+		while true
+			puts("unreachable")
+		end
+	end
+end
+
+def choose(value: Integer): Integer
+	if value == 0
+		return 10
+		if true
+			while true
+				puts("unreachable")
+			end
+		end
+	elsif value == 1
+		return 11
+		while true
+			values: Array<Integer> := []
+			puts(values[0])
+		end
+	else
+		return 12
+		if false
+			puts("unreachable")
+		elsif true
+			puts("unreachable")
+		end
+	end
+	while true
+		puts("unreachable")
+	end
+	return 99
+end
+
+def partial(stop: Boolean): Integer
+	if stop
+		return 20
+		while true
+			puts("unreachable")
+		end
+	else
+		puts("live")
+	end
+	return 21
+end
+
+def main()
+	stopped()
+	puts(choose(0))
+	puts(choose(1))
+	puts(choose(2))
+	puts(partial(true))
+	puts(partial(false))
+	return
+	if true
+		puts("unreachable")
+	end
+end

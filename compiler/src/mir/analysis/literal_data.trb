@@ -1,0 +1,62 @@
+import { mir_op_singleton_literal, mir_op_string_literal } from mir/model/instructions
+import { compiler_string_bytes } from support/compiler_bytes
+import { MirLiteralData, MirModule } from mir/model/module
+
+def mir_string_literal_data(value: String): MirLiteralData
+	return MirLiteralData.new(bytes: compiler_string_bytes(value), points: value.size())
+end
+
+# Called after structural verification; payloads are module-owned identities.
+def mir_literal_data(native_module: MirModule): Array<MirLiteralData>
+	mut data: Array<MirLiteralData> := []
+	native_module.literal_texts.each do |_text|
+		data.push(MirLiteralData.new(bytes: [], points: -1))
+	end
+	native_module.instructions.each do |instruction|
+		if instruction.kind == mir_op_string_literal() || (instruction.kind == mir_op_singleton_literal() && instruction.first == 8)
+			if data[instruction.payload].points == -1
+				data[instruction.payload] = mir_string_literal_data(native_module.literal_texts[instruction.payload])
+			end
+		end
+	end
+	return data
+end
+
+def mir_literal_data_error(native_module: MirModule, optimized: Boolean): String
+	if !optimized
+		if native_module.literal_data.size() != 0
+			return "MIR input cannot supply literal data"
+		end
+		return ""
+	end
+	if native_module.literal_data.size() != native_module.literal_texts.size()
+		return "MIR literal data count differs"
+	end
+	# Empty-function modules also reach this check. Never index an unchecked
+	# orphan payload while independently deriving the expected data.
+	native_module.instructions.each do |instruction|
+		if instruction.kind == mir_op_string_literal() || (instruction.kind == mir_op_singleton_literal() && instruction.first == 8)
+			if instruction.payload < 0 || instruction.payload >= native_module.literal_texts.size()
+				return "MIR literal data payload is invalid"
+			end
+		end
+	end
+	expected := mir_literal_data(native_module)
+	mut index := 0
+	while index < expected.size()
+		actual := native_module.literal_data[index]
+		wanted := expected[index]
+		if actual.points != wanted.points || actual.bytes.size() != wanted.bytes.size()
+			return "MIR literal data differs"
+		end
+		mut byte := 0
+		while byte < wanted.bytes.size()
+			if actual.bytes[byte] != wanted.bytes[byte]
+				return "MIR literal data differs"
+			end
+			byte += 1
+		end
+		index += 1
+	end
+	return ""
+end

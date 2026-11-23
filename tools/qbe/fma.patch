@@ -1,0 +1,216 @@
+--- a/ops.h
++++ b/ops.h
+@@ -39,6 +39,8 @@
+ O(udiv,    T(w,l,e,e, w,l,e,e), F(1,1,1,0,0,0,0,0,0,0)) X(0,0,0) V(0)
+ O(urem,    T(w,l,e,e, w,l,e,e), F(1,0,0,0,0,0,0,0,0,0)) X(0,0,0) V(0)
+ O(mul,     T(w,l,s,d, w,l,s,d), F(1,1,1,1,0,0,0,0,0,0)) X(2,0,0) V(0)
++/* Floating multiply whose consumer may omit the intermediate rounding. */
++O(mulc,    T(e,e,s,d, e,e,s,d), F(1,0,0,1,0,0,0,0,0,0)) X(2,0,0) V(0)
+ O(and,     T(w,l,e,e, w,l,e,e), F(1,0,0,1,1,1,0,0,0,0)) X(2,1,0) V(1)
+ O(or,      T(w,l,e,e, w,l,e,e), F(1,1,0,1,1,1,0,0,0,0)) X(2,1,0) V(1)
+ O(xor,     T(w,l,e,e, w,l,e,e), F(1,1,0,1,1,0,0,0,0,0)) X(2,1,0) V(1)
+--- a/fold.c
++++ b/fold.c
+@@ -169,7 +169,7 @@
+ 		case Osub: xd = ld - rd; break;
+ 		case Oneg: xd = -ld; break;
+ 		case Odiv: xd = ld / rd; break;
+-		case Omul: xd = ld * rd; break;
++		case Omul: case Omulc: xd = ld * rd; break;
+ 		case Oswtof: xd = (int32_t)cl->bits.i; break;
+ 		case Ouwtof: xd = (uint32_t)cl->bits.i; break;
+ 		case Osltof: xd = (int64_t)cl->bits.i; break;
+@@ -188,7 +188,7 @@
+ 		case Osub: xs = ls - rs; break;
+ 		case Oneg: xs = -ls; break;
+ 		case Odiv: xs = ls / rs; break;
+-		case Omul: xs = ls * rs; break;
++		case Omul: case Omulc: xs = ls * rs; break;
+ 		case Oswtof: xs = (int32_t)cl->bits.i; break;
+ 		case Ouwtof: xs = (uint32_t)cl->bits.i; break;
+ 		case Osltof: xs = (int64_t)cl->bits.i; break;
+--- a/arm64/emit.c
++++ b/arm64/emit.c
+@@ -54,6 +54,7 @@
+ 	{ Oshl,    Ki, "lsl %=, %0, %1" },
+ 	{ Omul,    Ki, "mul %=, %0, %1" },
+ 	{ Omul,    Ka, "fmul %=, %0, %1" },
++	{ Omulc,   Ka, "fmul %=, %0, %1" },
+ 	{ Odiv,    Ki, "sdiv %=, %0, %1" },
+ 	{ Odiv,    Ka, "fdiv %=, %0, %1" },
+ 	{ Oudiv,   Ki, "udiv %=, %0, %1" },
+@@ -564,6 +565,113 @@
+ 
+ */
+ 
++/* Recompute physical liveness after allocation inserted copies and spill slots.
++ * Functions without permitted Float multiplication need no extra analysis.
++ */
++static void
++contractlive(Fn *fn)
++{
++	Blk *b;
++	Ins *i;
++
++	for (b=fn->start; b; b=b->link)
++		for (i=b->ins; i!=&b->ins[b->nins]; i++)
++			if (i->op == Omulc) {
++				filllive(fn);
++				return;
++			}
++}
++
++/* A local divide or square root can delay the product after a carried addend
++ * is ready. Keep short load/multiply reductions separate; this profitability
++ * choice does not relax the product-observation proof below.
++ */
++static int
++contractlateproduct(Ins *mul, Blk *b)
++{
++	Ins *i;
++	int pending, arg;
++
++	pending = 3;
++	for (i=mul; i!=b->ins && pending;) {
++		i--;
++		if (i->op == Ocall)
++			break;
++		for (arg=0; arg<2; arg++)
++			if ((pending & (1 << arg)) && req(i->to, mul->arg[arg])) {
++				if ((i->op == Odiv || i->op == Osqrt) && i->cls == mul->cls)
++					return 1;
++				pending &= ~(1 << arg);
++			}
++	}
++	return 0;
++}
++
++/* Contract only an explicitly permitted multiply and its adjacent consumer.
++ * No operand can change between them. The rounded product must be overwritten
++ * before reuse, or dead at the block exit. Calls stop the local proof; successor
++ * liveness and ABI return registers preserve observations at block boundaries.
++ * Keeping this after register allocation avoids a third generic IR operand.
++ */
++static int
++emitcontract(Ins *mul, Blk *b, E *e)
++{
++	Ins *add, *next, *end, *prior;
++	Ref other;
++	char *op;
++	char reg;
++	int product, nr[2];
++
++	end = &b->ins[b->nins];
++	if (mul->op != Omulc || mul + 1 == end)
++		return 0;
++	add = mul + 1;
++	if ((add->op != Oadd && add->op != Osub) || add->cls != mul->cls)
++		return 0;
++	if (!isreg(mul->to) || !isreg(mul->arg[0]) || !isreg(mul->arg[1])
++	|| !isreg(add->to) || !isreg(add->arg[0]) || !isreg(add->arg[1]))
++		return 0;
++	if (req(mul->to, add->arg[0]) == req(mul->to, add->arg[1]))
++		return 0;
++	product = req(mul->to, add->arg[1]);
++	other = add->arg[!product];
++	if (!req(mul->to, add->to)) {
++		for (next=add+1; next!=end; next++) {
++			if (next->op == Ocall
++			|| req(next->arg[0], mul->to) || req(next->arg[1], mul->to))
++				return 0;
++			if (req(next->to, mul->to))
++				break;
++		}
++		if (next == end) {
++			/* A predecessor-fed addend can be a reduction chain:
++			 * fusion may lengthen its critical path. Extend the
++			 * overwrite proof for a local addend or a late product.
++			 */
++			for (prior=b->ins; prior!=mul; prior++)
++				if (req(prior->to, other))
++					break;
++			if (prior == mul && !contractlateproduct(mul, b))
++				return 0;
++			if (bshas(b->out, mul->to.val) || req(b->jmp.arg, mul->to))
++				return 0;
++			/* Return values are implicit uses, separate from successors. */
++			if (rtype(b->jmp.arg) == RCall
++			&& (T.retregs(b->jmp.arg, nr) & BIT(mul->to.val)))
++				return 0;
++		}
++	}
++	op = "fmadd";
++	if (add->op == Osub)
++		op = product ? "fmsub" : "fnmsub";
++	reg = mul->cls == Kd ? 'd' : 's';
++	fprintf(e->f, "\t%s\t%c%d, %c%d, %c%d, %c%d\n",
++		op, reg, add->to.val - V0,
++		reg, mul->arg[0].val - V0, reg, mul->arg[1].val - V0,
++		reg, other.val - V0);
++	return 1;
++}
++
+ void
+ arm64_emitfn(Fn *fn, FILE *out)
+ {
+@@ -629,11 +737,15 @@
+ 			emitins(i, e);
+ 		}
+ 
++	contractlive(fn);
+ 	for (lbl=0, b=e->fn->start; b; b=b->link) {
+ 		if (lbl || b->npred > 1)
+ 			fprintf(e->f, "%s%d:\n", T.asloc, id0+b->id);
+ 		for (i=b->ins; i!=&b->ins[b->nins]; i++)
+-			emitins(i, e);
++			if (emitcontract(i, b, e))
++				i++;
++			else
++				emitins(i, e);
+ 		lbl = 1;
+ 		switch (b->jmp.type) {
+ 		case Jhlt:
+--- a/amd64/emit.c
++++ b/amd64/emit.c
+@@ -81,6 +81,8 @@
+ 	{ Omul,     Ki, "+imul%k %1, %=" },
+ 	{ Omul,     Ks, "+mulss %1, %=" },
+ 	{ Omul,     Kd, "+mulsd %1, %=" },
++	{ Omulc,    Ks, "+mulss %1, %=" },
++	{ Omulc,    Kd, "+mulsd %1, %=" },
+ 	{ Odiv,     Ka, "-div%k %1, %=" },
+ 	{ Osqrt,    Ks, "sqrtss %0, %=" },
+ 	{ Osqrt,    Kd, "sqrtsd %0, %=" },
+--- a/amd64/isel.c
++++ b/amd64/isel.c
+@@ -429,6 +429,7 @@
+ 	case Oneg:
+ 	case Osqrt:
+ 	case Omul:
++	case Omulc:
+ 	case Oand:
+ 	case Oor:
+ 	case Oxor:
+--- a/rv64/emit.c
++++ b/rv64/emit.c
+@@ -25,6 +25,7 @@
+ 	{ Ourem,   Ki, "remu%k %=, %0, %1" },
+ 	{ Omul,    Ki, "mul%k %=, %0, %1" },
+ 	{ Omul,    Ka, "fmul.%k %=, %0, %1" },
++	{ Omulc,   Ka, "fmul.%k %=, %0, %1" },
+ 	{ Oand,    Ki, "and %=, %0, %1" },
+ 	{ Oor,     Ki, "or %=, %0, %1" },
+ 	{ Oxor,    Ki, "xor %=, %0, %1" },
+--- a/live.c
++++ b/live.c
+@@ -99,7 +99,9 @@
+ 					nlv[k] += m[k];
+ 				}
+ 			}
+-			if (!req(i->to, R)) {
++			/* Allocated copies can write a stack slot rather than a
++			 * temporary. Such writes do not kill a register value. */
++			if (!req(i->to, R) && rtype(i->to) != RSlot) {
+ 				assert(rtype(i->to) == RTmp);
+ 				t = i->to.val;
+ 				if (bshas(b->in, t))

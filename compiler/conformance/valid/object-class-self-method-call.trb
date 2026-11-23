@@ -1,0 +1,12 @@
+class Counter
+	@amount: Integer := 2
+	def value(): Integer
+		return @amount
+	end
+	def twice(): Integer
+		return self.value() + self.value()
+	end
+end
+def main()
+	puts(Counter.new().twice())
+end

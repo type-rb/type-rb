@@ -1,0 +1,184 @@
+import { GenericFunction, GenericParameter } from frontend/types/generic_model
+import { object_method_owner } from frontend/types/object_types
+import { standard_source_test, standard_source_test_host } from state/standard_source_kinds
+import { CompilerState } from state/state
+import { load_integer, load_string, sparse_integer_at } from support/storage
+
+# These IDs describe checked declarations, not backend operations. The loader
+# grants ownership; spelling an authored function identically grants nothing.
+def test_provider_id(source_kind: Integer, name: String): Integer
+	if source_kind == standard_source_test()
+		if name == "expect"
+			return 1
+		elsif name == "expect_ok"
+			return 2
+		elsif name == "expect_err"
+			return 3
+		end
+	elsif source_kind == standard_source_test_host()
+		if name == "scalar_kind"
+			return 20
+		end
+		if name == "inspect_value"
+			return 19
+		end
+		if name == "deep_equal"
+			return 18
+		end
+		if name == "fail"
+			return 17
+		end
+		names := ["assert_equal", "assert_not_equal", "assert_true", "assert_false", "assert_nil", "assert_result_ok", "assert_result_err"]
+		mut index := 0
+		while index < names.size()
+			if name == names[index]
+				return index + 10
+			end
+			index += 1
+		end
+	end
+	return 0
+end
+
+def test_provider_parameter(name: String, type_name: String): GenericParameter
+	return GenericParameter.new(name: name, type_name: type_name, line: 1, mutable: 0, named_only: 0, default_start: -1, default_finish: -1)
+end
+
+def test_provider_signature(source: Integer, name: String, kind: Integer): GenericFunction
+	mut arguments := ["T"]
+	mut parameters := [test_provider_parameter("actual", "T")]
+	mut result_type := "Void"
+	if kind == 1
+		result_type = "Expectation<T>"
+	elsif kind == 17
+		parameters[0] = test_provider_parameter("message", "String")
+		result_type = "T"
+	elsif kind == 2 || kind == 3 || kind == 15 || kind == 16
+		arguments.push("E")
+		parameters[0] = test_provider_parameter("actual", "Result<T,E>")
+		result_type = "T"
+		if kind == 3 || kind == 16
+			result_type = "E"
+		end
+	elsif kind == 10 || kind == 11 || kind == 18
+		parameters.push(test_provider_parameter("expected", "T"))
+	end
+	if kind == 20
+		result_type = "Integer"
+	elsif kind == 19
+		result_type = "String"
+	elsif kind == 18
+		result_type = "Boolean"
+	end
+	if kind >= 10 && kind <= 17
+		parameters.push(test_provider_parameter("path", "String"))
+		parameters.push(test_provider_parameter("line", "Integer"))
+		parameters.push(test_provider_parameter("column", "Integer"))
+	end
+	return GenericFunction.new(receiver_type: "", name: name, source_id: source, line: 1, type_parameters: arguments, parameters: parameters, result_type: result_type, body_start: 0, body_finish: 0)
+end
+
+def declare_test_signatures(mut state: CompilerState, source: Integer)
+	kind := sparse_integer_at(state.standard_modules, source)
+	mut names: Array<String> := []
+	if kind == standard_source_test()
+		names = ["expect", "expect_ok", "expect_err"]
+	elsif kind == standard_source_test_host()
+		names = ["assert_equal", "assert_not_equal", "assert_true", "assert_false", "assert_nil", "assert_result_ok", "assert_result_err", "fail", "deep_equal", "inspect_value", "scalar_kind"]
+	end
+	names.each do |name|
+		state.type_resolution.generic_functions.push(test_provider_signature(source, name, test_provider_id(kind, name)))
+	end
+end
+
+def test_provider_kind(state: CompilerState, definition: Integer): Integer
+	if definition < 0 || definition >= state.type_resolution.generic_functions.size()
+		return 0
+	end
+	row := state.type_resolution.generic_functions[definition]
+	kind := test_provider_id(sparse_integer_at(state.standard_modules, row.source_id), row.name)
+	if kind == 0 || row.receiver_type != "" || row.body_start != row.body_finish
+		return 0
+	end
+	expected := test_provider_signature(row.source_id, row.name, kind)
+	if row.result_type != expected.result_type || row.type_parameters.size() != expected.type_parameters.size() || row.parameters.size() != expected.parameters.size()
+		return 0
+	end
+	mut index := 0
+	while index < row.type_parameters.size()
+		if row.type_parameters[index] != expected.type_parameters[index]
+			return 0
+		end
+		index += 1
+	end
+	index = 0
+	while index < row.parameters.size()
+		parameter := row.parameters[index]
+		want := expected.parameters[index]
+		if parameter.name != want.name || parameter.type_name != want.type_name || parameter.mutable != 0 || parameter.named_only != 0 || parameter.default_start >= 0 || parameter.default_finish >= 0
+			return 0
+		end
+		index += 1
+	end
+	return kind
+end
+
+# Selected test syntax consumes these bindings without emitting an ordinary
+# call. Authored calls and function values must never execute an empty stub.
+def test_dsl_function(state: CompilerState, function: Integer): Boolean
+	if function < 0 || function >= state.declarations.function_count[0]
+		return false
+	end
+	owner := load_integer(state.declarations.function_modules, function)
+	if sparse_integer_at(state.standard_modules, owner) != standard_source_test()
+		return false
+	end
+	name := load_string(state.declarations.function_names, function)
+	if name == "describe" || name == "test"
+		return true
+	end
+	return false
+end
+
+def test_provider_function(state: CompilerState, function: Integer): Integer
+	state.type_resolution.generic_function_instances.each do |instance|
+		if instance.function == function
+			return test_provider_kind(state, instance.definition)
+		end
+	end
+	return 0
+end
+
+# Preserve the public assertion argument diagnostic without changing unrelated
+# call diagnostics or recognizing an authored method by its spelling alone.
+def test_assertion_argument_context(state: CompilerState, function: Integer, slot: Integer): String
+	if slot != 1 || function < 0 || function >= state.declarations.function_count[0]
+		return ""
+	end
+	if sparse_integer_at(state.standard_modules, load_integer(state.declarations.function_modules, function)) != standard_source_test()
+		return ""
+	end
+	state.type_resolution.generic_function_instances.each do |instance|
+		if instance.function == function
+			definition := instance.definition
+			row := state.type_resolution.generic_functions[definition]
+			if sparse_integer_at(state.standard_modules, row.source_id) != standard_source_test() || row.parameters.size() != 2
+				return ""
+			end
+			owner := object_method_owner(state, definition)
+			if owner < 0
+				return ""
+			end
+			object := state.nominal.objects[owner]
+			if object.name != "Expectation" || object.source_id != row.source_id || object.interface_type
+				return ""
+			end
+			object.methods.each do |method|
+				if method.generic_function == definition && !method.class_member && (method.name == "to_equal" || method.name == "to_not_equal")
+					return "argument 1 to " + method.name + "()"
+				end
+			end
+		end
+	end
+	return ""
+end

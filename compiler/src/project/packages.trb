@@ -1,0 +1,202 @@
+import project/package_manifest
+import { package_json_quote, package_sorted_indices } from project/package_json
+import { compiler_source_slice } from frontend/syntax/lexer
+import { compiler_string_bytes } from support/compiler_bytes
+import { string_starts_with } from support/path
+
+record ResolvedLocalPackage
+	root: String
+	path: String
+	source: String
+	revision: String
+	checksum: String
+	manifest: PackageManifest
+	aliases: Array<String>
+	names: Array<String>
+end
+
+record ProjectPackages
+	packages: Array<ResolvedLocalPackage>
+	loading: Array<Boolean>
+	aliases: Array<String>
+	names: Array<String>
+	checksum: String
+	error: Array<String>
+end
+
+def project_packages_new(checksum: String): ProjectPackages
+	return ProjectPackages.new(packages: [], loading: [], aliases: [], names: [], checksum: checksum, error: [""])
+end
+
+def project_packages_fail(mut packages: ProjectPackages, message: String)
+	if packages.error[0] == ""
+		packages.error[0] = message
+	end
+end
+
+def package_path_safe(path: String): Boolean
+	compiler_string_bytes(path).each do |byte|
+		if byte == 0
+			return false
+		end
+	end
+	return true
+end
+
+def package_path_segments(path: String): Array<String>
+	mut parts: Array<String> := []
+	mut part := ""
+	mut index := 0
+	while index <= path.size()
+		mut character := "/"
+		if index < path.size()
+			character = path[index]
+		end
+		if character == "/"
+			if part != ""
+				parts.push(part)
+			end
+			part = ""
+		else
+			part += character
+		end
+		index += 1
+	end
+	return parts
+end
+
+def package_relative_path(root: String, target: String): String
+	left := package_path_segments(root)
+	right := package_path_segments(target)
+	mut common := 0
+	while common < left.size() && common < right.size() && left[common] == right[common]
+		common += 1
+	end
+	mut result := ""
+	mut index := common
+	while index < left.size()
+		result += "../"
+		index += 1
+	end
+	index = common
+	while index < right.size()
+		result += right[index]
+		if index + 1 < right.size()
+			result += "/"
+		end
+		index += 1
+	end
+	if result == ""
+		return "."
+	end
+	if result[result.size() - 1] == "/"
+		return compiler_source_slice(result, 0, result.size() - 1)
+	end
+	return result
+end
+
+def package_canonical_import(path: String, aliases: Array<String>, names: Array<String>): String
+	mut selected := -1
+	mut length := 0
+	mut index := 0
+	while index < aliases.size()
+		if path == aliases[index] || string_starts_with(path, aliases[index] + "/")
+			if aliases[index].size() > length
+				selected = index
+				length = aliases[index].size()
+			end
+		end
+		index += 1
+	end
+	if selected < 0
+		return path
+	end
+	return names[selected] + compiler_source_slice(path, length, path.size())
+end
+
+def package_mapping_json(aliases: Array<String>, names: Array<String>, indent: String): String
+	order := package_sorted_indices(aliases)
+	if order.size() == 0
+		return "{}"
+	end
+	mut result := "{\n"
+	mut index := 0
+	while index < order.size()
+		if index > 0
+			result += ",\n"
+		end
+		entry := order[index]
+		result += indent + "  " + package_json_quote(aliases[entry]) + ": " + package_json_quote(names[entry])
+		index += 1
+	end
+	return result + "\n" + indent + "}"
+end
+
+def project_packages_lock(packages: ProjectPackages): String
+	mut result := "{\n  \"formatVersion\": 1,\n  \"configChecksum\": " + package_json_quote(packages.checksum) + ",\n  \"imports\": " + package_mapping_json(packages.aliases, packages.names, "  ") + ",\n  \"packages\": "
+	mut names: Array<String> := []
+	packages.packages.each do |package|
+		names.push(package.manifest.name)
+	end
+	order := package_sorted_indices(names)
+	if order.size() == 0
+		return result + "{}\n}\n"
+	end
+	result += "{\n"
+	mut index := 0
+	while index < order.size()
+		if index > 0
+			result += ",\n"
+		end
+		package := packages.packages[order[index]]
+		result += "    " + package_json_quote(package.manifest.name) + ": {\n      \"version\": " + package_json_quote(package.manifest.version)
+		if package.path != ""
+			result += ",\n      \"path\": " + package_json_quote(package.path) + ",\n      \"manifestChecksum\": " + package_json_quote(package.manifest.checksum)
+		else
+			result += ",\n      \"source\": " + package_json_quote(package.source) + ",\n      \"revision\": " + package_json_quote(package.revision) + ",\n      \"checksum\": " + package_json_quote(package.checksum)
+		end
+		if package.aliases.size() > 0
+			result += ",\n      \"dependencies\": " + package_mapping_json(package.aliases, package.names, "      ")
+		end
+		result += "\n    }"
+		index += 1
+	end
+	return result + "\n  }\n}\n"
+end
+
+record PackageContent
+	checksum: String
+	error: String
+end
+
+# nftw returns raw filesystem spelling. Compute the relative byte sequence
+# without decoding filenames as Unicode, and reject paths outside the root.
+def package_relative_file_bytes(root: Array<Integer>, path: Array<Integer>): Array<Integer>
+	mut length := root.size()
+	if length > 0 && root[length - 1] == 47
+		length -= 1
+	end
+	if path.size() < length
+		return []
+	end
+	mut index := 0
+	while index < length
+		if root[index] != path[index]
+			return []
+		end
+		index += 1
+	end
+	if path.size() == length
+		return [46]
+	end
+	if path[length] != 47
+		return []
+	end
+	mut result: Array<Integer> := []
+	index = length + 1
+	while index < path.size()
+		result.push(path[index])
+		index += 1
+	end
+	return result
+end

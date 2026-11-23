@@ -1,0 +1,65 @@
+import { emit_resource_cleanup_runtime } from backend/qbe/runtime/resource_cleanup
+import { emit_failure_recovery_runtime } from backend/qbe/runtime/failure_recovery
+import { qbe_output_line, qbe_output_new } from backend/qbe/output
+import { output_source } from testing/compiler
+import { logical_run_qbe } from testing/qbe_runner
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+# Execute the emitted trampoline itself, including the real libc setjmp/longjmp.
+# A test-only close substitute records ordering and returns a failure every time.
+# This isolates cleanup ownership from the later filesystem acquisition adapter.
+describe("Scoped resource failure cleanup") do
+	test("closes exactly once in LIFO order and preserves enclosing recovery boundaries") do
+		mut output := qbe_output_new(16, [])
+		emit_failure_recovery_runtime(output, false)
+		qbe_output_line(output, "data $trbn_bounds_error = { b \"panic: index is out of bounds\", b 10 }")
+		runtime := output_source(output).split("call $close(").join("call $test_close(")
+		fixture := "data $trbn_gc_temp_count = align 8 { l 7 }\ndata $test_closed = align 8 { l 0 }\ndata $test_format = { b \"%lld\", b 10, b 0 }\ndata $success_closure = align 8 { l 0, l $success }\ndata $float_closure = align 8 { l 0, l $float_failure }\ndata $outer_closure = align 8 { l 0, l $outer_failure }\ndata $inner_closure = align 8 { l 0, l $inner_failure }\n\nfunction $trbn_fatal(l %message, l %size) {\n@start\n call $abort()\n hlt\n}\n\nfunction w $test_close(w %descriptor) {\n@start\n %count =l loadl $test_closed\n %shift =l mul %count, 100\n %fd =l extsw %descriptor\n %next =l add %shift, %fd\n storel %next, $test_closed\n ret -1\n}\n\nfunction l $success(l %closure) {\n@start\n %scope =l alloc8 16\n call $trbn_resource_push(l %scope, w 20)\n storel 11, $trbn_gc_temp_count\n %status =w call $trbn_resource_close(l %scope)\n %failed =w ceqw %status, -1\n jnz %failed, @done, @bad\n@done\n ret 77\n@bad\n call $abort()\n hlt\n}\n\nfunction d $float_failure(l %closure) {\n@start\n %scope =l alloc8 16\n call $trbn_resource_push(l %scope, w 30)\n storel 42, $trbn_gc_temp_count\n call $trbn_unwind()\n hlt\n}\n\nfunction l $inner_failure(l %closure) {\n@start\n %scope =l alloc8 16\n call $trbn_resource_push(l %scope, w 50)\n storel 42, $trbn_gc_temp_count\n call $trbn_unwind()\n hlt\n}\n\nfunction l $outer_failure(l %closure) {\n@start\n %scope =l alloc8 16\n call $trbn_resource_push(l %scope, w 40)\n storel 8, $trbn_gc_temp_count\n %inner =l call $trbn_runtime_recover_l(l $inner_closure, l 11)\n %right_result =w ceql %inner, 11\n %current =l loadl $trbn_resource_scope\n %right_boundary =w ceql %current, %scope\n %roots =l loadl $trbn_gc_temp_count\n %right_roots =w ceql %roots, 8\n %first =w and %right_result, %right_boundary\n %valid =w and %first, %right_roots\n jnz %valid, @unwind, @bad\n@unwind\n call $trbn_unwind()\n hlt\n@bad\n call $abort()\n hlt\n}\n\nexport function w $main() {\n@start\n %scope =l alloc8 16\n call $trbn_resource_push(l %scope, w 10)\n %success =l call $trbn_runtime_recover_l(l $success_closure, l 0)\n %correct_success =w ceql %success, 77\n %floating =d call $trbn_runtime_recover_d(l $float_closure, d d_2.5)\n %correct_float =w ceqd %floating, d_2.5\n %nested =l call $trbn_runtime_recover_l(l $outer_closure, l 99)\n %correct_nested =w ceql %nested, 99\n %current =l loadl $trbn_resource_scope\n %correct_boundary =w ceql %current, %scope\n %roots =l loadl $trbn_gc_temp_count\n %correct_roots =w ceql %roots, 7\n %first =w and %correct_success, %correct_float\n %second =w and %correct_nested, %correct_boundary\n %both =w and %first, %second\n %valid =w and %both, %correct_roots\n jnz %valid, @terminal, @bad\n@terminal\n call $trbn_unwind()\n %head =l loadl $trbn_resource_scope\n jnz %head, @bad, @done\n@done\n %closed =l loadl $test_closed\n %printed =w call $printf(l $test_format, ..., l %closed)\n ret 0\n@bad\n call $abort()\n hlt\n}\n"
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, runtime + fixture)
+			when Result::Ok(actual)
+				expect(actual).to_equal("2030504010\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("closes a real descriptor before transferring to the recovery continuation") do
+		mut output := qbe_output_new(16, [])
+		emit_failure_recovery_runtime(output, false)
+		qbe_output_line(output, "data $trbn_bounds_error = { b \"panic: index is out of bounds\", b 10 }")
+		fixture := "data $trbn_gc_temp_count = align 8 { l 0 }\ndata $test_fd = align 4 { w -1 }\ndata $test_device = { b \"/dev/null\", b 0 }\ndata $test_done = { b \"closed\", b 0 }\ndata $test_action = align 8 { l 0, l $test_acquire }\nfunction $trbn_fatal(l %message, l %size) {\n@start\n call $abort()\n hlt\n}\nfunction l $test_acquire(l %closure) {\n@start\n %fd =w call $open(l $test_device, w 0, ..., w 0)\n %valid =w csgew %fd, 0\n jnz %valid, @acquired, @bad\n@acquired\n storew %fd, $test_fd\n %scope =l alloc8 16\n call $trbn_resource_push(l %scope, w %fd)\n call $trbn_unwind()\n hlt\n@bad\n call $abort()\n hlt\n}\nexport function w $main() {\n@start\n %result =l call $trbn_runtime_recover_l(l $test_action, l 99)\n %recovered =w ceql %result, 99\n %fd =w loadw $test_fd\n %flags =w call $fcntl(w %fd, w 1, ..., w 0)\n %closed =w ceqw %flags, -1\n %valid =w and %recovered, %closed\n jnz %valid, @done, @bad\n@done\n %printed =w call $puts(l $test_done)\n ret 0\n@bad\n call $abort()\n hlt\n}\n"
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, output_source(output) + fixture)
+			when Result::Ok(actual)
+				expect(actual).to_equal("closed\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+	test("unwinds mixed file and directory frames once despite close failures") do
+		mut output := qbe_output_new(16, [])
+		emit_resource_cleanup_runtime(output)
+		runtime := output_source(output).split("call $close(").join("call $test_close(").split("call $closedir(").join("call $test_closedir(")
+		fixture := "data $test_closed = align 8 { l 0 }\ndata $test_format = { b \"%lld\", b 10, b 0 }\nfunction $trbn_fatal(l %message, l %size) {\n@start\n call $abort()\n hlt\n}\nfunction w $test_close(w %descriptor) {\n@start\n %count =l loadl $test_closed\n %shift =l mul %count, 100\n %fd =l extsw %descriptor\n %next =l add %shift, %fd\n storel %next, $test_closed\n ret -1\n}\nfunction w $test_closedir(l %directory) {\n@start\n %status =w call $test_close(w %directory)\n ret %status\n}\nexport function w $main() {\n@start\n %outer =l alloc8 16\n %directory =l alloc8 24\n %inner =l alloc8 16\n call $trbn_resource_push(l %outer, w 10)\n call $trbn_resource_push_directory(l %directory, l 20)\n call $trbn_resource_push(l %inner, w 30)\n call $trbn_resource_unwind(l %outer)\n %head =l loadl $trbn_resource_scope\n %preserved =w ceql %head, %outer\n jnz %preserved, @finish, @bad\n@finish\n %status =w call $trbn_resource_close(l %outer)\n %closed =l loadl $test_closed\n call $printf(l $test_format, ..., l %closed)\n ret 0\n@bad\n ret 1\n}\n"
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, runtime + fixture)
+			when Result::Ok(actual)
+				expect(actual).to_equal("302010\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+end

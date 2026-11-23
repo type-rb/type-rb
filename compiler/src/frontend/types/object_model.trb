@@ -1,0 +1,95 @@
+# Authored object declarations retain nominal identity and source spans before
+# concrete layouts, initialization proofs and dispatch tables are resolved.
+record ObjectField
+	name: String
+	type_name: String
+	line: Integer
+	origin: Integer
+	readonly: Boolean
+	default_start: Integer
+	default_finish: Integer
+end
+
+record ObjectMethod
+	name: String
+	class_member: Boolean
+	origin: Integer
+	function: Integer
+	generic_function: Integer
+end
+
+record ObjectDefinition
+	name: String
+	source_id: Integer
+	line: Integer
+	origin: Integer
+	interface_type: Boolean
+	parameters: Array<String>
+	superclass: String
+	interfaces: Array<String>
+	fields: Array<ObjectField>
+	methods: Array<ObjectMethod>
+end
+
+# Concrete instances own resolved edges while authored declarations stay immutable.
+# Publish a shell before resolving fields so recursive storage reuses one identity.
+record ObjectInstance
+	definition: Integer
+	arguments: Array<String>
+	superclass: Integer
+	interfaces: Array<Integer>
+	fields: Array<ObjectField>
+end
+
+# MIR owns the resolved nominal graph independently of parsed declarations.
+# Fields are local to their declaring type; inherited storage retains that owner.
+record MirObjectField
+	name: String
+	type_id: Integer
+	line: Integer
+	readonly: Boolean
+end
+
+record MirObject
+	# Zero is ordinary, one is the owned File and two is the owned Dir.
+	resource_kind: Integer
+	initializer: Integer
+	declaration: Integer
+	type_id: Integer
+	name: String
+	# Concrete argument identities distinguish equal diagnostic spellings.
+	arguments: Array<Integer>
+	source_id: Integer
+	line: Integer
+	interface_type: Boolean
+	superclass: Integer
+	interfaces: Array<Integer>
+	fields: Array<MirObjectField>
+end
+
+# Call-shape metadata survives independently of tokens and frontend catalogs.
+# Slots include the implicit receiver; positional source names are immaterial.
+record MirObjectMethod
+	owner: Integer
+	name: String
+	class_member: Boolean
+	function: Integer
+	parameter_names: Array<String>
+	parameter_named: Array<Integer>
+	parameter_optional: Array<Integer>
+end
+
+# One witness binds every interface method in declaration order to a concrete
+# method and a verified permutation of the contract's argument slots.
+record MirObjectWitness
+	owner: Integer
+	contract: Integer
+	methods: Array<Integer>
+	arguments: Array<Array<Integer>>
+end
+record ObjectDirective
+	source_id: Integer
+	owner: String
+	origin: Integer
+	finish: Integer
+end

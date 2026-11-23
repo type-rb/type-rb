@@ -1,0 +1,252 @@
+import { Diagnostic, boundary_diagnostic } from support/diagnostic
+import { BootstrapSnapshot, SnapshotInstruction, SourceOrigin } from snapshot/schema
+import trb/std/result
+
+enum NativeValueType
+	Integer
+end
+
+enum NativeInstruction
+	ConstInteger(result: String, value: Integer, origin: SourceOrigin)
+	AddIntegerChecked(result: String, left: String, right: String, origin: SourceOrigin)
+	Return(value: String, origin: SourceOrigin)
+end
+
+record NativeBlock
+	id: String
+	origin: SourceOrigin
+	instructions: Array<NativeInstruction>
+end
+
+record NativeSource
+	id: String
+	path: String
+end
+
+record NativeFunction
+	id: String
+	name: String
+	result_type: NativeValueType
+	entry: String
+	origin: SourceOrigin
+	blocks: Array<NativeBlock>
+end
+
+record NativeModule
+	id: String
+	sources: Array<NativeSource>
+	functions: Array<NativeFunction>
+end
+
+def lower_snapshot(snapshot: BootstrapSnapshot): NativeModule
+	sources := snapshot.sources.map do |source|
+		NativeSource.new(id: source.id, path: source.path)
+	end
+	functions := snapshot.functions.map do |function|
+		blocks := function.blocks.map do |block|
+			instructions := block.instructions.map do |instruction|
+				case instruction
+				when SnapshotInstruction::IntegerLiteral(result, value, origin)
+					NativeInstruction::ConstInteger(result, value, origin)
+				when SnapshotInstruction::IntegerAddChecked(result, left, right, origin)
+					NativeInstruction::AddIntegerChecked(result, left, right, origin)
+				when SnapshotInstruction::Return(value, origin)
+					NativeInstruction::Return(value, origin)
+				end
+			end
+			NativeBlock.new(id: block.id, origin: block.origin, instructions: instructions)
+		end
+		NativeFunction.new(
+			id: function.id,
+			name: function.name,
+			result_type: NativeValueType::Integer,
+			entry: function.entry,
+			origin: function.origin,
+			blocks: blocks,
+		)
+	end
+	return NativeModule.new(id: snapshot.module_id, sources: sources, functions: functions)
+end
+
+def verify_native_mir(native_module: NativeModule): Result<Boolean, Diagnostic>
+	if native_module.sources.empty?()
+		return Result<Boolean, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0004", "/sources", "Native MIR must declare at least one source")
+		)
+	end
+	mut source_ids: Array<String> := []
+	mut source_index := 0
+	while source_index < native_module.sources.size()
+		source := native_module.sources[source_index]
+		if source_ids.include?(source.id)
+			return Result<Boolean, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0004", "/sources/" + source_index.to_s() + "/id", "Native MIR source identifier is duplicated")
+			)
+		end
+		source_ids.push(source.id)
+		source_index += 1
+	end
+	if native_module.functions.empty?()
+		return Result<Boolean, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0004", "/functions", "Native MIR must contain at least one function")
+		)
+	end
+	mut function_ids: Hash<String, Boolean> := {}
+	mut function_index := 0
+	while function_index < native_module.functions.size()
+		function := native_module.functions[function_index]
+		path := "/functions/" + function_index.to_s()
+		if function_ids.key?(function.id)
+			return Result<Boolean, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0004", path + "/id", "Native MIR function identifier is duplicated")
+			)
+		end
+		function_ids[function.id] = true
+		try _verify_native_origin(function.origin, source_ids, path + "/origin")
+		try _verify_native_function(function, source_ids, path)
+		function_index += 1
+	end
+	return Result<Boolean, Diagnostic>::Ok(true)
+end
+
+def _verify_native_function(
+		function: NativeFunction,
+		source_ids: Array<String>,
+		path: String,
+	): Result<Boolean, Diagnostic>
+	if function.blocks.size() != 1
+		return Result<Boolean, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0004", path + "/blocks", "Snapshot validation Native MIR requires exactly one entry block")
+		)
+	end
+	mut block_ids: Hash<String, Boolean> := {}
+	mut values: Hash<String, Boolean> := {}
+	mut entry_found := false
+	mut block_index := 0
+	while block_index < function.blocks.size()
+		block := function.blocks[block_index]
+		block_path := path + "/blocks/" + block_index.to_s()
+		if block_ids.key?(block.id)
+			return Result<Boolean, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0004", block_path + "/id", "Native MIR block identifier is duplicated")
+			)
+		end
+		block_ids[block.id] = true
+		if block.id == function.entry
+			entry_found = true
+		end
+		try _verify_native_origin(block.origin, source_ids, block_path + "/origin")
+		if block.instructions.empty?()
+			return Result<Boolean, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0004", block_path + "/instructions", "Native MIR block has no terminator")
+			)
+		end
+		mut instruction_index := 0
+		while instruction_index < block.instructions.size()
+			instruction := block.instructions[instruction_index]
+			instruction_path := block_path + "/instructions/" + instruction_index.to_s()
+			try _verify_native_instruction(
+				instruction,
+				values,
+				source_ids,
+				instruction_path,
+				instruction_index == block.instructions.size() - 1,
+			)
+			instruction_index += 1
+		end
+		block_index += 1
+	end
+	if !entry_found
+		return Result<Boolean, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0004", path + "/entry", "Native MIR entry block does not exist")
+		)
+	end
+	return Result<Boolean, Diagnostic>::Ok(true)
+end
+
+def _verify_native_instruction(
+		instruction: NativeInstruction,
+		mut values: Hash<String, Boolean>,
+		source_ids: Array<String>,
+		path: String,
+		is_last: Boolean,
+	): Result<Boolean, Diagnostic>
+	case instruction
+	when NativeInstruction::ConstInteger(result, _value, origin)
+		try _verify_native_origin(origin, source_ids, path + "/origin")
+		try _native_define(values, result, path + "/result")
+	when NativeInstruction::AddIntegerChecked(result, left, right, origin)
+		try _verify_native_origin(origin, source_ids, path + "/origin")
+		try _native_require(values, left, path + "/left")
+		try _native_require(values, right, path + "/right")
+		try _native_define(values, result, path + "/result")
+	when NativeInstruction::Return(value, origin)
+		try _verify_native_origin(origin, source_ids, path + "/origin")
+		try _native_require(values, value, path + "/value")
+		if !is_last
+			return Result<Boolean, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0004", path, "Native MIR terminator is not final")
+			)
+		end
+	end
+	if is_last
+		case instruction
+		when NativeInstruction::Return(_value, _origin)
+		else
+			return Result<Boolean, Diagnostic>::Err(
+				boundary_diagnostic("TRBN0004", path, "Native MIR block does not end in return")
+			)
+		end
+	end
+	return Result<Boolean, Diagnostic>::Ok(true)
+end
+
+def _verify_native_origin(
+		origin: SourceOrigin,
+		source_ids: Array<String>,
+		path: String,
+	): Result<Boolean, Diagnostic>
+	if !source_ids.include?(origin.source_id)
+		return Result<Boolean, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0004", path, "Native MIR origin references an unknown source")
+		)
+	end
+	if origin.start_line < 1 || origin.start_column < 1 || origin.end_line < 1 || origin.end_column < 1
+		return Result<Boolean, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0004", path, "Native MIR origin is invalid")
+		)
+	end
+	if origin.end_line == origin.start_line && origin.end_column < origin.start_column
+		return Result<Boolean, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0004", path, "Native MIR origin is invalid")
+		)
+	end
+	return Result<Boolean, Diagnostic>::Ok(true)
+end
+
+def _native_define(
+		mut values: Hash<String, Boolean>,
+		value: String,
+		path: String,
+	): Result<Boolean, Diagnostic>
+	if values.key?(value)
+		return Result<Boolean, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0004", path, "Native MIR value is defined more than once")
+		)
+	end
+	values[value] = true
+	return Result<Boolean, Diagnostic>::Ok(true)
+end
+
+def _native_require(
+		values: Hash<String, Boolean>,
+		value: String,
+		path: String,
+	): Result<Boolean, Diagnostic>
+	if !values.key?(value)
+		return Result<Boolean, Diagnostic>::Err(
+			boundary_diagnostic("TRBN0004", path, "Native MIR operand is undefined")
+		)
+	end
+	return Result<Boolean, Diagnostic>::Ok(true)
+end

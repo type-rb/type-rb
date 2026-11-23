@@ -1,0 +1,52 @@
+import { emit_deadline_clock_runtime, emit_deadline_runtime } from backend/qbe/runtime/deadlines
+import { emit_failure_recovery_runtime } from backend/qbe/runtime/failure_recovery
+import { qbe_output_new } from backend/qbe/output
+import { output_source } from testing/compiler
+import { logical_run_qbe } from testing/qbe_runner
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+# These tests execute the actual returns-twice trampolines. A controlled clock
+# isolates frame ownership and cleanup from wall-clock scheduling.
+def deadline_test_runtime(fixture: String, fake_clock: Boolean, fake_close: Boolean)
+	mut output := qbe_output_new(16, [])
+	emit_failure_recovery_runtime(output, true)
+	emit_deadline_clock_runtime(output)
+	emit_deadline_runtime(output)
+	mut runtime := output_source(output)
+	if fake_clock
+		runtime = runtime.split("call $trbn_deadline_now(").join("call $test_clock(")
+	end
+	if fake_close
+		runtime = runtime.split("call $close(").join("call $test_close(")
+	end
+	qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+	if qbe != nil
+		case logical_run_qbe(qbe, runtime + "data $trbn_gc_temp_count = align 8 { l 7 }\ndata $trbn_bounds_error = { b \"bounds\", b 10 }\ndata $test_time = align 8 { l 0 }\ndata $test_progress = align 8 { l 0 }\ndata $test_done = { b \"deadline checks\", b 0 }\nfunction $trbn_fatal(l %message, l %size) {\n@start\n call $abort()\n hlt\n}\nfunction l $test_clock() {\n@start\n %time =l loadl $test_time\n ret %time\n}\nfunction $test_require(w %condition) {\n@start\n jnz %condition, @done, @failed\n@failed\n call $abort()\n hlt\n@done\n ret\n}\nfunction $test_clean() {\n@start\n %deadline =l loadl $trbn_deadline_scope\n %recovery =l loadl $trbn_recovery_scope\n %resource =l loadl $trbn_resource_scope\n %roots =l loadl $trbn_gc_temp_count\n %d =w ceql %deadline, 0\n %r =w ceql %recovery, 0\n %f =w ceql %resource, 0\n %g =w ceql %roots, 7\n %dr =w and %d, %r\n %fg =w and %f, %g\n %ok =w and %dr, %fg\n call $test_require(w %ok)\n ret\n}\n" + fixture)
+		when Result::Ok(actual)
+			expect(actual).to_equal("deadline checks\n")
+		when Result::Err(error)
+			puts(error)
+			expect(false).to_be_true()
+		end
+	end
+end
+
+describe("Managed deadline frame recovery") do
+	test("preserves nested owners, ordinary errors, parent scopes and Float results") do
+		deadline_test_runtime("data $fast = align 8 { l 0, l $test_fast }\ndata $slow = align 8 { l 0, l $test_slow }\ndata $inner = align 8 { l 0, l $test_inner }\ndata $parent = align 8 { l 0, l $test_parent }\ndata $failure = align 8 { l 0, l $test_failure }\ndata $caught_inside = align 8 { l 0, l $test_caught_inside }\ndata $deadline_error = align 8 { l 0, l $test_deadline_error }\ndata $float_slow = align 8 { l 0, l $test_float_slow }\ndata $message = { b \"ordinary\", b 10 }\nfunction l $test_fast(l %closure) {\n@start\n ret 123\n}\nfunction l $test_slow(l %closure) {\n@start\n storel 2000000, $test_time\n storel 19, $trbn_gc_temp_count\n call $trbn_deadline_checkpoint()\n storel 1, $test_progress\n ret 999\n}\nfunction l $test_inner(l %closure) {\n@start\n %inner =l call $trbn_runtime_deadline_l(l $slow, l 1, l -10)\n %ok =w ceql %inner, -10\n call $test_require(w %ok)\n ret 88\n}\nfunction l $test_parent(l %closure) {\n@start\n %inner =l call $trbn_runtime_deadline_l(l $slow, l 1000, l -10)\n storel 2, $test_progress\n ret 99\n}\nfunction l $test_failure(l %closure) {\n@start\n call $trbn_fail(l $message, l 9)\n ret 0\n}\nfunction l $test_caught_inside(l %closure) {\n@start\n %caught =l call $trbn_runtime_recover_l(l $failure, l 77)\n %ok =w ceql %caught, 77\n call $test_require(w %ok)\n %scope =l loadl $trbn_deadline_scope\n %present =w cnel %scope, 0\n call $test_require(w %present)\n storel 2000000, $test_time\n call $trbn_deadline_checkpoint()\n ret 999\n}\nfunction l $test_deadline_error(l %closure) {\n@start\n %value =l call $trbn_runtime_deadline_l(l $failure, l 1000, l -1)\n ret %value\n}\nfunction d $test_float_slow(l %closure) {\n@start\n storel 2000000, $test_time\n ret d_3.5\n}\nexport function w $main() {\n@start\n %alarm =w call $alarm(w 5)\n %first =l call $trbn_runtime_deadline_l(l $fast, l 1000, l -1)\n %first_ok =w ceql %first, 123\n call $test_require(w %first_ok)\n call $test_clean()\n storel 0, $test_time\n %inner =l call $trbn_runtime_deadline_l(l $inner, l 1000, l -20)\n %inner_ok =w ceql %inner, 88\n call $test_require(w %inner_ok)\n call $test_clean()\n storel 0, $test_time\n %parent =l call $trbn_runtime_deadline_l(l $parent, l 1, l -20)\n %parent_ok =w ceql %parent, -20\n call $test_require(w %parent_ok)\n call $test_clean()\n storel 0, $test_time\n %inside =l call $trbn_runtime_deadline_l(l $caught_inside, l 1, l -30)\n %inside_ok =w ceql %inside, -30\n call $test_require(w %inside_ok)\n call $test_clean()\n storel 0, $test_time\n %outside =l call $trbn_runtime_recover_l(l $deadline_error, l 55)\n %outside_ok =w ceql %outside, 55\n call $test_require(w %outside_ok)\n call $test_clean()\n %again =l call $trbn_runtime_deadline_l(l $fast, l 1000, l -1)\n %again_ok =w ceql %again, 123\n call $test_require(w %again_ok)\n call $test_clean()\n storel 0, $test_time\n %floating =d call $trbn_runtime_deadline_d(l $float_slow, l 1, d d_4.5)\n %floating_ok =w ceqd %floating, d_4.5\n call $test_require(w %floating_ok)\n call $test_clean()\n %progress =l loadl $test_progress\n %stopped =w ceql %progress, 0\n call $test_require(w %stopped)\n %done =w call $puts(l $test_done)\n ret 0\n}\n", true, false)
+	end
+	test("bypasses inner ordinary recovery and unwinds younger resources once") do
+		deadline_test_runtime("data $test_closed = align 8 { l 0 }\ndata $body = align 8 { l 0, l $test_body }\ndata $slow = align 8 { l 0, l $test_slow }\nfunction w $test_close(w %fd) {\n@start\n %previous =l loadl $test_closed\n %times =l mul %previous, 100\n %descriptor =l extsw %fd\n %next =l add %times, %descriptor\n storel %next, $test_closed\n ret -1\n}\nfunction l $test_slow(l %closure) {\n@start\n %resource =l alloc8 16\n call $trbn_resource_push(l %resource, w 2)\n storel 19, $trbn_gc_temp_count\n storel 2000000, $test_time\n call $trbn_deadline_checkpoint()\n storel 1, $test_progress\n ret 999\n}\nfunction l $test_body(l %closure) {\n@start\n %resource =l alloc8 16\n call $trbn_resource_push(l %resource, w 1)\n %caught =l call $trbn_runtime_recover_l(l $slow, l 777)\n storel 2, $test_progress\n ret %caught\n}\nexport function w $main() {\n@start\n %alarm =w call $alarm(w 5)\n %outer =l alloc8 16\n call $trbn_resource_push(l %outer, w 90)\n %value =l call $trbn_runtime_deadline_l(l $body, l 1, l -10)\n %ok =w ceql %value, -10\n call $test_require(w %ok)\n %scope =l loadl $trbn_resource_scope\n %outer_retained =w ceql %scope, %outer\n call $test_require(w %outer_retained)\n %closed =l loadl $test_closed\n %closed_ok =w ceql %closed, 201\n call $test_require(w %closed_ok)\n %ignored =w call $trbn_resource_close(l %outer)\n %final =l loadl $test_closed\n %once =w ceql %final, 20190\n call $test_require(w %once)\n %progress =l loadl $test_progress\n %stopped =w ceql %progress, 0\n call $test_require(w %stopped)\n call $test_clean()\n %done =w call $puts(l $test_done)\n ret 0\n}\n", true, true)
+	end
+	test("closes a real descriptor before continuation without closing its reuse") do
+		deadline_test_runtime("data $test_device = { b \"/dev/null\", b 0 }\ndata $test_fd = align 4 { w -1 }\ndata $body = align 8 { l 0, l $test_body }\nfunction l $test_body(l %closure) {\n@start\n %fd =w call $open(l $test_device, w 0, ...)\n %valid =w csgew %fd, 0\n call $test_require(w %valid)\n storew %fd, $test_fd\n %resource =l alloc8 16\n call $trbn_resource_push(l %resource, w %fd)\n storel 2000000, $test_time\n call $trbn_deadline_checkpoint()\n ret 999\n}\nexport function w $main() {\n@start\n %alarm =w call $alarm(w 5)\n %value =l call $trbn_runtime_deadline_l(l $body, l 1, l -10)\n %ok =w ceql %value, -10\n call $test_require(w %ok)\n %fd =w loadw $test_fd\n %flags =w call $fcntl(w %fd, w 1, ...)\n %closed =w ceqw %flags, -1\n call $test_require(w %closed)\n %reused =w call $open(l $test_device, w 0, ...)\n %opened =w csgew %reused, 0\n call $test_require(w %opened)\n call $trbn_resource_unwind(l 0)\n %after =w call $fcntl(w %reused, w 1, ...)\n %still_open =w csgew %after, 0\n call $test_require(w %still_open)\n %ignored =w call $close(w %reused)\n call $test_clean()\n %done =w call $puts(l $test_done)\n ret 0\n}\n", true, false)
+	end
+	test("uses the host monotonic clock and a bounded non-throwing budget") do
+		deadline_test_runtime("data $body = align 8 { l 0, l $test_body }\nfunction l $test_body(l %closure) {\n@start\n %remaining =l call $trbn_deadline_remaining_millis()\n %positive =w csgtl %remaining, 0\n %bounded =w cslel %remaining, 10000\n %ok =w and %positive, %bounded\n call $test_require(w %ok)\n ret 99\n}\nexport function w $main() {\n@start\n %alarm =w call $alarm(w 5)\n %none =l call $trbn_deadline_remaining_millis()\n %none_ok =w ceql %none, -1\n call $test_require(w %none_ok)\n %now =l call $trbn_deadline_checked_now()\n %positive =w csgel %now, 0\n call $test_require(w %positive)\n %value =l call $trbn_runtime_deadline_l(l $body, l 10000, l -10)\n %ok =w ceql %value, 99\n call $test_require(w %ok)\n call $test_clean()\n %done =w call $puts(l $test_done)\n ret 0\n}\n", false, false)
+	end
+	test("keeps clock failures non-throwing in foreign budget queries") do
+		deadline_test_runtime("data $body = align 8 { l 0, l $test_body }\nfunction l $test_body(l %closure) {\n@start\n %time =l call $trbn_deadline_checked_now()\n ret %time\n}\nexport function w $main() {\n@start\n %alarm =w call $alarm(w 5)\n %frame =l alloc8 64\n %deadline_slot =l add %frame, 16\n storel 10000000, %deadline_slot\n storel %frame, $trbn_deadline_scope\n storel -1, $test_time\n %budget =l call $trbn_deadline_remaining_millis()\n %aborted =w ceql %budget, 0\n call $test_require(w %aborted)\n storel 0, $trbn_deadline_scope\n %caught =l call $trbn_runtime_recover_l(l $body, l 44)\n %ordinary =w ceql %caught, 44\n call $test_require(w %ordinary)\n call $test_clean()\n %done =w call $puts(l $test_done)\n ret 0\n}\n", true, false)
+	end
+end

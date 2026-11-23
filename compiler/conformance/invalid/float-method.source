@@ -1,0 +1,4 @@
+def main()
+	value := 1.0.to_s(1)
+	return
+end

@@ -1,0 +1,4 @@
+def main()
+span := 1..2
+puts(span[0])
+end

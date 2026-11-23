@@ -1,0 +1,66 @@
+# Value-producing collection transforms share these tags across parser, checker,
+# MIR lowering and REPL. Predicate and sorting groups retain their ordered ranges.
+
+# A serial implementation still owns a structured concurrent group. Keep its
+# tag distinct so admission checks and ownership never become ordinary map.
+def transform_concurrent_map(): Integer
+	return 11
+end
+
+def transform_mapping(kind: Integer): Boolean
+	if kind == transform_map()
+		return true
+	end
+	return kind == transform_concurrent_map()
+end
+
+def transform_sorting(kind: Integer): Boolean
+	if kind == transform_sort_by()
+		return true
+	end
+	return kind == transform_sort_by_descending()
+end
+
+def transform_absent(): Integer
+	return 0
+end
+
+def transform_map(): Integer
+	return 1
+end
+
+def transform_select(): Integer
+	return 2
+end
+
+def transform_reduce(): Integer
+	return 3
+end
+
+def transform_any(): Integer
+	return 4
+end
+
+def transform_all(): Integer
+	return 5
+end
+
+def transform_none(): Integer
+	return 6
+end
+
+def transform_find(): Integer
+	return 7
+end
+
+def transform_find_index(): Integer
+	return 8
+end
+
+def transform_sort_by(): Integer
+	return 9
+end
+
+def transform_sort_by_descending(): Integer
+	return 10
+end

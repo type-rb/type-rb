@@ -1,0 +1,24 @@
+record Entry
+	label: String
+end
+alias Rows = Array<Entry>
+def bounds(mut items: Rows): Range<Integer>
+	items.push(Entry.new(label: "new" + "!"))
+	return 0...items.size()
+end
+def main()
+	mut items := [Entry.new(label: "A" + "B"), Entry.new(label: "C" + "D")]
+	all := items.slice(bounds(items))
+	copy := all.dup()
+	reversed := all.reverse()
+	retained := copy.first()
+	items = [Entry.new(label: "replacement")]
+	mut garbage := ""
+	(0...10).each { |i| garbage += i.to_s() }
+	puts(retained.label)
+	puts(reversed.first().label)
+	puts(copy.last().label)
+	puts(all.size())
+	puts(items.first().label)
+	puts(garbage.size())
+end

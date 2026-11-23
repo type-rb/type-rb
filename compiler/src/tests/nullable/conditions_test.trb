@@ -1,0 +1,62 @@
+import { check, emit_qbe } from compiler
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { control_test_output } from testing/mir/control
+import { logical_checked_source } from testing/pipeline
+import { logical_run_qbe } from testing/qbe_runner
+import { verify_mir } from mir/verify/module
+import { load_string } from support/storage
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+describe("Nullable compound conditions") do
+	test("retains both proofs on guaranteed edges and swaps them under negation") do
+		sources := [
+			"def sum(a: Array<Integer>?, b: Array<Integer>?): Integer\nif a != nil && b != nil\nreturn a[0] + b[0]\nend\nreturn -1\nend\ndef main()\nputs(sum([2], [3]))\nputs(sum(nil, [3]))\nputs(sum([2], nil))\n\nend\n",
+			"def sum(a: Array<Integer>?, b: Array<Integer>?): Integer\nif !(a == nil || b == nil)\nreturn a[0] + b[0]\nend\nreturn -1\nend\ndef main()\nputs(sum([2], [3]))\nputs(sum(nil, [3]))\nputs(sum([2], nil))\n\nend\n",
+			"def sum(a: Array<Integer>?, b: Array<Integer>?): Integer\nif a == nil || b == nil\nreturn -1\nend\nreturn a[0] + b[0]\nend\ndef main()\nputs(sum([2], [3]))\nputs(sum(nil, [3]))\nputs(sum([2], nil))\n\nend\n",
+			"def main()\nvalue: String? := \"hello\"\nif value != nil && value.size() > 0\nputs(value.size())\nend\n\nend\n",
+		]
+		outputs := ["5\n-1\n-1\n", "5\n-1\n-1\n", "5\n-1\n-1\n", "5\n"]
+		mut index := 0
+		sources.each do |source|
+			mut state := logical_checked_source(source)
+			valid := check(state)
+			if !valid
+				puts(index)
+				puts(load_string(state.diagnostics.messages, 0))
+			end
+			expect(valid).to_be_true()
+			if valid
+				expect(verify_mir(state.scalar_mir, true)).to_equal("")
+				before := control_test_output(emit_qbe(state))
+				intrinsic_mir_erase(state)
+				expect(control_test_output(emit_qbe(state))).to_equal(before)
+				qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+				if qbe != nil
+					case logical_run_qbe(qbe, before)
+					when Result::Ok(output)
+						expect(output).to_equal(outputs[index])
+					when Result::Err(error)
+						puts(error)
+						expect(false).to_be_true()
+					end
+				end
+			end
+			index += 1
+		end
+	end
+
+	test("rejects alternate-path and stale mutable facts") do
+		sources := [
+			"def size(a: String?, b: Boolean, c: Boolean): Integer\nif (a != nil && b) || (a != nil && c)\nreturn a.size()\nend\nreturn -1\nend\ndef main()\nputs(size(\"hello\", false, true))\nputs(size(nil, true, true))\nputs(size(\"hello\", false, false))\n\nend\n",
+			"def unsafe(a: Array<Integer>?, b: Array<Integer>?): Integer\nif a != nil || b != nil\nreturn a.size()\nend\nreturn -1\nend\ndef main()\n\nend\n",
+			"mut current: String? := \"kept\"\ndef reset(): Boolean\ncurrent = nil\nreturn true\nend\ndef unsafe(): Integer\nif current != nil && reset()\nreturn current.size()\nend\nreturn -1\nend\ndef main()\n\nend\n",
+		]
+		sources.each do |source|
+			mut state := logical_checked_source(source)
+			expect(check(state)).to_be_false()
+			expect(load_string(state.diagnostics.messages, 0).include?("size is unavailable")).to_be_true()
+		end
+	end
+end

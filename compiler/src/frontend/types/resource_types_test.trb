@@ -1,0 +1,54 @@
+import { scoped_resource_name } from frontend/types/resource_types
+import { find_object_in_module } from frontend/types/object_types
+import { instantiate_object_type } from frontend/resolution/type_resolution
+import { load_standard_source } from project/standard_library
+import { standard_source_dir, standard_source_file } from state/standard_source_kinds
+import { compiler_new, has_diagnostic } from state/state
+import { store_integer } from support/storage
+import { check } from compiler
+import { lex } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { expect_compiler_phase, logical_checked_source } from testing/pipeline
+import { load_string } from support/storage
+import { describe, expect, test } from trb/std/test
+
+describe("Owned scoped resource identities") do
+	test("requires the loaded declaration owner even with a matching module path") do
+		[standard_source_file(), standard_source_dir()].each do |kind|
+			mut state := compiler_new(1048576)
+			source := load_standard_source(state, kind, 1)
+			mut name := "File"
+			if kind == standard_source_dir()
+				name = "Dir"
+			end
+			definition := find_object_in_module(state, source, name)
+			expect(definition >= 0).to_be_true()
+			type_name := instantiate_object_type(state, definition, [])
+			expect(has_diagnostic(state)).to_be_false()
+			expect(scoped_resource_name(state, type_name)).to_equal(name)
+			store_integer(state.standard_modules, source, 0)
+			expect(scoped_resource_name(state, type_name)).to_equal("")
+		end
+	end
+
+	test("rejects direct construction through bare and named import aliases") do
+		[
+			"import trb/std/file\ndef main()\nFile.new()\nend\n",
+			"import { File as Handle } from trb/std/file\ndef main()\nHandle.new()\nend\n",
+			"import trb/std/dir as Folder\ndef main()\nFolder.new()\nend\n",
+		].each do |source|
+			mut state := compiler_new(1048576)
+			expect_compiler_phase(state, "lex", lex(state, source))
+			expect_compiler_phase(state, "parse", parse_module(state, 0, 0))
+			expect_compiler_phase(state, "resolve", resolve(state))
+			expect(check(state)).to_be_false()
+			expect(load_string(state.diagnostics.messages, 0).include?("cannot be constructed directly")).to_be_true()
+		end
+	end
+
+	test("leaves authored File and Dir declarations constructible") do
+		mut state := logical_checked_source("class File\nend\nclass Dir\nend\ndef main()\nFile.new()\nDir.new()\nreturn\nend\n")
+		expect_compiler_phase(state, "check", check(state))
+	end
+end

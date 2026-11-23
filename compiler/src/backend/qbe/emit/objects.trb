@@ -1,0 +1,69 @@
+import { mir_op_object_copy, mir_op_object_field, mir_op_object_identity, mir_op_object_new } from mir/model/instructions
+import { integer_string } from support/literals
+import { MirInstruction } from mir/model/module
+import { mir_managed_type, mir_operand_type, mir_storage_type_name } from mir/model/types
+import { mir_object_id } from mir/model/objects
+import { QbeEmitContext, QbeValue, emit_address, emit_temporary, emit_typed_load, emit_typed_store, emitted_value } from backend/qbe/context
+import { QbeOutput, qbe_output_line } from backend/qbe/output
+import { CompilerState } from state/state
+
+# Only verified MIR fields determine allocation, access and managed offsets.
+def emit_mir_object_instruction(state: CompilerState, value_types: Array<Integer>, instruction: MirInstruction, operands: Array<String>, mut context: QbeEmitContext, mut output: QbeOutput): QbeValue
+	result := emit_temporary(context)
+	if instruction.kind == mir_op_object_new()
+		definition := state.scalar_mir.objects[instruction.payload]
+		qbe_output_line(output, "\t" + result + " =l call $trbn_gc_alloc(l $trbn_desc_object" + integer_string(instruction.payload) + ", l " + integer_string(definition.fields.size() * 8) + ", l 0)")
+		return emitted_value(result, "Address")
+	end
+	owner := mir_object_id(state.scalar_mir, mir_operand_type(value_types, instruction.first))
+	if instruction.kind == mir_op_object_identity()
+		qbe_output_line(output, "\t" + result + " =l ceql " + operands[instruction.first] + ", " + operands[instruction.second])
+		return emitted_value(result, "Boolean")
+	end
+	if instruction.kind == mir_op_object_copy()
+		definition := state.scalar_mir.objects[owner]
+		qbe_output_line(output, "\t" + result + " =l call $trbn_gc_alloc(l $trbn_desc_object" + integer_string(owner) + ", l " + integer_string(definition.fields.size() * 8) + ", l 0)")
+		mut slot := 0
+		while slot < definition.fields.size()
+			field_type := mir_storage_type_name(state.scalar_mir, definition.fields[slot].type_id)
+			mut value := operands[instruction.second]
+			if slot != instruction.payload
+				value = emit_temporary(context)
+				address := emit_address(context, output, operands[instruction.first], 8 + slot * 8)
+				emit_typed_load(output, value, field_type, address)
+			end
+			destination := emit_address(context, output, result, 8 + slot * 8)
+			emit_typed_store(output, field_type, value, destination)
+			slot += 1
+		end
+		return emitted_value(result, "Address")
+	end
+	field := state.scalar_mir.objects[owner].fields[instruction.payload]
+	type_name := mir_storage_type_name(state.scalar_mir, field.type_id)
+	address := emit_address(context, output, operands[instruction.first], 8 + instruction.payload * 8)
+	if instruction.kind == mir_op_object_field()
+		emit_typed_load(output, result, type_name, address)
+	else
+		emit_typed_store(output, type_name, operands[instruction.second], address)
+		return emitted_value("", "Void")
+	end
+	return emitted_value(result, type_name)
+end
+
+def emit_object_descriptors(state: CompilerState, mut output: QbeOutput)
+	state.scalar_mir.objects.each do |definition|
+		if !definition.interface_type
+			mut managed := 0
+			mut offsets := ""
+			mut slot := 0
+			definition.fields.each do |field|
+				if mir_managed_type(state.scalar_mir, field.type_id)
+					managed += 1
+					offsets += ", l " + integer_string(8 + slot * 8)
+				end
+				slot += 1
+			end
+			qbe_output_line(output, "data $trbn_desc_object" + integer_string(definition.declaration) + " = align 8 { l 1, l " + integer_string(managed) + ", l " + integer_string(slot * 8) + offsets + " }")
+		end
+	end
+end

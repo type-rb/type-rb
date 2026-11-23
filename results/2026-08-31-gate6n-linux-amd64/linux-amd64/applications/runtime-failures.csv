@@ -1,0 +1,7 @@
+mode,native_status,go_status,failure_class
+invalid-format,2,2,panic: invalid Integer
+sign-only,2,2,panic: invalid Integer
+integer-range,2,2,panic: Integer is outside the portable range
+nan,2,2,panic: Float cannot be converted to Integer
+infinity,2,2,panic: Float cannot be converted to Integer
+float-range,2,2,panic: Integer is outside the portable range

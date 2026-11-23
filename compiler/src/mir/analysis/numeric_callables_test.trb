@@ -1,0 +1,150 @@
+import { emit_qbe } from compiler
+import { mir_op_indirect_call } from mir/model/instructions
+import { mir_numeric_find, mir_numeric_plans_equal } from mir/analysis/numeric
+import { MirNumericPlan } from mir/model/module
+import { optimize_verified_mir } from mir/passes/optimize
+import { verify_mir } from mir/verify/module
+import { CompilerState } from state/state
+import { array_loop_mir_check } from testing/mir/array_loops
+import { array_mir_test_read } from testing/mir/arrays
+import { control_test_output } from testing/mir/control
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { logical_run_qbe } from testing/qbe_runner
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+def numeric_callable_source(body: String, argument: String): String
+	return "def apply(callback: (Integer) -> Integer): Integer\nmut total := 0\nmut index := 0\nwhile index < 3\ntotal += callback(" + argument + ")\nindex += 1\nend\nreturn total\nend\ndef main()\noffset := 7\ncallback := fn(value: Integer): Integer\n" + body + "\nend\nputs(apply(callback))\nend\n"
+end
+
+def numeric_callable_expansions(state: CompilerState): Integer
+	mut count := 0
+	state.scalar_mir.numeric_plans[0].each do |plan|
+		if plan.call_instruction >= 0
+			if state.scalar_mir.instructions[plan.call_instruction].kind == mir_op_indirect_call()
+				count += 1
+			end
+		end
+	end
+	return count
+end
+
+def numeric_callable_run(state: CompilerState, expected: String)
+	qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+	if qbe != nil
+		case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+		when Result::Ok(actual)
+			expect(actual).to_equal(expected)
+		when Result::Err(error)
+			puts(error)
+			expect(false).to_be_true()
+		end
+	end
+end
+
+describe("MIR singleton scalar callable expansion") do
+	test("shares scalar expansion with a captured leaf and preserves its result") do
+		state := array_loop_mir_check(numeric_callable_source("return value + offset", "index"))
+		expect(numeric_callable_expansions(state)).to_equal(1)
+		plan := state.scalar_mir.callable_plans[0][0]
+		selected := mir_numeric_find(state.scalar_mir.numeric_plans[0], -1, 0, plan.instruction)
+		expect(selected.function_id).to_equal(plan.callee)
+		expect(plan.captures).to_equal(1)
+		numeric_callable_run(state, "24\n")
+	end
+
+	test("expands the Closures callback after forwarding its capture operands") do
+		root := Process.environment("TYPE_RB_NATIVE_ROOT")
+		if root != nil
+			state := array_loop_mir_check(array_mir_test_read(root + "/benchmarks/features/closures/src/main.trb"))
+			expect(numeric_callable_expansions(state)).to_equal(0)
+			mut found := 0
+			state.scalar_mir.numeric_plans[0].each do |plan|
+				if plan.function_id == 3 && plan.caller == 1 && plan.call_instruction >= 0
+					found += 1
+				end
+			end
+			expect(found).to_equal(1)
+			caller := control_test_output(emit_qbe(state)).split("function l $trbnf1(")[1].split("\n}\n")[0]
+			expect(caller.include?("call $trbnf0(")).to_be_false()
+			expect(caller.include?("call $trbnf3(")).to_be_false()
+			expect(caller.include?("call $trbn_integer_add(")).to_be_false()
+		end
+	end
+
+	test("keeps allocating and branching callable bodies out of scalar expansion") do
+		bodies := ["values := [value, offset]\nreturn values[0]", "if value < offset\nreturn value\nend\nreturn offset"]
+		bodies.each do |body|
+			state := array_loop_mir_check(numeric_callable_source(body, "index"))
+			expect(numeric_callable_expansions(state)).to_equal(0)
+			numeric_callable_run(state, "3\n")
+		end
+	end
+
+	test("keeps differently targeted incoming callable values unresolved") do
+		source := "def first(value: Integer): Integer\nreturn value + 1\nend\ndef second(value: Integer): Integer\nreturn value + 2\nend\ndef apply(callback: (Integer) -> Integer): Integer\nmut total := 0\nmut index := 0\nwhile index < 3\ntotal += callback(index)\nindex += 1\nend\nreturn total\nend\ndef main()\nputs(apply(first))\nputs(apply(second))\nend\n"
+		state := array_loop_mir_check(source)
+		expect(numeric_callable_expansions(state)).to_equal(0)
+		numeric_callable_run(state, "6\n9\n")
+	end
+
+	test("preserves checked overflow inside the expanded callable") do
+		state := array_loop_mir_check(numeric_callable_source("return value + offset", "9007199254740991"))
+		expect(numeric_callable_expansions(state)).to_equal(1)
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+			when Result::Ok(_actual)
+				expect(false).to_be_true()
+			when Result::Err(error)
+				expect(error.include?("Integer")).to_be_true()
+			end
+		end
+	end
+
+	test("recomputes expansion after source erasure and rejects a forged target") do
+		mut state := array_loop_mir_check(numeric_callable_source("return value + offset", "index"))
+		before := control_test_output(emit_qbe(state))
+		plans := state.scalar_mir.numeric_plans[0]
+		intrinsic_mir_erase(state)
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(mir_numeric_plans_equal(plans, state.scalar_mir.numeric_plans[0])).to_be_true()
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+		mut current := state.scalar_mir.numeric_plans[0]
+		mut index := 0
+		while index < current.size()
+			plan := current[index]
+			if plan.call_instruction >= 0
+				current[index] = MirNumericPlan.new(witness: plan.witness, function_id: 999, caller: plan.caller, call_instruction: plan.call_instruction, operations: plan.operations)
+				break
+			end
+			index += 1
+		end
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR numeric plan differs")
+	end
+end
+
+describe("MIR scalar callable expansion limits") do
+	test("shares the two-site budget with ordinary scalar calls") do
+		source := "def scalar(value: Integer): Integer\nreturn value + 2\nend\ndef apply(callback: (Integer) -> Integer): Integer\nmut total := 0\nmut index := 0\nwhile index < 3\ntotal += callback(index)\ntotal += scalar(index)\ntotal += callback(index)\nindex += 1\nend\nreturn total\nend\ndef main()\ncallback := fn(value: Integer): Integer\nreturn value + 1\nend\nputs(apply(callback))\nend\n"
+		state := array_loop_mir_check(source)
+		mut expanded := 0
+		state.scalar_mir.numeric_plans[0].each do |plan|
+			if plan.caller >= 0
+				expanded += 1
+			end
+		end
+		expect(expanded).to_equal(2)
+		expect(numeric_callable_expansions(state)).to_equal(1)
+		numeric_callable_run(state, "21\n")
+	end
+
+	test("preserves Float capture and argument widths") do
+		source := "def apply(callback: (Float) -> Float): Float\nmut total := 0.0\nmut index := 0\nwhile index < 3\ntotal += callback(1.5)\nindex += 1\nend\nreturn total\nend\ndef main()\noffset := 0.5\ncallback := fn(value: Float): Float\nreturn value + offset\nend\nputs(apply(callback).to_i())\nend\n"
+		state := array_loop_mir_check(source)
+		expect(numeric_callable_expansions(state)).to_equal(1)
+		numeric_callable_run(state, "6\n")
+	end
+end

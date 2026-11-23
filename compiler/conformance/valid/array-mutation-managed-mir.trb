@@ -1,0 +1,34 @@
+record Entry
+	text: String
+	inner: Array<Integer>
+end
+def main()
+	mut inner := [1]
+	mut items := [Entry.new(text: "A" + "B", inner: inner)]
+	mut index := 0
+	while index < 20
+		items.unshift(Entry.new(text: index.to_s(), inner: inner))
+		index += 1
+	end
+	saved := items.pop()
+	first := items.shift()
+	items = []
+	inner.push(2)
+	mut garbage := ""
+	(0...10).each { |value| garbage += value.to_s() }
+	puts(saved.text)
+	puts(first.text)
+	puts(saved.inner.size())
+	puts(garbage.size())
+	mut captured := 3
+	callback := fn(): Integer
+		return captured
+	end
+	mut callbacks := [callback]
+	callbacks.unshift(callback)
+	last := callbacks.pop()
+	leading := callbacks.shift()
+	captured = 7
+	puts(last())
+	puts(leading())
+end

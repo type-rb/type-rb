@@ -1,0 +1,51 @@
+import { MirBlock, MirFunction, MirInstruction, MirModule, MirValue } from mir/model/module
+
+def flow_test_module(edges: Array<Array<Integer>>): MirModule
+	mut blocks: Array<MirBlock> := []
+	mut instructions: Array<MirInstruction> := []
+	mut values := [MirValue.new(function_id: 7, id: 0, type_id: 2, source_id: 0, line: 1)]
+	mut index := 0
+	while index < edges.size()
+		mut kind := 3
+		mut first := -1
+		mut second := -1
+		mut condition := -1
+		if edges[index].size() > 0
+			kind = 1
+			first = 100 + edges[index][0]
+		end
+		if edges[index].size() == 2
+			kind = 2
+			second = 100 + edges[index][1]
+			condition = 0
+		end
+		blocks.push(MirBlock.new(id: 100 + index, source_id: 0, line: 1, parameter_start: 0, parameter_count: 0, instruction_start: index, instruction_count: 1, terminator: kind, condition: condition, first_target: first, second_target: second, first_argument_start: 0, first_argument_count: 0, second_argument_start: 0, second_argument_count: 0, return_value: -1))
+		values.push(MirValue.new(function_id: 7, id: 9007199254740980 + index, type_id: 1, source_id: 0, line: 1))
+		instructions.push(MirInstruction.new(kind: 1, result: 9007199254740980 + index, first: -1, second: -1, payload: index, failure: -1, source_id: 0, line: 1))
+		index += 1
+	end
+	return MirModule.new(enum_scalars: [], source_names: [], program: [], object_methods: [], object_witnesses: [], objects: [], newtypes: [], unions: [], globals: [], global_initialization: [], callables: [], callable_plans: [[]], enums: [], enum_variants: [], enum_fields: [], numeric_plans: [[]], hash_lookup_reuse: [[]], hash_membership_reuse: [[]], hash_concat_probes: [[]], call_return_guards: [[]], types: [], records: [], fields: [], root_plans: [], enum_stack_functions: [], array_loops: [], loop_calls: [], file_scopes: [], array_check_reuse: [], array_read_guards: [], array_joins: [], string_splits: [], signatures: [], calls: [], source_count: [1], entry_function: [7], functions: [MirFunction.new(kind: 0, result_type: "Void", integer_guard: 0, id: 7, entry_block: 100, source_id: 0, line: 1, parameter_start: 0, parameter_count: 1, block_start: 0, block_count: edges.size())], blocks: blocks, values: values, instructions: instructions, arguments: [0], literal_texts: [], literal_data: [], string_concats: [])
+end
+
+def flow_test_reachable(excluded: Integer, edges: Array<Array<Integer>>): Array<Integer>
+	mut seen: Array<Integer> := []
+	edges.each do |_edge|
+		seen.push(0)
+	end
+	if excluded == 0
+		return seen
+	end
+	mut pending := [0]
+	seen[0] = 1
+	mut index := 0
+	while index < pending.size()
+		edges[pending[index]].each do |target|
+			if target != excluded && seen[target] == 0
+				seen[target] = 1
+				pending.push(target)
+			end
+		end
+		index += 1
+	end
+	return seen
+end

@@ -1,0 +1,24 @@
+{
+  "workflow": "https://github.com/type-rb/type-rb-native/actions/runs/34423530952",
+  "sourceRevision": "b230d34c1a415eab9f8eaa98c7ed418b57b5bafa",
+  "artifact": {
+    "id": 10131868725,
+    "name": "runtime-worker-darwin-arm64",
+    "size_in_bytes": 432048,
+    "digest": "sha256:6c2b8b389cd23ab8f83b43034c60e411a53683ef6c3b5fc76103eee4a39c9ae9"
+  },
+  "evidence": {
+    "build-evidence/chain.txt": "profile=darwin-arm64-v0\nsetup_first_size=365816\nsetup_current_runtime_size=365816\nb2_size=365816\nb3_size=365816\nb4_size=365816\n",
+    "build-evidence/process-inventory.txt": "profile=darwin-arm64-v0\nevidence=direct-workflow-invocations-without-platform-process-trace\nsetup-first=/Users/runner/work/_temp/release/type-rb-native-bootstrap-darwin-arm64\nsetup-current-runtime=/Users/runner/work/_temp/chain/first/compiler\nb2=/Users/runner/work/_temp/chain/second/compiler\nb3=/Users/runner/work/_temp/chain/third/compiler\nb4=/Users/runner/work/_temp/chain/fourth/compiler\nqbe=/Users/runner/work/_temp/qbe-1.3/qbe\ncc=/usr/bin/cc\n",
+    "release/selection.txt": "release_tag=bootstrap-seed-2026-09-09-record-arrays\n",
+    "worker-smoke-evidence/collector-statistics.txt": "collections=175\nautomatic_collections=174\nallocated_bytes=182400576\nreclaimed_bytes=182400576\nlive_bytes=0\npeak_heap_bytes=1047808\n",
+    "worker-smoke-evidence/compiler-size-bytes.txt": "365856\n",
+    "worker-smoke-evidence/environment.txt": "Darwin sat12-dp146-b4bd073c-e14c-4ebe-abcb-9ab7d719b0d9-1AA59FC3C3D9.local 24.6.0 Darwin Kernel Version 24.6.0: Tue Jul 21 20:51:34 PDT 2026; root:xnu-11417.140.69.711.44~1/RELEASE_ARM64_VMAPPLE arm64\nApple clang version 17.0.0 (clang-1700.0.13.5)\nTarget: arm64-apple-darwin24.6.0\nThread model: posix\nInstalledDir: /Applications/Xcode_16.4.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin\n/Users/runner/work/_temp/qbe-1.3/qbe [OPTIONS] {file.ssa, -}\n\t-h          prints this help\n\t-o file     output to file\n\t-t <target> generate for a target among:\n\t            amd64_sysv, amd64_apple, amd64_win, arm64, arm64_apple (default), rv64\n\t-d <flags>  dump debug information\n",
+    "worker-smoke-evidence/gc-trace-analysis.txt": "observation_count=3\nautomatic_observation_count=2\nmanual_observation_count=1\nfinal_collection=175\nmaximum_sampled_live_bytes=3568\nmaximum_root_count=3\nroot_capacity_words=64\n",
+    "worker-smoke-evidence/identities.txt": "mode=smoke\nprofile=darwin-arm64-v0\nphases=1\nbatches_per_phase=40000\noriginal_jobs_per_batch=128\nprocessed_attempts_per_batch=136\ncompiler_size=365816\nstripped_compiler_size=365856\ncompiler_sha256=1ffe460be69ab71b05621bb712a231a13f3d3614e772c0e2fcc076affe07477b\nqbe_sha256=8722a4b4da6e968aae52d5f344e57fb01c5cd8e021e1d166d95ef4ee9d996333\nworkload_sha256=56738c1ab9d50f3c1658e490ae20d927fb6a2e2099491913c8072be33731a98e\nqbe_output_sha256=ccfc583706490e0791000c5d037145de53e825553019cab363c7faecbac9995a\nnative_program_sha256=82a21fd2f2a0d20e6efebbb054ddee90b7061fbfde40cec60b7a990a74e594c7\nreference_trb_version=0.4.6-dev\nreference_program_sha256=449bcc92b85360b172f06e4cf085ae79ca2c210d16dd890ba0250517c5f57de4\n",
+    "worker-smoke-evidence/invocation.txt": "controller=/bin/sh tools/runtime-worker-soak/runtime-worker-soak.sh\nmode=smoke\ncompiler=/Users/runner/work/_temp/chain/fifth/compiler\nqbe=/Users/runner/work/_temp/qbe-1.3/qbe\ncc=/usr/bin/cc\nreference_trb=/Users/runner/work/_temp/trb\nprofile=darwin-arm64-v0\nworkspace=/Users/runner/work/_temp/worker-smoke-workspace\nevidence=/Users/runner/work/_temp/worker-smoke-evidence\nruntime_stats=1\nruntime_trace=1\n",
+    "worker-smoke-evidence/native-runtime.txt": "elapsed_seconds=0.10\n",
+    "worker-smoke-evidence/reference-runtime.txt": "elapsed_seconds=0.13\n",
+    "workflow-evidence/context.txt": "repository_revision=db0310c8f381ecf3957afc76d31be2ce167cd065\nrepository_ref=refs/pull/389/merge\nworkflow=.github/workflows/runtime-worker-memory.yml\nworkflow_run_id=34423530952\nrunner=macos-15\nprofile=darwin-arm64-v0\ntype_rb_revision=6cbd4025545d44a1de211335f9197772077bb478\ntype_rb_version=0.4.6-dev\n"
+  }
+}

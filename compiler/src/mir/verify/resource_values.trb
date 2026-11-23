@@ -1,0 +1,52 @@
+import { mir_op_file_scope } from mir/model/instructions
+import { mir_live_before, mir_managed_add, mir_managed_contains } from mir/analysis/liveness
+import { mir_op_direct_call, mir_op_value_copy } from mir/model/instructions
+import { mir_terminator_return } from mir/model/control
+import { MirFunction, MirModule, MirValue } from mir/model/module
+
+# This check follows structural verification, so value types and operand spans
+# are already authoritative. It does not trust source rejection of an escape.
+# Function borrows and lexical aliases may flow through block arguments; their
+# only instruction uses are another immutable borrow or an identity-preserving
+# copy. Acquisition regions will add their own independently verified lifetime.
+def mir_resource_values_error(native_module: MirModule, function: MirFunction, values: Array<MirValue>): String
+	mut resource_types: Array<Integer> := []
+	native_module.objects.each do |object|
+		if object.resource_kind > 0
+			mir_managed_add(resource_types, object.type_id)
+		end
+	end
+	if resource_types.size() == 0
+		return ""
+	end
+	mut resources: Array<Integer> := []
+	values.each do |value|
+		if mir_managed_contains(resource_types, value.type_id)
+			mir_managed_add(resources, value.id)
+		end
+	end
+	if resources.size() == 0
+		return ""
+	end
+	mut block_index := function.block_start
+	while block_index < function.block_start + function.block_count
+		block := native_module.blocks[block_index]
+		if block.terminator == mir_terminator_return() && mir_managed_contains(resources, block.return_value)
+			return "MIR scoped resource cannot escape through a return"
+		end
+		mut index := block.instruction_start
+		while index < block.instruction_start + block.instruction_count
+			instruction := native_module.instructions[index]
+			if mir_managed_contains(resources, instruction.result) && instruction.kind != mir_op_value_copy()
+				return "MIR scoped resource requires a checked acquisition or borrow origin"
+			end
+			uses := mir_live_before(native_module, resources, instruction, [])
+			if uses.size() > 0 && instruction.kind != mir_op_value_copy() && instruction.kind != mir_op_direct_call() && instruction.kind != mir_op_file_scope()
+				return "MIR scoped resource cannot escape through storage or conversion"
+			end
+			index += 1
+		end
+		block_index += 1
+	end
+	return ""
+end

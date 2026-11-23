@@ -1,0 +1,18 @@
+# Only loader-owned time implementation sources can import these declarations.
+# Their complete signatures select verified MIR adapters, never source spelling.
+module TimeHost
+end
+
+def clock(mut parts: Array<Integer>): Boolean
+end
+
+# A negative start is relative to EOF. length=-1 reads a bounded whole TZif
+# file; exact ranges are used for ZIP headers and the selected stored entry.
+# parts receives bytes and the host error text; the result preserves errno.
+def zone_data(path: String, start: Integer, length: Integer, mut parts: Array<String>): Integer
+end
+
+# Only these two environment inputs cross the time boundary. The Boolean
+# distinguishes an absent TZ from an explicitly empty value.
+def zone_environment(mut parts: Array<String>): Boolean
+end

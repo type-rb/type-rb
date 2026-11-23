@@ -1,0 +1,52 @@
+import { deadline_intrinsic_test_state } from testing/mir/deadlines
+import { standard_runtime_deadline } from frontend/resolution/standard_intrinsics
+import { check, emit_qbe } from compiler
+import { verify_mir } from mir/verify/module
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { control_test_output } from testing/mir/control
+import { callable_forced_collection } from testing/mir/callables
+import { expect_compiler_phase, logical_checked_source } from testing/pipeline
+import { logical_run_qbe } from testing/qbe_runner
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+describe("Managed Web deadline execution") do
+	test("requires loader ownership and preserves verified cancellation after source erasure") do
+		mut state := deadline_intrinsic_test_state()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		before := control_test_output(emit_qbe(state))
+		expect(before.include?("call $trbn_deadline_checkpoint()")).to_be_true()
+		mut owned := 0
+		state.scalar_mir.signatures.each do |signature|
+			if standard_runtime_deadline(state, signature.id)
+				owned += 1
+				expect(signature.adapter).to_equal(67)
+			end
+		end
+		expect(owned).to_equal(2)
+		intrinsic_mir_erase(state)
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			# The watchdog bounds a broken checkpoint implementation independently
+			# of the managed clock; the fixed source loop is deliberately long.
+			bounded := callable_forced_collection(before).split("export function w $main() {\n@start").join("export function w $main() {\n@start\n call $alarm(w 5)")
+			case logical_run_qbe(qbe, bounded)
+			when Result::Ok(actual)
+				expect(actual).to_equal("7\n2.5\n9.5\n123\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+	test("keeps a program without deadlines free of clock imports and polling") do
+		mut state := logical_checked_source("def main()\nputs(123)\nend\n")
+		expect_compiler_phase(state, "check", check(state))
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		output := control_test_output(emit_qbe(state))
+		expect(output.include?("trbn_deadline")).to_be_false()
+		expect(output.include?("$clock_gettime")).to_be_false()
+	end
+end

@@ -1,0 +1,264 @@
+import { mir_function_control } from mir/model/control
+import { mir_op_literal_widen, mir_op_singleton_literal, mir_op_string_literal, mir_op_string_split } from mir/model/instructions
+import { MirFunction, MirLiteralData, MirModule, MirStringSplit, MirValue } from mir/model/module
+import { mir_build_flow_with_values, mir_flow_blocks } from mir/analysis/flow
+import { mir_add_observed_split_fields } from mir/analysis/split_fields
+import { mir_string_literal_data } from mir/analysis/literal_data
+import { integer_string } from support/literals
+
+# A finite constant lattice: -2 is an unseeded cycle, -1 is unknown, and a
+# nonnegative value identifies a literal. Every incoming edge participates;
+# branch conditions are never assumed constant. Unknown inputs poison a join.
+def mir_literal_meet(left: Integer, right: Integer): Integer
+	if left == -2
+		return right
+	end
+	if right == -2 || left == right
+		return left
+	end
+	return -1
+end
+
+def mir_function_string_splits(native_module: MirModule, function: MirFunction, values: Array<MirValue>): Array<MirStringSplit>
+	mut plans: Array<MirStringSplit> := []
+	if function.kind != mir_function_control() || values.size() > 4096 || function.block_count > 256
+		return plans
+	end
+	mut found := false
+	mut block_index := function.block_start
+	while block_index < function.block_start + function.block_count
+		block := native_module.blocks[block_index]
+		mut index := block.instruction_start
+		while index < block.instruction_start + block.instruction_count
+			if native_module.instructions[index].kind == mir_op_string_split()
+				found = true
+			end
+			index += 1
+		end
+		block_index += 1
+	end
+	if !found
+		return plans
+	end
+	flow := mir_build_flow_with_values(native_module, function, mir_flow_blocks(native_module, function), values)
+	mut literals: Hash<String, Integer> := {}
+	values.each do |value|
+		literals[integer_string(value.id)] = -1
+	end
+	block_index = 0
+	while block_index < function.block_count
+		block := native_module.blocks[function.block_start + block_index]
+		if block_index != flow.entry && flow.ranks[block_index] >= 0
+			mut parameter := 0
+			while parameter < block.parameter_count
+				literals[integer_string(native_module.arguments[block.parameter_start + parameter])] = -2
+				parameter += 1
+			end
+		end
+		mut index := block.instruction_start
+		while index < block.instruction_start + block.instruction_count
+			instruction := native_module.instructions[index]
+			if instruction.kind == mir_op_string_literal() || (instruction.kind == mir_op_singleton_literal() && instruction.first == 8)
+				literals[integer_string(instruction.result)] = instruction.payload
+			elsif instruction.kind == mir_op_literal_widen()
+				literals[integer_string(instruction.result)] = -2
+			end
+			index += 1
+		end
+		block_index += 1
+	end
+	mut changed := true
+	mut rounds := 0
+	while changed && rounds <= values.size() * 2
+		changed = false
+		block_index = 0
+		while block_index < function.block_count
+			block := native_module.blocks[function.block_start + block_index]
+			if block_index != flow.entry && flow.ranks[block_index] >= 0
+				mut parameter := 0
+				while parameter < block.parameter_count
+					key := integer_string(native_module.arguments[block.parameter_start + parameter])
+					mut literal := literals[key]
+					flow.incoming_starts[block_index].each do |start|
+						incoming := native_module.arguments[start + parameter]
+						literal = mir_literal_meet(literal, literals[integer_string(incoming)])
+					end
+					if literals[key] != literal
+						literals[key] = literal
+						changed = true
+					end
+					parameter += 1
+				end
+			end
+			mut index := block.instruction_start
+			while index < block.instruction_start + block.instruction_count
+				instruction := native_module.instructions[index]
+				if instruction.kind == mir_op_literal_widen()
+					key := integer_string(instruction.result)
+					literal := mir_literal_meet(literals[key], literals[integer_string(instruction.first)])
+					if literals[key] != literal
+						literals[key] = literal
+						changed = true
+					end
+				end
+				index += 1
+			end
+			block_index += 1
+		end
+		rounds += 1
+	end
+	if changed
+		return plans
+	end
+	mut dynamic_splits: Array<Integer> := []
+	mut static_bytes := 0
+	block_index = function.block_start
+	while block_index < function.block_start + function.block_count
+		block := native_module.blocks[block_index]
+		mut index := block.instruction_start
+		while index < block.instruction_start + block.instruction_count
+			instruction := native_module.instructions[index]
+			if instruction.kind == mir_op_string_split()
+				first := literals[integer_string(instruction.first)]
+				second := literals[integer_string(instruction.second)]
+				if first >= 0 && second >= 0
+					fragments := mir_literal_split_fragments(native_module.literal_texts[first], native_module.literal_texts[second])
+					mut bytes := 0
+					fragments.each do |fragment|
+						# Header, terminator, worst-case alignment and table pointer.
+						bytes += fragment.bytes.size() + 40
+					end
+					if fragments.size() > 0 && static_bytes + bytes <= 16384
+						plans.push(MirStringSplit.new(instruction: index, fragments: fragments, first_field: -1, last_field: -1))
+						static_bytes += bytes
+					end
+				else
+					dynamic_splits.push(index)
+				end
+			end
+			index += 1
+		end
+		block_index += 1
+	end
+	mir_add_observed_split_fields(native_module, function, flow, values, dynamic_splits, plans)
+	return plans
+end
+
+# These generic limits bound compile-time work and immutable data growth.
+# An empty separator remains an ordinary failing operation at its original site.
+# Reference-host bootstrap may lack non-ASCII bytes; that route stays dynamic.
+def mir_literal_split_fragments(source: String, separator: String): Array<MirLiteralData>
+	mut fragments: Array<MirLiteralData> := []
+	if separator.size() == 0 || source.size() > 4096 || separator.size() > 4096
+		return fragments
+	end
+	data := mir_string_literal_data(source)
+	pattern := mir_string_literal_data(separator)
+	if (data.bytes.size() == 0 && data.points > 0) || pattern.bytes.size() == 0 || data.bytes.size() > 4096 || pattern.bytes.size() > 4096
+		return fragments
+	end
+	mut start := 0
+	mut at := 0
+	while at + pattern.bytes.size() <= data.bytes.size()
+		mut matched := true
+		mut offset := 0
+		while offset < pattern.bytes.size()
+			if data.bytes[at + offset] != pattern.bytes[offset]
+				matched = false
+				break
+			end
+			offset += 1
+		end
+		if matched
+			if fragments.size() >= 63
+				return []
+			end
+			fragments.push(mir_literal_fragment(data.bytes, start, at))
+			at += pattern.bytes.size()
+			start = at
+		else
+			at += 1
+		end
+	end
+	fragments.push(mir_literal_fragment(data.bytes, start, data.bytes.size()))
+	return fragments
+end
+
+def mir_string_splits_equal(left: Array<MirStringSplit>, right: Array<MirStringSplit>): Boolean
+	if left.size() != right.size()
+		return false
+	end
+	mut index := 0
+	while index < left.size()
+		a := left[index]
+		b := right[index]
+		if a.instruction != b.instruction || a.fragments.size() != b.fragments.size() || a.first_field != b.first_field || a.last_field != b.last_field
+			return false
+		end
+		mut part := 0
+		while part < a.fragments.size()
+			x := a.fragments[part]
+			y := b.fragments[part]
+			if x.points != y.points || x.bytes.size() != y.bytes.size()
+				return false
+			end
+			mut byte := 0
+			while byte < x.bytes.size()
+				if x.bytes[byte] != y.bytes[byte]
+					return false
+				end
+				byte += 1
+			end
+			part += 1
+		end
+		index += 1
+	end
+	return true
+end
+
+# Count each malformed byte as one replacement point, including byte matches
+# which cut through an otherwise valid sequence. Never decode beyond the piece.
+def mir_literal_utf8_width(bytes: Array<Integer>, start: Integer, finish: Integer): Integer
+	first := bytes[start]
+	if first < 194 || first > 244
+		return 1
+	end
+	mut width := 2
+	if first >= 240
+		width = 4
+	elsif first >= 224
+		width = 3
+	end
+	if width > finish - start
+		return 1
+	end
+	mut offset := 1
+	while offset < width
+		byte := bytes[start + offset]
+		if byte < 128 || byte > 191
+			return 1
+		end
+		offset += 1
+	end
+	second := bytes[start + 1]
+	if (first == 224 && second < 160) || (first == 237 && second >= 160) || (first == 240 && second < 144) || (first == 244 && second >= 144)
+		return 1
+	end
+	return width
+end
+
+def mir_literal_fragment(bytes: Array<Integer>, start: Integer, finish: Integer): MirLiteralData
+	mut result: Array<Integer> := []
+	mut index := start
+	while index < finish
+		result.push(bytes[index])
+		index += 1
+	end
+	mut points := 0
+	index = start
+	while index < finish
+		index += mir_literal_utf8_width(bytes, index, finish)
+		points += 1
+	end
+	return MirLiteralData.new(bytes: result, points: points)
+end

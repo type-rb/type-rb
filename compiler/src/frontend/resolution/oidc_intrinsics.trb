@@ -1,0 +1,51 @@
+import { standard_source_oidc, standard_source_oidc_host } from state/standard_source_kinds
+import { oidc_mutable, oidc_names, oidc_parameter_names, oidc_parameters, oidc_result } from mir/model/oidc_contract
+import { CompilerState } from state/state
+import { load_integer, load_string, sparse_integer_at } from support/storage
+
+# Complete loader identity and declaration shape, not a path/name allowlist.
+def standard_oidc_host(state: CompilerState, function: Integer): Integer
+	if function < 0 || function >= state.declarations.function_count[0]
+		return -1
+	end
+	owner := load_integer(state.declarations.function_modules, function)
+	if sparse_integer_at(state.standard_modules, owner) != standard_source_oidc_host()
+		return -1
+	end
+	names := oidc_names()
+	mut kind := 0
+	while kind < names.size() && names[kind] != load_string(state.declarations.function_names, function)
+		kind += 1
+	end
+	if kind == names.size()
+		return -1
+	end
+	types := oidc_parameters(kind)
+	parameters := oidc_parameter_names(kind)
+	if load_integer(state.declarations.function_parameter_counts, function) != types.size() || load_string(state.declarations.function_result_types, function) != oidc_result(kind) || load_integer(state.declarations.function_body_starts, function) != load_integer(state.declarations.function_body_ends, function) || sparse_integer_at(state.parsed.function_expression_bodies, function) != 0
+		return -1
+	end
+	start := load_integer(state.declarations.function_parameter_starts, function)
+	mut index := 0
+	while index < types.size()
+		parameter := start + index
+		if load_string(state.declarations.parameter_names, parameter) != parameters[index] || load_string(state.declarations.parameter_types, parameter) != types[index] || load_integer(state.declarations.parameter_mutable, parameter) != oidc_mutable(kind, index) || load_integer(state.declarations.parameter_named_only, parameter) != 0 || sparse_integer_at(state.parsed.parameter_defaults, parameter) > 0
+			return -1
+		end
+		index += 1
+	end
+	return kind
+end
+
+# The retained reference evaluator diagnoses the public verifier before any
+# validation or network operation; preserve that boundary, including errors.
+def oidc_verify_function(state: CompilerState, function: Integer): Boolean
+	if function < 0 || function >= state.declarations.function_count[0]
+		return false
+	end
+	owner := load_integer(state.declarations.function_modules, function)
+	if sparse_integer_at(state.standard_modules, owner) == standard_source_oidc()
+		return load_string(state.declarations.function_names, function) == "verify_bearer"
+	end
+	return false
+end

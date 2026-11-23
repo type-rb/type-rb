@@ -1,0 +1,37 @@
+import { has_union_header, union_parts } from frontend/types/union_types
+import { describe, expect, test } from trb/std/test
+
+describe("Union type header and decomposition") do
+	test("preserves character boundaries and permissive internal member spellings") do
+		invalid := ["", "$", "$Union", "$Union<", "$Union<>", "$Union<A", "$Union<A]", "!Union<A>", "$union<A>", "$Union[A>", "$Unión<A>", "$Union名A>"]
+		invalid.each do |name|
+			expect(has_union_header(name)).to_be_false()
+			expect(union_parts(name).size()).to_equal(0)
+		end
+		valid := ["$Union<A>", "$Union<,>", "$Union<名>", "$Union<😀>", "$Union<Array<名>,Hash<String,Integer>>", "$Union<<>", "$Union<A>>", "$Union<A,<B>"]
+		valid.each do |name|
+			expect(has_union_header(name)).to_be_true()
+			expect(union_parts(name).size() > 0).to_be_true()
+		end
+	end
+
+	test("keeps nested alternatives ordered without normalizing their contents") do
+		expect(union_parts("$Union<名,Array<Integer>,Hash<String,Array<名>>>")).to_equal(["名", "Array<Integer>", "Hash<String,Array<名>>"])
+		expect(union_parts("$Union<,>")).to_equal(["", ""])
+		expect(union_parts("$Union<A,<B>")).to_equal(["A", "<B"])
+	end
+
+	test("returns independently mutable empty and populated arrays") do
+		mut empty := union_parts("Integer")
+		other_empty := union_parts("Integer")
+		empty.push("String")
+		expect(other_empty.size()).to_equal(0)
+		name := "$Union<Integer,String>"
+		mut parts := union_parts(name)
+		other_parts := union_parts(name)
+		parts[0] = "Boolean"
+		parts.push("Float")
+		expect(other_parts).to_equal(["Integer", "String"])
+		expect(name).to_equal("$Union<Integer,String>")
+	end
+end

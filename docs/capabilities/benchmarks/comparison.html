@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <meta
+      name="description"
+      content="Explore reproducible TypeRB Native runtime and build benchmark results."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="TypeRB Native Benchmarks" />
+    <meta
+      property="og:description"
+      content="Reproducible runtime, memory, build, and artifact-size evidence for exact experimental workloads."
+    />
+    <meta property="og:url" content="https://type-rb.github.io/type-rb-native/benchmarks/comparison.html" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="TypeRB Native Benchmarks" />
+    <meta
+      name="twitter:description"
+      content="Reproducible runtime, memory, build, and artifact-size evidence for exact experimental workloads."
+    />
+    <title>TypeRB Native Benchmarks</title>
+    <link rel="stylesheet" href="../styles.css" />
+    <link rel="stylesheet" href="./benchmark.css?v=2026-09-03-ff78517" />
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="shell header-inner">
+        <a class="brand" href="../" aria-label="TypeRB Native capability map">
+          <span class="brand-mark" aria-hidden="true">TR</span>
+          <span>TypeRB Native</span>
+          <span class="development">Development</span>
+        </a>
+        <div class="header-actions">
+          <nav class="site-nav" aria-label="Site navigation">
+            <a href="../">Capabilities</a>
+            <a class="active" href="./" aria-current="page">Benchmarks</a>
+          </nav>
+          <span class="snapshot" id="snapshot-date"></span>
+        </div>
+      </div>
+    </header>
+
+    <main class="shell benchmark-layout">
+      <nav aria-label="Benchmark views"><a href="./">Current performance</a> · <a href="trends.html">Trends</a> · <a href="comparison.html" aria-current="page">Detailed comparison</a></nav>
+      <p>This is a dated, complete cross-language snapshot. Its measurement runs only when a specific comparison is needed. <a href="./">See the daily performance page for current status.</a></p>
+      <section class="benchmark-intro">
+        <div>
+          <p class="eyebrow">REPRODUCIBLE MEASUREMENTS</p>
+          <h1>Small binaries. Light memory. Runtime work remains.</h1>
+          <p class="intro-copy">
+            Explore exact Linux arm64 results for three numeric kernels. Every retained
+            observation, toolchain boundary, and source revision remains linked to public evidence.
+            Native now exceeds Pure Go on spectral-norm in the one-core measurements.
+            The other two kernels remain slower. Compare the full results below;
+            these three programs do not establish general language parity.
+          </p>
+          <p class="focused-update">
+            <strong>Included in this snapshot:</strong> assignment recovery and verified
+            Array-header reuse in MIR, including individual loops. Safe loops reuse
+            headers while preserving every element bounds check and evaluation order.
+            All seven implementations are measured afresh at Native revision 8980b597.
+            <a href="https://github.com/type-rb/type-rb-native/blob/04c6ca7263c066fd13e83b3faa09c4e80d707c13/docs/native-mir-local-array-headers.md">Open the optimization and evidence ↗</a>
+          </p>
+          <p class="focused-update">
+            <strong>Regression recovered:</strong> one-core Native n-body is now 7.87414
+            seconds, down from the previous published 26.2869 seconds and below the
+            pre-regression 10.2644 seconds. Fannkuch-redux is now 61.8302 seconds,
+            down from 202.325 and below the pre-regression 77.1176 seconds. These
+            are comparisons across publication dates; controlled local evidence
+            separately identifies the assignment repair and subsequent improvements.
+            <a href="https://github.com/type-rb/type-rb-native/blob/main/results/2026-09-10-benchmarksgame-runtime-loop-local-headers-linux-arm64/README.md">Open the complete comparison ↗</a>
+          </p>
+          <p class="focused-update">
+            <strong>MIR is still a partial migration:</strong> verified scalar leaves,
+            selected Integer/Float Array reductions, and bounded Array-header facts
+            support optimization above QBE. General control flow, allocation,
+            and I/O lowering remain incomplete.
+            <a href="https://github.com/type-rb/type-rb-native/blob/main/docs/native-mir-optimization-status.md">Open current MIR scope ↗</a>
+          </p>
+        </div>
+        <aside class="integrity-card">
+          <span class="integrity-check" aria-hidden="true">✓</span>
+          <div><strong id="integrity-title"></strong><small id="integrity-detail"></small></div>
+        </aside>
+      </section>
+
+      <section class="benchmark-summary" id="benchmark-summary" aria-label="Benchmark summary"></section>
+
+      <section class="result-surface" id="runtime">
+        <div class="surface-heading">
+          <div><p class="eyebrow">FORMAL RUNTIME RESULT</p><h2>Compare runtime medians</h2></div>
+          <a class="evidence-link" id="runtime-result-link" href="#">Open complete result ↗</a>
+        </div>
+        <div class="control-grid" aria-label="Runtime controls">
+          <div><span class="control-label">PROGRAM</span><div class="segmented" id="runtime-cases"></div></div>
+          <div><span class="control-label">CPU LANE</span><div class="segmented" id="runtime-lanes"></div></div>
+          <div><span class="control-label">METRIC</span><div class="segmented" id="runtime-metrics"></div></div>
+        </div>
+        <div class="chart-heading">
+          <div><strong id="runtime-title"></strong><span id="runtime-context"></span></div>
+          <span>Shorter bars are better · medians of 11 retained processes</span>
+        </div>
+        <div class="comparison-chart" id="runtime-chart" aria-live="polite"></div>
+        <details class="exact-data">
+          <summary>Show exact runtime data <span aria-hidden="true">⌄</span></summary>
+          <div class="table-scroll">
+            <table>
+              <thead><tr><th>Candidate</th><th>Wall</th><th>CPU</th><th>Peak RSS</th><th>Samples</th><th>Evidence</th></tr></thead>
+              <tbody id="runtime-table-body"></tbody>
+            </table>
+          </div>
+        </details>
+      </section>
+
+      <section class="result-surface" id="build">
+        <div class="surface-heading">
+          <div><p class="eyebrow">FORMAL BUILD RESULT</p><h2>Compare the identical TypeRB sources</h2></div>
+          <a class="evidence-link" id="build-result-link" href="#">Open complete result ↗</a>
+        </div>
+        <div class="build-toolbar">
+          <p>Native compiler + QBE versus the optimized Go backend path.</p>
+          <div><span class="control-label">METRIC</span><div class="segmented" id="build-metrics"></div></div>
+        </div>
+        <div class="build-grid" id="build-grid"></div>
+      </section>
+
+      <section class="method-grid">
+        <article class="method-card">
+          <p class="eyebrow">MEASUREMENT CONTRACT</p>
+          <h2>Evidence before headlines</h2>
+          <p>Fresh isolated processes, two warmup rounds, eleven retained alternating observations, exact output checks, and independently reproduced medians.</p>
+          <a id="methodology-link" href="#">Read the reproducible benchmark plan ↗</a>
+        </article>
+        <article class="interpretation-note">
+          <strong>Read each result in scope.</strong>
+          <p>These measurements cover exact programs, inputs, host, and toolchains. They do not measure persistent services, package ecosystems, application latency, or developer productivity, and they are not a composite language ranking. Later focused optimization results remain separate until another complete rerun replaces this snapshot.</p>
+        </article>
+      </section>
+
+      <footer>
+        <p>TypeRB Native benchmarks · reproducible experimental evidence</p>
+        <p id="platform-note"></p>
+      </footer>
+    </main>
+    <script type="module" src="./app.js?v=2026-09-10-8980b597"></script>
+  </body>
+</html>

@@ -1,0 +1,174 @@
+import { check, emit_qbe } from compiler
+import { compiler_test_instruction_with_cell } from testing/compiler
+import { control_test_output } from testing/mir/control
+import { logical_checked_source } from testing/pipeline
+import { object_execution_run, object_execution_state } from testing/objects
+import { MirObjectWitness } from frontend/types/object_model
+import { verify_mir } from mir/verify/module
+import { store_string } from support/storage
+import { describe, expect, test } from trb/std/test
+
+def object_dispatch_source(): String
+	return "interface Named\nname(): String\nend\nclass First implements Named\n@text: String\ndef initialize(text: String)\n@text = text + \"!\"\nend\ndef name(): String\nreturn @text\nend\nend\nclass Second implements Named\ndef name(): String\nreturn \"second\"\nend\nend\ndef read(value: Named): String\nreturn value.name()\nend\ndef main()\nitems: Array<Named> := [First.new(\"held\"), Second.new()]\nitems.each { |item| puts(read(item)) }\nend\n"
+end
+
+describe("Object interface dispatch") do
+	test("dispatches distinct implementations and retains managed fields across GC") do
+		mut state := object_execution_state(object_dispatch_source())
+		expect(state.scalar_mir.object_witnesses.size()).to_equal(2)
+		emitted := control_test_output(emit_qbe(state))
+		expect(emitted.include?("$trbn_interface_target_")).to_be_false()
+		expect(emitted.include?("data $trbn_interface_table_0 = align 8 { l $trbnf")).to_be_true()
+		object_execution_run(state, "held!\nsecond\n")
+	end
+
+	test("specializes generic interface methods and explicit implementation arguments") do
+		mut state := object_execution_state("interface Source<T>\nget(): T\nend\nclass Box<T> implements Source<T>\n@value: T\ndef initialize(value: T)\n@value = value\nend\ndef get(): T\nreturn @value\nend\nend\ndef read(value: Source<String>): String\nreturn value.get()\nend\ndef main()\nputs(read(Box<String>.new(\"held\")))\nend\n")
+		object_execution_run(state, "held\n")
+	end
+
+	test("maps reordered named parameters with Float and managed arguments") do
+		mut state := object_execution_state("interface Format\nshow(number: Integer, *, left: String, scale: Float): String\nend\nclass Text implements Format\ndef show(mut value: Integer, *, scale: Float, left: String): String\nvalue += 1\nputs(value)\nputs(scale)\nreturn left + \"!\"\nend\nend\ndef main()\nvalue: Format := Text.new()\nputs(value.show(4, scale: 2.5, left: \"named\"))\nend\n")
+		emitted := control_test_output(emit_qbe(state))
+		expect(emitted.include?("function l $trbn_interface_target_0_0")).to_be_true()
+		expect(emitted.include?("d %p3, l %p2)")).to_be_true()
+		object_execution_run(state, "5\n2.5\nnamed!\n")
+	end
+
+	test("preserves Boolean and Float return ABI for identity witnesses") do
+		mut state := object_execution_state("interface Probe\nready(): Boolean\nratio(): Float\nend\nclass Reading implements Probe\n@ready: Boolean := true\n@ratio: Float := 2.5\ndef ready(): Boolean\nreturn @ready\nend\ndef ratio(): Float\nreturn @ratio\nend\nend\ndef main()\nvalue: Probe := Reading.new()\nputs(value.ready())\nputs(value.ratio())\nend\n")
+		emitted := control_test_output(emit_qbe(state))
+		expect(emitted.include?("$trbn_interface_target_")).to_be_false()
+		object_execution_run(state, "true\n2.5\n")
+	end
+
+	test("inherits field-free methods and interface declarations across two parents") do
+		mut state := object_execution_state("interface Named\nname(): String\nend\nclass Base implements Named\ndef name(): String\nreturn \"base\"\nend\ndef self.number(): Integer\nreturn 7\nend\nend\nclass Middle < Base\nend\nclass Child < Middle\nend\ndef read(value: Named): String\nreturn value.name()\nend\ndef main()\nputs(Child.new().name())\nputs(read(Child.new()))\nputs(Child.number())\nend\n")
+		object_execution_run(state, "base\nbase\n7\n")
+	end
+
+	test("supports nullable conversions return values containers and captures") do
+		mut state := object_execution_state("interface Named\nname(): String\nend\nclass Label implements Named\n@text: String := \"saved\"\ndef name(): String\nreturn @text\nend\nend\ndef selected(): Named?\nreturn Label.new()\nend\ndef main()\nvalue := selected()\nif value != nil\nreader := fn(): String; return value.name(); end\nputs(reader())\nend\nmut values: Hash<String, Named> := {}\nvalues[\"a\"] = Label.new()\nputs(values[\"a\"].name())\nend\n")
+		object_execution_run(state, "saved\nsaved\n")
+	end
+
+	test("rejects missing incompatible implicit and invariant implementations") do
+		[
+			"interface Named\nname(): String\nend\nclass Wrong implements Named\nend\n",
+			"interface Named\nname(): String\nend\nclass Wrong implements Named\ndef name(): Integer\nreturn 1\nend\nend\n",
+			"interface Named\nname(): String\nend\nclass Wrong\ndef name(): String\nreturn \"x\"\nend\nend\ndef main()\nvalue: Named := Wrong.new()\nend\n",
+			"interface Named\nname(): String\nend\nclass Label implements Named\ndef name(): String\nreturn \"x\"\nend\nend\ndef main()\nvalues := [Label.new()]\ncontracts: Array<Named> := values\nend\n",
+			"interface Named\nname(*, left: Integer): String\nend\nclass Wrong implements Named\ndef name(*, right: Integer): String\nreturn \"x\"\nend\nend\n",
+			"interface Named\nname(value: Integer): String\nend\nclass Wrong implements Named\ndef name(value: Integer = 1): String\nreturn \"x\"\nend\nend\n",
+		].each do |source|
+			mut program := source
+			if !source.include?("def main()")
+				program += "def main()\nend\n"
+			end
+			mut state := logical_checked_source(program)
+			expect(check(state)).to_be_false()
+		end
+	end
+
+	test("keeps unresolved superclass initialization and overrides guarded") do
+		[
+			"class Base\n@value: Integer := 1\nend\nclass Child < Base\nend\n",
+			"class Base\ndef initialize()\nputs(1)\nend\nend\nclass Child < Base\nend\n",
+			"class Base\ndef value(): Integer\nreturn 1\nend\nend\nclass Child < Base\ndef value(): Integer\nreturn 2\nend\nend\n",
+		].each do |source|
+			mut program := source
+			if !source.include?("def main()")
+				program += "def main()\nend\n"
+			end
+			mut state := logical_checked_source(program)
+			expect(check(state)).to_be_false()
+		end
+	end
+
+	test("rejects forged conversion identity operand and result shapes") do
+		mut cell := 0
+		while cell < 6
+			mut state := object_execution_state(object_dispatch_source())
+			mut index := 0
+			while state.scalar_mir.instructions[index].kind != 66
+				index += 1
+			end
+			state.scalar_mir.instructions[index] = compiler_test_instruction_with_cell(state.scalar_mir.instructions[index], cell, 99999)
+			expect(verify_mir(state.scalar_mir, true).empty?()).to_be_false()
+			cell += 1
+		end
+	end
+
+	test("rejects witness ownership targets and argument permutations") do
+		mut corruption := 0
+		while corruption < 6
+			mut state := object_execution_state(object_dispatch_source())
+			witness := state.scalar_mir.object_witnesses[0]
+			mut owner := witness.owner
+			mut contract := witness.contract
+			mut methods := witness.methods
+			mut arguments := witness.arguments
+			if corruption == 0
+				owner = contract
+			elsif corruption == 1
+				contract = owner
+			elsif corruption == 2
+				methods = [99999]
+			elsif corruption == 3
+				methods = state.scalar_mir.object_witnesses[1].methods
+			elsif corruption == 4
+				arguments = [[1]]
+			else
+				methods = []
+				arguments = []
+			end
+			state.scalar_mir.object_witnesses[0] = MirObjectWitness.new(owner: owner, contract: contract, methods: methods, arguments: arguments)
+			expect(verify_mir(state.scalar_mir, true).empty?()).to_be_false()
+			corruption += 1
+		end
+	end
+
+	test("emits dispatch exclusively from MIR after source catalogs are erased") do
+		mut state := object_execution_state(object_dispatch_source())
+		mut origin := 0
+		while origin < state.source_tokens.token_count[0]
+			store_string(state.source_tokens.token_texts, origin, "erased")
+			origin += 1
+		end
+		while state.nominal.objects.size() > 0
+			state.nominal.objects.pop()
+		end
+		while state.nominal.object_instances.size() > 0
+			state.nominal.object_instances.pop()
+		end
+		while state.type_resolution.generic_functions.size() > 0
+			state.type_resolution.generic_functions.pop()
+		end
+		while state.type_resolution.generic_function_instances.size() > 0
+			state.type_resolution.generic_function_instances.pop()
+		end
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		object_execution_run(state, "held!\nsecond\n")
+	end
+	test("uses declaring visibility for inherited private self calls") do
+		mut state := object_execution_state("class Base\ndef _part(): String\nreturn \"base\"\nend\ndef name(): String\nreturn self._part()\nend\nend\nclass Child < Base\nend\ndef main()\nputs(Child.new().name())\nend\n")
+		object_execution_run(state, "base\n")
+	end
+
+	test("keeps private self fields distinct from public fields") do
+		mut state := object_execution_state("class Value\n@value: String := \"public\"\n@_value: String := \"private\"\ndef text(): String\nreturn self._value + self.value\nend\nend\ndef main()\nputs(Value.new().text())\nend\n")
+		object_execution_run(state, "privatepublic\n")
+	end
+
+	test("shares object identity through multiple interfaces and Void methods") do
+		mut state := object_execution_state("interface Named\nname(): String\nend\ninterface Writable\nreplace(value: String)\nend\ninterface Empty\nend\nclass Label implements Named, Writable, Named, Empty\n@text: String := \"first\"\ndef name(): String\nreturn @text\nend\ndef replace(value: String)\n@text = value + \"!\"\nend\nend\ndef main()\nvalue := Label.new()\nread: Named := value\nwrite: Writable := value\n_empty: Empty := value\nwrite.replace(\"updated\")\nputs(read.name())\nend\n")
+		expect(state.scalar_mir.object_witnesses.size()).to_equal(3)
+		object_execution_run(state, "updated!\n")
+	end
+
+	test("checks unused generic interface implementations") do
+		mut state := logical_checked_source("interface Source<T>\nget(): T\nend\nclass Wrong<T> implements Source<Integer>\n@value: T\ndef initialize(value: T)\n@value = value\nend\ndef get(): T\nreturn @value\nend\nend\ndef main()\nend\n")
+		expect(check(state)).to_be_false()
+	end
+
+end

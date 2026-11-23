@@ -1,0 +1,189 @@
+import { emit_qbe } from compiler
+import { CompilerState } from state/state
+import { optimize_verified_mir } from mir/passes/optimize
+import { mir_array_version_count } from mir/passes/array_loop_versions
+import { mir_array_guard_fallbacks } from mir/analysis/array_bounds
+import { mir_build_flow, mir_flow_block_index, mir_flow_blocks } from mir/analysis/flow
+import { mir_natural_loop } from mir/analysis/loops
+import { mir_managed_contains } from mir/analysis/liveness
+import { verify_mir } from mir/verify/module
+import { array_loop_mir_check } from testing/mir/array_loops
+import { control_test_output } from testing/mir/control
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { logical_run_qbe } from testing/qbe_runner
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+def versioned_array_access_count(state: CompilerState): Integer
+	mut count := 0
+	state.scalar_mir.array_loops.each do |plans|
+		plans.each do |plan|
+			plan.headers.each do |header|
+				count += header.bounded_accesses.size()
+			end
+		end
+	end
+	return count
+end
+
+def versioned_array_run(output: String, expected: String)
+	qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+	if qbe != nil
+		case logical_run_qbe(qbe, output)
+		when Result::Ok(actual)
+			expect(actual).to_equal(expected)
+		when Result::Err(error)
+			puts(error)
+			expect(false).to_be_true()
+		end
+	end
+end
+
+def versioned_array_guard_depth(state: CompilerState): Integer
+	function := state.scalar_mir.functions[0]
+	flow := mir_build_flow(state.scalar_mir, function, mir_flow_blocks(state.scalar_mir, function))
+	fallbacks := mir_array_guard_fallbacks(state.scalar_mir, function, flow)
+	mut depth := 0
+	mut guard := 0
+	while guard < function.block_count
+		block := state.scalar_mir.blocks[function.block_start + guard]
+		if block.second_target >= 0 && mir_managed_contains(fallbacks, mir_flow_block_index(flow, block.second_target))
+			mut header := 0
+			while header < function.block_count
+				loop := mir_natural_loop(state.scalar_mir, function, flow, header)
+				if loop.preheader >= 0 && mir_managed_contains(loop.members, guard)
+					depth += 1
+				end
+				header += 1
+			end
+		end
+		guard += 1
+	end
+	return depth
+end
+
+describe("MIR Array loop versioning") do
+	test("selects stable peer guards before repeated nested loops") do
+		body := "mut index := 0\nwhile index < left.size()\nright[index] += left[index]\nindex += 1\nend\nindex = 0\nwhile index < left.size()\nright[index] += left[index]\nindex += 1\nend\n"
+		mut state := array_loop_mir_check("def repeat(left: Array<Integer>, mut right: Array<Integer>, rounds: Integer): Integer\nmut round := 0\nwhile round < rounds\n" + body + "round += 1\nend\nreturn right[0]\nend\ndef main()\nputs(repeat([2, 3], [10, 20], 3))\nputs(repeat([2], [10], 0))\nputs(repeat([2], [10], -2))\nmut values := [2, 3]\nputs(repeat(values, values, 2))\nend\n")
+		expect(mir_array_version_count(state.scalar_mir, state.scalar_mir.functions[0])).to_equal(1)
+		expect(versioned_array_guard_depth(state)).to_equal(0)
+		before := control_test_output(emit_qbe(state))
+		intrinsic_mir_erase(state)
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+		versioned_array_run(before, "22\n10\n10\n32\n")
+	end
+
+	test("keeps guards inside outer loops that resize or observe the arrays") do
+		["right.push(0)", "puts(round)"].each do |operation|
+			state := array_loop_mir_check("def repeat(left: Array<Integer>, mut right: Array<Integer>, rounds: Integer): Integer\nmut round := 0\nwhile round < rounds\n" + operation + "\nmut index := 0\nwhile index < left.size()\nright[index] += left[index]\nindex += 1\nend\nround += 1\nend\nreturn right.size()\nend\ndef main()\nend\n")
+			expect(mir_array_version_count(state.scalar_mir, state.scalar_mir.functions[0])).to_equal(1)
+			expect(versioned_array_guard_depth(state) > 0).to_be_true()
+		end
+	end
+
+	test("retains an inner scalar bound that changes on each outer visit") do
+		state := array_loop_mir_check("def repeat(mut values: Array<Integer>, rounds: Integer): Integer\nmut round := 0\nwhile round < rounds\nlimit := round + 1\nmut index := 0\nwhile index < limit\nvalues[index] += 1\nindex += 1\nend\nround += 1\nend\nreturn values[0]\nend\ndef main()\nputs(repeat([0, 0], 2))\nend\n")
+		expect(versioned_array_guard_depth(state) > 0).to_be_true()
+		versioned_array_run(control_test_output(emit_qbe(state)), "2\n")
+	end
+
+	test("retains short-array failure after a lifted guard and zero-trip safety") do
+		source := "def repeat(left: Array<Integer>, mut right: Array<Integer>, rounds: Integer)\nmut round := 0\nwhile round < rounds\nmut index := 0\nwhile index < left.size()\nright[index] = left[index]\nindex += 1\nend\nround += 1\nend\nend\n"
+		state := array_loop_mir_check(source + "def main()\nrepeat([10, 20], [0], 0)\nrepeat([10, 20], [0], 1)\nend\n")
+		expect(versioned_array_guard_depth(state)).to_equal(0)
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, control_test_output(emit_qbe(state)), 2)
+			when Result::Ok(_actual)
+				expect(false).to_be_true()
+			when Result::Err(error)
+				expect(error).to_equal("panic: index is out of bounds\n")
+			end
+		end
+	end
+
+	test("versions an independent loop after earlier guard arms rejoin") do
+		mut state := array_loop_mir_check("def update(left: Array<Integer>, mut right: Array<Integer>): Integer\nmut index := 0\nwhile index < left.size()\nright[index] += left[index]\nindex += 1\nend\nindex = 0\nwhile index < left.size()\nright[index] += left[index]\nindex += 1\nend\nreturn right[0]\nend\ndef main()\nputs(update([2, 3], [10, 20]))\nputs(update([], [7]))\nend\n")
+		expect(mir_array_version_count(state.scalar_mir, state.scalar_mir.functions[0])).to_equal(2)
+		before := control_test_output(emit_qbe(state))
+		count := state.scalar_mir.blocks.size()
+		intrinsic_mir_erase(state)
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(state.scalar_mir.blocks.size()).to_equal(count)
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+		versioned_array_run(before, "14\n7\n")
+	end
+
+	test("guards scalar bounds once and retains zero negative and short-array paths") do
+		mut state := array_loop_mir_check("def sum(values: Array<Integer>, limit: Integer): Integer\nmut total := 0\nmut index := 0\nwhile index < limit\nif index == 2\nbreak\nend\ntotal += values[index]\nindex += 1\nend\nreturn total\nend\ndef main()\nputs(sum([10, 20, 30], 3))\nputs(sum([10, 20], 4))\nputs(sum([], 0))\nputs(sum([], -1))\nend\n")
+		expect(versioned_array_access_count(state) > 0).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		before := control_test_output(emit_qbe(state))
+		count := state.scalar_mir.blocks.size()
+		intrinsic_mir_erase(state)
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(state.scalar_mir.blocks.size()).to_equal(count)
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+		versioned_array_run(before, "30\n30\n0\n0\n")
+	end
+
+	test("guards peer lengths and preserves nested induction and mutable elements") do
+		mut state := array_loop_mir_check("def update(left: Array<Integer>, mut right: Array<Integer>): Integer\nmut index := 0\nwhile index < left.size()\nmut other := index + 1\nwhile other < left.size()\nright[other] += left[index]\nother += 1\nend\nright[index] += left[index]\nindex += 1\nend\nreturn right[2]\nend\ndef main()\nputs(update([2, 3, 5], [10, 20, 30]))\nend\n")
+		expect(versioned_array_access_count(state) > 0).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		output := control_test_output(emit_qbe(state))
+		intrinsic_mir_erase(state)
+		# Reordering physical SSA rows must not change alias or value ownership.
+		mut first := 0
+		mut last := state.scalar_mir.values.size() - 1
+		while first < last
+			saved := state.scalar_mir.values[first]
+			state.scalar_mir.values[first] = state.scalar_mir.values[last]
+			state.scalar_mir.values[last] = saved
+			first += 1
+			last -= 1
+		end
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(control_test_output(emit_qbe(state))).to_equal(output)
+		versioned_array_run(output, "40\n")
+	end
+
+	test("keeps failures at their original access after preceding observable work") do
+		state := array_loop_mir_check("def update(left: Array<Integer>, mut right: Array<Integer>)\nmut index := 0\nwhile index < left.size()\nright[index] = left[index]\nindex += 1\nend\nend\ndef main()\nupdate([10, 20], [0])\nend\n")
+		expect(versioned_array_access_count(state) > 0).to_be_true()
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, control_test_output(emit_qbe(state)), 2)
+			when Result::Ok(_actual)
+				expect(false).to_be_true()
+			when Result::Err(error)
+				expect(error).to_equal("panic: index is out of bounds\n")
+			end
+		end
+	end
+
+	test("keeps the version budget across repeated optimization") do
+		body := "index = 0\nwhile index < limit\ntotal += values[index]\nindex += 1\nend\n"
+		mut state := array_loop_mir_check("def sum(values: Array<Integer>, limit: Integer): Integer\nmut total := 0\nmut index := 0\n" + body + body + body + body + "\nreturn total\nend\ndef main()\nputs(sum([10, 20], 2))\nend\n")
+		expect(mir_array_version_count(state.scalar_mir, state.scalar_mir.functions[0])).to_equal(3)
+		count := state.scalar_mir.blocks.size()
+		optimize_verified_mir(state.scalar_mir)
+		expect(state.scalar_mir.blocks.size()).to_equal(count)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		versioned_array_run(control_test_output(emit_qbe(state)), "120\n")
+	end
+
+	test("rejects resizing and allocating operations inside a candidate loop") do
+		["values.pop()", "touch(values)"].each do |operation|
+			state := array_loop_mir_check("def touch(mut values: Array<Integer>)\nvalues.push(1)\nend\ndef sum(mut values: Array<Integer>, limit: Integer): Integer\nmut total := 0\nmut index := 0\nwhile index < limit\n" + operation + "\ntotal += values[index]\nindex += 1\nend\nreturn total\nend\ndef main()\nend\n")
+			expect(versioned_array_access_count(state)).to_equal(0)
+		end
+	end
+end

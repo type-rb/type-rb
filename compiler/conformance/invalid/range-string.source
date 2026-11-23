@@ -1,0 +1,3 @@
+def main()
+span := "a".."z"
+end

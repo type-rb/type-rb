@@ -1,0 +1,81 @@
+import { discover_web_routes } from project/web_routes
+import { repl_order_projected_globals, repl_project_binding_order } from repl/projection
+import { skip_newlines } from frontend/syntax/syntax_tokens
+import { ReplProject, repl_project_source } from repl/project
+import { CompilerState, has_diagnostic, select_checked_body } from state/state
+import { CheckedFlowFact, CheckedPresentation, CheckedSubmission, ProjectedType } from state/source_state
+import { resolve_with_projected_types } from frontend/checking/program/resolution
+import { find_function_in_module } from frontend/resolution/declaration_lookup
+import { check, load_configured_repl, load_file_root_with_mode } from compiler
+import { path_join } from support/path
+import { sparse_integer_at, load_integer, store_integer, string_storage, integer_storage } from support/storage
+
+# Checking remains shared with ordinary compilation. The projection is attached
+# only to the synthetic entry body at explicit source boundaries.
+def repl_checked(source: String, project: ReplProject): CompilerState
+	return repl_checked_input(source, project, -1, -1, [], [])
+end
+
+def repl_checked_input(source: String, project: ReplProject, start_line: Integer, finish_line: Integer, facts: Array<CheckedFlowFact>, reset_lines: Array<Integer>, captured: Array<String> = [], projected_start: Integer = -1, projected_finish: Integer = -1, inputs: Array<String> = [], active_order: Integer = 0, presentations: Array<CheckedPresentation> = [], projected_types: Array<ProjectedType> = []): CompilerState
+	mut state := load_file_root_with_mode(repl_project_source(source, project.imports), path_join(project.root, "__repl__.trb"), true)
+	if project.configuration != ""
+		state = load_configured_repl(project.configuration, repl_project_source(source, project.imports))
+	end
+	if project.configured && project.configuration == "" && !has_diagnostic(state)
+		mut owners: Array<Integer> := []
+		mut module_index := 0
+		while module_index < state.module_graph.module_count[0]
+			mut owner := 0
+			if sparse_integer_at(state.standard_modules, module_index) == 0
+				owner = -1
+			end
+			owners.push(owner)
+			module_index += 1
+		end
+		discover_web_routes(state, owners)
+	end
+	state.nominal.projected_type_lines[0] = projected_start
+	state.nominal.projected_type_lines[1] = projected_finish
+	if !has_diagnostic(state)
+		repl_project_binding_order(state, project.imports, inputs, projected_start, projected_finish, start_line, finish_line, active_order)
+		resolve_with_projected_types(state, projected_types)
+		repl_order_projected_globals(state, projected_start, projected_finish)
+	end
+	# A REPL import is an intentional session declaration; it need not be used
+	# by the same submission that introduced it.
+	mut index := 0
+	while index < state.module_graph.import_count[0]
+		store_integer(state.module_graph.import_used, index, 1)
+		index += 1
+	end
+	if !has_diagnostic(state) && start_line >= 0
+		main := find_function_in_module(state, state.module_graph.entry_module[0], "main")
+		mut start := [load_integer(state.declarations.function_body_starts, main)]
+		while load_integer(state.source_tokens.token_lines, start[0]) < start_line
+			start[0] += 1
+		end
+		skip_newlines(state, start)
+		mut finish := start[0]
+		while load_integer(state.source_tokens.token_lines, finish) < finish_line
+			finish += 1
+		end
+		mut resets: Array<Integer> := []
+		reset_lines.each do |line|
+			mut position := [load_integer(state.declarations.function_body_starts, main)]
+			while load_integer(state.source_tokens.token_lines, position[0]) < line
+				position[0] += 1
+			end
+			skip_newlines(state, position)
+			resets.push(position[0])
+		end
+		state.submissions.push(CheckedSubmission.new(presentations: string_storage(state.source_tokens.token_count[0] + 1), retained_presentations: presentations, start: start[0], finish: finish, before: facts, after: [], types: string_storage(state.source_tokens.token_count[0] + 1), mutable: integer_storage(state.source_tokens.token_count[0] + 1), resets: resets, captured: captured))
+	end
+	if !has_diagnostic(state)
+		check(state)
+	end
+
+	if !has_diagnostic(state)
+		select_checked_body(state, find_function_in_module(state, state.module_graph.entry_module[0], "main"))
+	end
+	return state
+end

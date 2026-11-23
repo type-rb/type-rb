@@ -1,0 +1,27 @@
+def scan(values: Array<Integer>): Integer
+	mut first: Array<Integer> := []
+	mut second: Array<Integer> := []
+	mut index := 0
+	mut total := 0
+	while index < values.size()
+		first.push(values[index])
+		second.push(values[index] + 1)
+		total += values[index]
+		index += 1
+	end
+	puts(first.size())
+	puts(second[-1])
+	return total
+end
+
+def main()
+	mut values: Array<Integer> := []
+	mut index := 0
+	while index < 1025
+		values.push(index)
+		index += 1
+	end
+	puts(scan(values))
+	puts(values.size())
+	puts(values[1024])
+end

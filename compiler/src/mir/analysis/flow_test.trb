@@ -1,0 +1,220 @@
+import { MirFunction, MirValue, mir_failure_error } from mir/model/module
+import { mir_build_flow, mir_flow_alias, mir_flow_aliases, mir_flow_block_index, mir_flow_blocks, mir_flow_graph_error, mir_flow_order, mir_flow_position, mir_flow_type, mir_value_available } from mir/analysis/flow
+import { mir_test_block_with_cell, mir_test_instruction_with_cell, mir_test_module } from testing/mir/model
+import { verify_mir } from mir/verify/module
+import { describe, expect, test } from trb/std/test
+import { flow_test_module, flow_test_reachable } from testing/mir/flow
+
+describe("MIR traversal order") do
+	test("preserves single-node and odd-length traversal orders") do
+		single: Array<Array<Integer>> := [[]]
+		expect(mir_flow_order(0, single)).to_equal([0])
+		expect(single).to_equal([[]])
+		chain: Array<Array<Integer>> := [[1], [2], []]
+		expect(mir_flow_order(0, chain)).to_equal([0, 1, 2])
+		expect(chain).to_equal([[1], [2], []])
+	end
+
+	test("preserves even-length cyclic traversal from a nonzero entry") do
+		edges: Array<Array<Integer>> := [[1], [2], [3], [0]]
+		expect(mir_flow_order(2, edges)).to_equal([2, 3, 0, 1])
+		expect(edges).to_equal([[1], [2], [3], [0]])
+	end
+
+	test("preserves branch order while excluding unreachable blocks") do
+		edges: Array<Array<Integer>> := [[1, 2], [3], [3], [], [4]]
+		expect(mir_flow_order(0, edges)).to_equal([0, 2, 1, 3])
+		expect(edges).to_equal([[1, 2], [3], [3], [], [4]])
+	end
+end
+
+# Independent oracle: a block dominates a reachable consumer iff deleting that
+# block makes the consumer unreachable. This does not use immediate dominators.
+
+describe("MIR control-flow dominance") do
+	test("indexes compact block identities with a base and retains sparse fallback") do
+		mut native_module := flow_test_module([[1], [], []])
+		function := native_module.functions[0]
+		mut flow := mir_build_flow(native_module, function, mir_flow_blocks(native_module, function))
+		expect(flow.dense_block_base).to_equal(100)
+		expect(flow.dense_blocks.size()).to_equal(3)
+		expect(mir_flow_block_index(flow, 102)).to_equal(2)
+		native_module.blocks[2] = mir_test_block_with_cell(native_module.blocks[2], 0, 9007199254740991)
+		flow = mir_build_flow(native_module, function, mir_flow_blocks(native_module, function))
+		expect(flow.dense_blocks.size()).to_equal(0)
+		expect(mir_flow_block_index(flow, 9007199254740991)).to_equal(2)
+	end
+
+	test("matches node-removal reachability on all three-block graphs with at most two successors") do
+		mut mask := 0
+		mut checked := 0
+		while mask < 512
+			mut bits := mask
+			mut edges: Array<Array<Integer>> := []
+			mut valid := true
+			mut row := 0
+			while row < 3
+				mut targets: Array<Integer> := []
+				mut column := 0
+				while column < 3
+					if bits % 2 == 1
+						targets.push(column)
+					end
+					bits /= 2
+					column += 1
+				end
+				if targets.size() > 2
+					valid = false
+				end
+				edges.push(targets)
+				row += 1
+			end
+			if valid
+				checked += 1
+				native_module := flow_test_module(edges)
+				expect(verify_mir(native_module, false)).to_equal("")
+				function := native_module.functions[0]
+				blocks := mir_flow_blocks(native_module, function)
+				expect(mir_flow_graph_error(native_module, function, blocks)).to_equal("")
+				flow := mir_build_flow(native_module, function, blocks)
+				reachable := flow_test_reachable(-1, edges)
+				mut owner := 0
+				while owner < 3
+					without := flow_test_reachable(owner, edges)
+					mut consumer := 0
+					while consumer < 3
+						mut expected := owner == consumer
+						if reachable[consumer] == 1 && without[consumer] == 0
+							expected = true
+						end
+						expect(mir_value_available(flow, native_module.blocks[consumer], consumer + 1, 9007199254740980 + owner)).to_equal(expected)
+						consumer += 1
+					end
+					owner += 1
+				end
+			end
+			mask += 1
+		end
+		expect(checked).to_equal(343)
+	end
+
+	test("preserves both incoming branch arms and their alias disagreement after reordering") do
+		[false, true].each do |same|
+			mut native_module := flow_test_module([[1, 1], [], []])
+			native_module.functions[0] = MirFunction.new(kind: 0, result_type: "Void", integer_guard: 0, id: 7, entry_block: 100, source_id: 0, line: 1, parameter_start: 0, parameter_count: 3, block_start: 0, block_count: 3)
+			[1, 2, 3].each do |id|
+				native_module.values.push(MirValue.new(function_id: 7, id: id, type_id: 1, source_id: 0, line: 1))
+			end
+			[1, 2, 3, 1, 2].each do |value|
+				native_module.arguments.push(value)
+			end
+			if same
+				native_module.arguments[5] = 1
+			end
+			native_module.blocks[0] = mir_test_block_with_cell(native_module.blocks[0], 11, 4)
+			native_module.blocks[0] = mir_test_block_with_cell(native_module.blocks[0], 12, 1)
+			native_module.blocks[0] = mir_test_block_with_cell(native_module.blocks[0], 13, 5)
+			native_module.blocks[0] = mir_test_block_with_cell(native_module.blocks[0], 14, 1)
+			native_module.blocks[1] = mir_test_block_with_cell(native_module.blocks[1], 3, 3)
+			native_module.blocks[1] = mir_test_block_with_cell(native_module.blocks[1], 4, 1)
+			[0, 2].each do |predecessor|
+				expect(verify_mir(native_module, false)).to_equal("")
+				function := native_module.functions[0]
+				flow := mir_build_flow(native_module, function, mir_flow_blocks(native_module, function))
+				expect(flow.predecessors[1]).to_equal([predecessor, predecessor])
+				expect(flow.incoming_starts[1]).to_equal([4, 5])
+				mut expected := -1
+				if same
+					expected = 1
+				end
+				aliases := mir_flow_aliases(native_module, function, flow, native_module.blocks[2 - predecessor])
+				expect(mir_flow_alias(aliases, 3)).to_equal(expected)
+				saved := native_module.blocks[0]
+				native_module.blocks[0] = native_module.blocks[2]
+				native_module.blocks[2] = saved
+			end
+		end
+	end
+
+	test("rejects use before definition, unknown values and unreachable cross-block uses") do
+		native_module := flow_test_module([[1], [], [2]])
+		function := native_module.functions[0]
+		flow := mir_build_flow(native_module, function, mir_flow_blocks(native_module, function))
+		expect(mir_value_available(flow, native_module.blocks[0], 0, 9007199254740980)).to_be_false()
+		expect(mir_value_available(flow, native_module.blocks[1], 2, 9007199254740991)).to_be_false()
+		expect(mir_value_available(flow, native_module.blocks[2], 3, 9007199254740980)).to_be_false()
+		expect(mir_value_available(flow, native_module.blocks[2], 3, 0)).to_be_true()
+	end
+
+	test("validates graph identities before constructing dominance") do
+		mut native_module := flow_test_module([[1], [], [2]])
+		native_module.blocks[0] = mir_test_block_with_cell(native_module.blocks[0], 9, 9007199254740991)
+		expect(verify_mir(native_module, false)).to_equal("MIR terminator target does not exist")
+		native_module.blocks[0] = mir_test_block_with_cell(native_module.blocks[0], 0, 101)
+		expect(verify_mir(native_module, false)).to_equal("MIR function entry block does not exist")
+	end
+
+	test("rejects branch-only values in return and edge operands") do
+		mut returned := flow_test_module([[1, 2], [3], [3], []])
+		returned.blocks[3] = mir_test_block_with_cell(returned.blocks[3], 15, 9007199254740981)
+		expect(verify_mir(returned, false)).to_equal("MIR return value is undefined")
+		mut edged := flow_test_module([[1, 2], [3], [3], []])
+		edged.values.push(MirValue.new(function_id: 7, id: 4, type_id: 1, source_id: 0, line: 1))
+		edged.arguments.push(4)
+		edged.arguments.push(9007199254740981)
+		edged.blocks[3] = mir_test_block_with_cell(edged.blocks[3], 3, 1)
+		edged.blocks[3] = mir_test_block_with_cell(edged.blocks[3], 4, 1)
+		[1, 2].each do |index|
+			edged.blocks[index] = mir_test_block_with_cell(edged.blocks[index], 11, 2)
+			edged.blocks[index] = mir_test_block_with_cell(edged.blocks[index], 12, 1)
+		end
+		expect(verify_mir(edged, false)).to_equal("MIR block argument is undefined")
+	end
+
+	test("keeps instruction failure edges terminal and free of value uses") do
+		mut native_module := mir_test_module(false, false)
+		native_module.blocks[3] = mir_test_block_with_cell(native_module.blocks[3], 6, 1)
+		expect(mir_failure_error(native_module, native_module.functions[0], 13)).to_equal("MIR failure target must be an empty trap")
+	end
+end
+
+describe("Native MIR model and verifier") do
+	test("indexes dense value types directly and sparse identities through Hash") do
+		mut native_module := mir_test_module(false, false)
+		function := native_module.functions[0]
+		mut flow := mir_build_flow(native_module, function, mir_flow_blocks(native_module, function))
+		expect(flow.dense_types.size()).to_equal(9)
+		expect(flow.dense_definitions.size()).to_equal(9)
+		expect(flow.definitions.size()).to_equal(0)
+		expect(flow.types.size()).to_equal(0)
+		expect(mir_flow_type(flow, 6)).to_equal(4)
+		expect(mir_flow_type(flow, 9)).to_equal(0)
+		expect(mir_flow_position(flow, 1)).to_equal(0)
+		expect(mir_flow_position(flow, 9)).to_equal(-1)
+		expect(mir_value_available(flow, native_module.blocks[0], 0, 1)).to_be_false()
+		expect(mir_value_available(flow, native_module.blocks[0], 1, 1)).to_be_true()
+		expect(mir_value_available(flow, native_module.blocks[0], 1, 0)).to_be_true()
+		expect(mir_value_available(flow, native_module.blocks[0], 1, 9)).to_be_false()
+		native_module.values[8] = MirValue.new(function_id: 1, id: 9007199254740991, type_id: 2, source_id: 0, line: 4)
+		flow = mir_build_flow(native_module, function, mir_flow_blocks(native_module, function))
+		expect(flow.dense_types.size()).to_equal(0)
+		expect(flow.dense_definitions.size()).to_equal(0)
+		expect(flow.definitions.size()).to_equal(9)
+		expect(flow.types.size()).to_equal(9)
+		expect(mir_flow_type(flow, 9007199254740991)).to_equal(2)
+		expect(mir_flow_type(flow, 8)).to_equal(0)
+		expect(mir_flow_position(flow, 1)).to_equal(0)
+		expect(mir_value_available(flow, native_module.blocks[0], 1, 1)).to_be_true()
+	end
+
+	test("keeps malformed out-of-range result identities in the sparse fallback") do
+		mut native_module := mir_test_module(false, false)
+		function := native_module.functions[0]
+		native_module.instructions[5] = mir_test_instruction_with_cell(native_module.instructions[5], 1, 999)
+		flow := mir_build_flow(native_module, function, mir_flow_blocks(native_module, function))
+		expect(flow.dense_definitions.size()).to_equal(9)
+		expect(flow.definitions.size()).to_equal(1)
+		expect(mir_flow_position(flow, 999)).to_equal(5)
+		expect(mir_value_available(flow, native_module.blocks[2], 6, 999)).to_be_true()
+	end
+end

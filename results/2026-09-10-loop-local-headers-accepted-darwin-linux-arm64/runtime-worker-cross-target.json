@@ -1,0 +1,13 @@
+{
+  "workflow": "https://github.com/type-rb/type-rb-native/actions/runs/34423530952",
+  "sourceRevision": "b230d34c1a415eab9f8eaa98c7ed418b57b5bafa",
+  "artifact": {
+    "id": 10131875326,
+    "name": "runtime-worker-cross-target",
+    "size_in_bytes": 245,
+    "digest": "sha256:59de7ebf9ea91913015936ebf13f685f385e8fb2aa2a2829d4a7eae91f28fe30"
+  },
+  "evidence": {
+    "cross-target-summary.txt": "darwin_stripped_compiler_bytes=365856\nlinux_stripped_compiler_bytes=332432\ncombined_stripped_compiler_bytes=698288\ncombined_limit_bytes=700000\n"
+  }
+}

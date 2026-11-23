@@ -1,0 +1,4 @@
+def main()
+	puts(42)
+	return
+end

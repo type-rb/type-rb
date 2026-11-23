@@ -1,0 +1,245 @@
+import { emit_qbe } from compiler
+import { MirArrayLoop } from mir/model/module
+import { optimize_verified_mir } from mir/passes/optimize
+import { verify_mir } from mir/verify/module
+import { CompilerState } from state/state
+import { array_loop_mir_check } from testing/mir/array_loops
+import { control_test_output } from testing/mir/control
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { logical_run_qbe } from testing/qbe_runner
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+def array_peeling_source(element: String, initial: String, extra: String, main: String): String
+	return "def reverse_prefix(mut values: Array<" + element + ">, last: Integer)\nlimit := (last + 1) / 2\nmut index := " + initial + "\nwhile index < limit\nright := last - index\ntemporary := values[index]\nvalues[index] = values[right]\nvalues[right] = temporary\n" + extra + "\nindex += 1\nend\nend\ndef main()\n" + main + "\nend\n"
+end
+
+def array_peeling_count(state: CompilerState): Integer
+	mut count := 0
+	state.scalar_mir.array_loops[0].each do |plan|
+		if plan.peel_body >= 0
+			count += 1
+		end
+	end
+	return count
+end
+
+def array_nonempty_peeling_count(state: CompilerState): Integer
+	mut count := 0
+	state.scalar_mir.array_loops.each do |plans|
+		plans.each do |plan|
+			if plan.peel_nonempty
+				count += 1
+			end
+		end
+	end
+	return count
+end
+
+def array_peeling_guarded_source(guard: String): String
+	source := array_peeling_source("Integer", "0", "", "mut values := [10, 20, 30, 40]\nreverse_prefix(values, -3)\nreverse_prefix(values, 0)\nreverse_prefix(values, 1)\nreverse_prefix(values, 3)\nputs(values[0])\nputs(values[1])\nputs(values[2])\nputs(values[3])")
+	return source.split("limit := (last + 1) / 2").join(guard + "\nlimit := (last + 1) / 2")
+end
+
+def array_peeling_run(output: String, expected: String)
+	qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+	if qbe != nil
+		case logical_run_qbe(qbe, output)
+		when Result::Ok(actual)
+			expect(actual).to_equal(expected)
+		when Result::Err(error)
+			puts(error)
+			expect(false).to_be_true()
+		end
+	end
+end
+
+describe("MIR first Array iteration") do
+	test("omits only the first condition after a dominating positive guard") do
+		["if last <= 0\nreturn\nend", "if 1 > last\nreturn\nend", "if last >= 1\nelse\nreturn\nend"].each do |guard|
+			mut state := array_loop_mir_check(array_peeling_guarded_source(guard))
+			expect(array_nonempty_peeling_count(state)).to_equal(1)
+			output := control_test_output(emit_qbe(state))
+			array_peeling_run(output, "40\n30\n10\n20\n")
+			intrinsic_mir_erase(state)
+			optimize_verified_mir(state.scalar_mir)
+			expect(verify_mir(state.scalar_mir, true)).to_equal("")
+			expect(control_test_output(emit_qbe(state))).to_equal(output)
+		end
+	end
+
+	test("combines nonnegative Array contents with a nonzero edge") do
+		["last != 0", "0 != last"].each do |guard|
+			source := "def main()\nmut values := [3, 2, 1, 0]\nmut last := values[0]\nwhile " + guard + "\nlimit := (last + 1) / 2\nmut index := 0\nwhile index < limit\nright := last - index\ntemporary := values[index]\nvalues[index] = values[right]\nvalues[right] = temporary\nindex += 1\nend\nlast = values[0]\nend\nputs(values[0])\nputs(values[3])\nend"
+			state := array_loop_mir_check(source)
+			expect(array_nonempty_peeling_count(state)).to_equal(1)
+			array_peeling_run(control_test_output(emit_qbe(state)), "0\n3\n")
+		end
+	end
+
+	test("retains the first predicate when a guard allows nonpositive values") do
+		["", "if last == 0\nreturn\nend", "if last < 0\nreturn\nend", "if last > 0\nputs(1)\nend"].each do |guard|
+			state := array_loop_mir_check(array_peeling_guarded_source(guard))
+			expect(array_nonempty_peeling_count(state)).to_equal(0)
+		end
+	end
+
+	test("preserves checked failures after a positive entry proof") do
+		["bounds", "endpoint", "first", "later"].each do |failure|
+			mut extra := ""
+			mut main := "reverse_prefix([1, 2, 3], 3)"
+			mut expected := "panic: index is out of bounds\n"
+			if failure == "endpoint"
+				main = "reverse_prefix([1, 2, 3], 9007199254740991)"
+				expected = "panic: Integer is outside the portable range\n"
+			elsif failure == "first" || failure == "later"
+				extra = "values[index] = temporary + 9007199254740991"
+				main = "reverse_prefix([1, 0, 0, 0], 3)"
+				if failure == "later"
+					main = "reverse_prefix([0, 1, 0, 0], 3)"
+				end
+				expected = "panic: Integer is outside the portable range\n"
+			end
+			source := array_peeling_source("Integer", "0", extra, main).split("limit := (last + 1) / 2").join("if last <= 0\nreturn\nend\nlimit := (last + 1) / 2")
+			state := array_loop_mir_check(source)
+			expect(array_nonempty_peeling_count(state)).to_equal(1)
+			qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+			if qbe != nil
+				case logical_run_qbe(qbe, control_test_output(emit_qbe(state)), 2)
+				when Result::Ok(_actual)
+					expect(false).to_be_true()
+				when Result::Err(error)
+					expect(error).to_equal(expected)
+				end
+			end
+		end
+	end
+
+	test("rejects a forged nonempty flag and rebuilds after block reordering") do
+		mut state := array_loop_mir_check(array_peeling_source("Integer", "0", "", ""))
+		mut changed := false
+		mut slot := 0
+		while slot < state.scalar_mir.array_loops[0].size()
+			plan := state.scalar_mir.array_loops[0][slot]
+			if plan.peel_body >= 0
+				state.scalar_mir.array_loops[0][slot] = MirArrayLoop.new(header: plan.header, preheader: plan.preheader, owner: plan.owner, length: plan.length, accesses: plan.accesses, headers: plan.headers, reserved_pushes: plan.reserved_pushes, cached_values: plan.cached_values, peel_body: plan.peel_body, peel_nonempty: true)
+				changed = true
+			end
+			slot += 1
+		end
+		expect(changed).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR Array-loop plan differs")
+		intrinsic_mir_erase(state)
+		state.scalar_mir.functions.each do |function|
+			mut left := function.block_start
+			mut right := left + function.block_count - 1
+			while left < right
+				saved := state.scalar_mir.blocks[left]
+				state.scalar_mir.blocks[left] = state.scalar_mir.blocks[right]
+				state.scalar_mir.blocks[right] = saved
+				left += 1
+				right -= 1
+			end
+		end
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(array_nonempty_peeling_count(state)).to_equal(0)
+	end
+
+	test("peels a checked zero-start reflection and retains empty and negative visits") do
+		mut state := array_loop_mir_check(array_peeling_source("Integer", "0", "", "mut values := [10, 20, 30, 40, 50]\nreverse_prefix(values, -3)\nreverse_prefix(values, 0)\nreverse_prefix(values, 1)\nreverse_prefix(values, 4)\nputs(values[0])\nputs(values[1])\nputs(values[2])\nputs(values[3])\nputs(values[4])\nreverse_prefix([], -1)"))
+		expect(array_peeling_count(state)).to_equal(1)
+		output := control_test_output(emit_qbe(state))
+		expect(output.include?("@mir_peel_")).to_be_true()
+		intrinsic_mir_erase(state)
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(control_test_output(emit_qbe(state))).to_equal(output)
+		array_peeling_run(output, "50\n40\n30\n10\n20\n")
+	end
+
+	test("preserves Float signs Boolean values and ordinary aliasing") do
+		floating := array_loop_mir_check(array_peeling_source("Float", "0", "", "mut values := [-0.0, 1.0, 2.0, 3.0]\nsame := values\nreverse_prefix(values, 3)\nputs(same[0])\nputs(same[1])\nputs(same[2])\nputs(1.0 / same[3] < 0.0)"))
+		expect(array_peeling_count(floating)).to_equal(1)
+		array_peeling_run(control_test_output(emit_qbe(floating)), "3.0\n2.0\n1.0\ntrue\n")
+		boolean := array_loop_mir_check(array_peeling_source("Boolean", "0", "", "mut values := [true, false, false]\nreverse_prefix(values, 2)\nputs(values[0])\nputs(values[1])\nputs(values[2])"))
+		expect(array_peeling_count(boolean)).to_equal(1)
+		array_peeling_run(control_test_output(emit_qbe(boolean)), "false\nfalse\ntrue\n")
+	end
+
+	test("rejects nonzero entries calls nested branches and managed elements") do
+		["1", "-1"].each do |initial|
+			state := array_loop_mir_check(array_peeling_source("Integer", initial, "", ""))
+			expect(array_peeling_count(state)).to_equal(0)
+		end
+		["puts(temporary)", "if index == 1\nbreak\nend", "values.push(1)"].each do |extra|
+			state := array_loop_mir_check(array_peeling_source("Integer", "0", extra, ""))
+			expect(array_peeling_count(state)).to_equal(0)
+		end
+		managed := array_loop_mir_check(array_peeling_source("String", "0", "", ""))
+		expect(array_peeling_count(managed)).to_equal(0)
+	end
+
+	test("rejects a forged schedule and rederives it after physical reordering") do
+		mut state := array_loop_mir_check(array_peeling_source("Integer", "0", "", "mut values := [1, 2, 3]\nreverse_prefix(values, 2)\nputs(values[0])"))
+		mut changed := false
+		mut index := 0
+		while index < state.scalar_mir.array_loops[0].size()
+			plan := state.scalar_mir.array_loops[0][index]
+			if plan.peel_body >= 0
+				state.scalar_mir.array_loops[0][index] = MirArrayLoop.new(header: plan.header, preheader: plan.preheader, owner: plan.owner, length: plan.length, accesses: plan.accesses, headers: plan.headers, reserved_pushes: plan.reserved_pushes, cached_values: plan.cached_values, peel_body: plan.preheader, peel_nonempty: false)
+				changed = true
+			end
+			index += 1
+		end
+		expect(changed).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR Array-loop plan differs")
+		intrinsic_mir_erase(state)
+		state.scalar_mir.functions.each do |function|
+			mut left := function.block_start
+			mut right := left + function.block_count - 1
+			while left < right
+				saved := state.scalar_mir.blocks[left]
+				state.scalar_mir.blocks[left] = state.scalar_mir.blocks[right]
+				state.scalar_mir.blocks[right] = saved
+				left += 1
+				right -= 1
+			end
+		end
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(array_peeling_count(state)).to_equal(1)
+		array_peeling_run(control_test_output(emit_qbe(state)), "3\n")
+	end
+
+	test("preserves bounds and arithmetic failures on the first and later visits") do
+		["bounds", "endpoint", "first", "later"].each do |failure|
+			mut extra := ""
+			mut main := "reverse_prefix([1, 2, 3], 3)"
+			mut expected := "panic: index is out of bounds\n"
+			if failure == "endpoint"
+				main = "reverse_prefix([1, 2, 3], 9007199254740991)"
+				expected = "panic: Integer is outside the portable range\n"
+			elsif failure == "first" || failure == "later"
+				extra = "values[index] = temporary + 9007199254740991"
+				main = "reverse_prefix([1, 0, 0, 0], 3)"
+				if failure == "later"
+					main = "reverse_prefix([0, 1, 0, 0], 3)"
+				end
+				expected = "panic: Integer is outside the portable range\n"
+			end
+			state := array_loop_mir_check(array_peeling_source("Integer", "0", extra, main))
+			expect(array_peeling_count(state)).to_equal(1)
+			qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+			if qbe != nil
+				case logical_run_qbe(qbe, control_test_output(emit_qbe(state)), 2)
+				when Result::Ok(_actual)
+					expect(false).to_be_true()
+				when Result::Err(error)
+					expect(error).to_equal(expected)
+				end
+			end
+		end
+	end
+end

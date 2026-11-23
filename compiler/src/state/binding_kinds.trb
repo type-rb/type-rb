@@ -1,0 +1,26 @@
+# Use obligations pack (source token + 1) and a binding kind in one integer.
+# The stride leaves three low bits for the kind; zero means no obligation.
+
+def binding_use_local(): Integer
+	return 1
+end
+
+def binding_use_parameter(): Integer
+	return 2
+end
+
+def binding_use_pattern(): Integer
+	return 3
+end
+
+def binding_use_catch(): Integer
+	return 4
+end
+
+def binding_use_result(): Integer
+	return 5
+end
+
+def binding_use_stride(): Integer
+	return 8
+end

@@ -1,0 +1,14 @@
+class Counter
+	OFFSET := 3
+	@count: Integer
+	def initialize(value: Integer)
+		@count = value + OFFSET
+	end
+	def value(): Integer
+		return @count
+	end
+end
+
+def main()
+	puts(Counter.new(4).value())
+end

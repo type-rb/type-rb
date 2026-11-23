@@ -1,0 +1,141 @@
+import { literal_type_base } from frontend/types/literal_types
+import { ascii_code } from support/literals
+
+record UnionPattern
+	origin: Integer
+	type_name: String
+	binding: Integer
+end
+
+# An internal spelling keeps union precedence separate from optional, generic
+# and callable types. It cannot collide with an authored declaration name.
+def has_union_header(name: String): Boolean
+	if name.size() < 9 || name[0] != "$" || name[name.size() - 1] != ">"
+		return false
+	end
+	mut prefix := ""
+	mut index := 0
+	while index < 7
+		prefix += name[index]
+		index += 1
+	end
+	return prefix == "$Union<"
+end
+
+def union_parts(name: String): Array<String>
+	mut result: Array<String> := []
+	if !has_union_header(name)
+		return result
+	end
+	mut index := 7
+	mut part := ""
+	mut depth := 0
+	while index < name.size() - 1
+		character := name[index]
+		if character == "," && depth == 0
+			result.push(part)
+			part = ""
+		else
+			part += character
+		end
+		if character == "<"
+			depth += 1
+		elsif character == ">"
+			depth -= 1
+		end
+		index += 1
+	end
+	result.push(part)
+	return result
+end
+
+def union_name_before(left: String, right: String): Boolean
+	mut index := 0
+	while index < left.size() && index < right.size()
+		first := ascii_code(left[index])
+		second := ascii_code(right[index])
+		if first != second
+			return first < second
+		end
+		index += 1
+	end
+	return left.size() < right.size()
+end
+
+def union_type(input: Array<String>): String
+	mut alternatives: Array<String> := []
+	mut invalid := false
+	input.each do |name|
+		mut parts := union_parts(name)
+		if parts.size() == 0
+			parts.push(name)
+		end
+		parts.each do |part|
+			if part == "" || part == "Void" || part == "Invalid"
+				invalid = true
+			end
+			mut present := part == "Never"
+			alternatives.each do |previous|
+				if previous == part
+					present = true
+				end
+			end
+			if !present
+				alternatives.push(part)
+			end
+		end
+	end
+	if invalid
+		return ""
+	end
+	mut has_float := false
+	mut has_integer := false
+	mut has_string := false
+	alternatives.each do |part|
+		if part == "Float"
+			has_float = true
+		elsif part == "Integer"
+			has_integer = true
+		elsif part == "String"
+			has_string = true
+		end
+	end
+	mut ordered: Array<String> := []
+	alternatives.each do |part|
+		base := literal_type_base(part)
+		mut subsumed := false
+		if has_float && (part == "Integer" || base == "Integer")
+			subsumed = true
+		elsif has_integer && base == "Integer"
+			subsumed = true
+		elsif has_string && base == "String"
+			subsumed = true
+		end
+		if !subsumed
+			ordered.push(part)
+			mut index := ordered.size() - 1
+			while index > 0 && union_name_before(ordered[index], ordered[index - 1])
+				previous := ordered[index - 1]
+				ordered[index - 1] = ordered[index]
+				ordered[index] = previous
+				index -= 1
+			end
+		end
+	end
+	if ordered.size() == 0
+		return "Never"
+	end
+	if ordered.size() == 1
+		return ordered[0]
+	end
+	mut name := "$Union<"
+	mut index := 0
+	ordered.each do |part|
+		if index > 0
+			name += ","
+		end
+		name += part
+		index += 1
+	end
+	return name + ">"
+end

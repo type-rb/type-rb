@@ -1,0 +1,13 @@
+{
+  "workflow": "https://github.com/type-rb/type-rb-native/actions/runs/34423530952",
+  "sourceRevision": "b230d34c1a415eab9f8eaa98c7ed418b57b5bafa",
+  "artifact": {
+    "id": 10132361703,
+    "name": "static-string-compactness-cross-target",
+    "size_in_bytes": 422,
+    "digest": "sha256:e02a30b72ef2477058d3f0ebd11903fc0f434470092dfeaaa24c17a1289da33f"
+  },
+  "evidence": {
+    "cross-target.txt": "darwin_arm64_compiler_bytes=365816\nlinux_arm64_compiler_bytes=332440\nbaseline_combined_compiler_bytes=696184\ncombined_compiler_bytes=698256\ncombined_compiler_limit=700000\ndarwin_arm64_text_bytes=265248\nlinux_arm64_text_bytes=268064\ninduction_phi_recovery=0\narray_reduction_transition=0\narray_loop_recovery=0\nfloat_array_reduction=0\nguarded_multiply=0\nguarded_add=0\nstable_array_header=0\ntarget_neutral_qbe_bytes=1195739\ntarget_neutral_qbe_sha256=ab9c8729308823f7c12e26c3616587032569e19e8eddc2e710b59cd1cf35de7a\ncandidate_spectral_qbe_bytes=not-applicable\ncandidate_spectral_qbe_sha256=not-applicable\n"
+  }
+}

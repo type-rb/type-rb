@@ -1,0 +1,39 @@
+import { ReplStore, repl_integer, repl_value } from repl/model
+
+# Cursor cells hold next index/value, end, exclusivity and observed exhaustion.
+# Keeping exhaustion distinct from the live Array length prevents a partial
+# batch's block from restarting an iterator that has already ended.
+def repl_slice_available(store: ReplStore, source: Integer, range: Boolean, cursor: Array<Integer>): Boolean
+	if cursor[3] == 1
+		return false
+	end
+	if !range
+		return cursor[0] < store.children[source].size()
+	end
+	if cursor[2] == 1
+		return cursor[0] < cursor[1]
+	end
+	return cursor[0] <= cursor[1]
+end
+
+def repl_slice_next(mut store: ReplStore, source: Integer, range: Boolean, element_type: String, size: Integer, mut cursor: Array<Integer>): Integer
+	mut elements: Array<Integer> := []
+	while elements.size() < size
+		if !repl_slice_available(store, source, range, cursor)
+			cursor[3] = 1
+			break
+		end
+		if range
+			elements.push(repl_integer(store, cursor[0]))
+			if cursor[0] == cursor[1]
+				cursor[3] = 1
+			else
+				cursor[0] += 1
+			end
+		else
+			elements.push(store.children[source][cursor[0]])
+			cursor[0] += 1
+		end
+	end
+	return repl_value(store, "Array<" + element_type + ">", 0, 0.0, "", elements)
+end

@@ -1,0 +1,15 @@
+def nested(table: Hash<String, String>, key: String, depth: Integer): String
+	marker := "d" + depth.to_s()
+	if depth == 0
+		return table[key] + marker
+	end
+	held := nested(table, "" + key, depth - 1)
+	return held + marker
+end
+
+def main()
+	mut table: Hash<String, String> := {}
+	index := 0
+	table["k" + index.to_s()] = "kept" + index.to_s()
+	puts(nested(table, "k0", 3))
+end

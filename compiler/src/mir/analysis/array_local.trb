@@ -1,0 +1,122 @@
+import { MirFunction, MirModule } from mir/model/module
+import { MirFlow, MirFlowAliases, mir_flow_alias, mir_flow_aliases, mir_flow_block_index, mir_flow_type } from mir/analysis/flow
+import { mir_op_array_load, mir_op_array_new, mir_op_array_position, mir_op_array_push, mir_op_array_size, mir_op_array_store } from mir/model/instructions
+import { mir_type_integer } from mir/model/type_ids
+import { mir_element_type } from mir/model/types
+import { mir_live_add, mir_live_before } from mir/analysis/liveness
+
+# Every forwarded identity must remain unambiguous. An edge into a parameter
+# that also receives another Array can hide a later escape or mutation.
+def mir_array_forwarding_safe(native_module: MirModule, function: MirFunction, flow: MirFlow, aliases: MirFlowAliases, owner: Integer, target: Integer, start: Integer, count: Integer): Boolean
+	if count == 0
+		return true
+	end
+	block := native_module.blocks[function.block_start + mir_flow_block_index(flow, target)]
+	mut slot := 0
+	while slot < count
+		value := native_module.arguments[start + slot]
+		if mir_flow_alias(aliases, value) == owner
+			parameter := native_module.arguments[block.parameter_start + slot]
+			if mir_flow_alias(aliases, parameter) != owner
+				return false
+			end
+		end
+		slot += 1
+	end
+	return true
+end
+
+# The container never escapes, so every possible element writer is explicit.
+# Loads and writes carry SSA values; their joint range proof belongs to ranges.
+record MirLocalArray
+	writes: Array<Integer>
+	loads: Array<Integer>
+end
+
+def mir_local_integer_array(native_module: MirModule, function: MirFunction, flow: MirFlow, aliases: MirFlowAliases, owner: Integer): MirLocalArray
+	empty := MirLocalArray.new(writes: [], loads: [])
+	mut names: Array<Integer> := []
+	native_module.values.each do |value|
+		if value.function_id == function.id && mir_flow_alias(aliases, value.id) == owner
+			mir_live_add(names, value.id)
+		end
+	end
+	mut writes: Array<Integer> := []
+	mut loads: Array<Integer> := []
+	mut block_index := function.block_start
+	while block_index < function.block_start + function.block_count
+		block := native_module.blocks[block_index]
+		if mir_flow_alias(aliases, block.return_value) == owner
+			return empty
+		end
+		if !mir_array_forwarding_safe(native_module, function, flow, aliases, owner, block.first_target, block.first_argument_start, block.first_argument_count)
+			return empty
+		end
+		if !mir_array_forwarding_safe(native_module, function, flow, aliases, owner, block.second_target, block.second_argument_start, block.second_argument_count)
+			return empty
+		end
+		mut index := block.instruction_start
+		while index < block.instruction_start + block.instruction_count
+			use := native_module.instructions[index]
+			if mir_live_before(native_module, names, use, []).size() > 0
+				if mir_flow_alias(aliases, use.first) != owner
+					return empty
+				end
+				kind := use.kind
+				if kind == mir_op_array_push()
+					mir_live_add(writes, use.second)
+				elsif kind == mir_op_array_store()
+					mir_live_add(writes, use.payload)
+				elsif kind == mir_op_array_load()
+					mir_live_add(loads, use.result)
+				elsif kind != mir_op_array_size() && kind != mir_op_array_position()
+					return empty
+				end
+			end
+			index += 1
+		end
+		block_index += 1
+	end
+	return MirLocalArray.new(writes: writes, loads: loads)
+end
+
+def mir_local_integer_arrays(native_module: MirModule, function: MirFunction, flow: MirFlow): Array<MirLocalArray>
+	if native_module.functions.size() > 96 || flow.entry < 0
+		return []
+	end
+	if flow.predecessors[flow.entry].size() > 0
+		return []
+	end
+	# Bound repeated alias/use analysis independently of arbitrary SSA IDs.
+	mut instructions := 0
+	mut block := function.block_start
+	while block < function.block_start + function.block_count
+		instructions += native_module.blocks[block].instruction_count
+		block += 1
+	end
+	if instructions > 512
+		return []
+	end
+	entry := native_module.blocks[function.block_start + flow.entry]
+	mut owners: Array<Integer> := []
+	mut index := entry.instruction_start
+	while index < entry.instruction_start + entry.instruction_count
+		instruction := native_module.instructions[index]
+		if instruction.kind == mir_op_array_new() && mir_element_type(native_module, mir_flow_type(flow, instruction.result)) == mir_type_integer()
+			owners.push(instruction.result)
+		end
+		index += 1
+	end
+	if owners.size() == 0 || owners.size() > 8
+		return []
+	end
+	aliases := mir_flow_aliases(native_module, function, flow, entry)
+	mut arrays: Array<MirLocalArray> := []
+	owners.each do |owner|
+		array := mir_local_integer_array(native_module, function, flow, aliases, owner)
+		if array.loads.size() > 0
+			arrays.push(array)
+		end
+	end
+	return arrays
+end

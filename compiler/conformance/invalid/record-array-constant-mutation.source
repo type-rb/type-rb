@@ -1,0 +1,10 @@
+record Entry
+id: Integer
+end
+record Other
+id: Integer
+end
+def main()
+values := [Entry.new(id: 1)]
+values[0] = Entry.new(id: 2)
+end

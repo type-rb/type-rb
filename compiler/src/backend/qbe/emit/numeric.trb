@@ -1,0 +1,367 @@
+import { mir_scalar_boolean_and, mir_scalar_boolean_or, mir_scalar_contract_multiply } from mir/model/scalar_operators
+import { qbe_runtime_integer_power_slot } from backend/qbe/runtime_slots
+import { mir_numeric_checked_mode, mir_numeric_default_mode, mir_numeric_guarded_add_mode, mir_numeric_guarded_multiply_mode, mir_numeric_left_nonnegative_add_mode, mir_numeric_proven_arithmetic_mode, mir_numeric_right_nonnegative_add_mode } from mir/model/numeric_modes
+import { binary_add, binary_divide, binary_greater, binary_greater_equal, binary_less, binary_less_equal, binary_multiply, binary_not_equal, binary_power, binary_remainder, binary_subtract } from frontend/types/operators
+import { integer_string } from support/literals
+import { QbeEmitContext, QbeValue, emit_label, emit_temporary } from backend/qbe/context
+import { QbeOutput, qbe_output_branch, qbe_output_line } from backend/qbe/output
+
+def integer_range_failure_label(mut context: QbeEmitContext): String
+	context.integer_range_failure_used[0] = true
+	return "@integer_range_failure"
+end
+
+def emit_checked_integer_operation(
+		mut context: QbeEmitContext,
+		mut output: QbeOutput,
+		result: String,
+		left: String,
+		right: String,
+		operation: String,
+		right_nonnegative: Boolean,
+	): String
+	failure := integer_range_failure_label(context)
+	complete := emit_label(context)
+	qbe_output_line(output, "\t" + result + " =l " + operation + " " + left + ", " + right)
+	if right_nonnegative
+		too_high := emit_temporary(context)
+		qbe_output_line(output, "\t" + too_high + " =w csgtl " + result + ", 9007199254740991")
+		qbe_output_branch(output, too_high, failure, complete)
+	else
+		# A single unsigned comparison checks both ends of the portable range.
+		shifted := emit_temporary(context)
+		outside := emit_temporary(context)
+		qbe_output_line(output, "\t" + shifted + " =l add " + result + ", 9007199254740991")
+		qbe_output_line(output, "\t" + outside + " =w cugtl " + shifted + ", 18014398509481982")
+		qbe_output_branch(output, outside, failure, complete)
+	end
+	qbe_output_line(output, complete)
+	return complete
+end
+
+# Portable operands fit a signed64 sum. The first unsigned comparison accepts
+# 0..MAX; the second accepts -MAX..-1 and rejects every other remaining sum.
+# Keep the common nonnegative path short without a returning runtime call.
+def emit_expanded_integer_add(
+		mut context: QbeEmitContext,
+		mut output: QbeOutput,
+		result: String,
+		left: String,
+		right: String,
+	)
+	nonnegative := emit_temporary(context)
+	outside := emit_temporary(context)
+	remaining := emit_label(context)
+	complete := emit_label(context)
+	failure := integer_range_failure_label(context)
+	qbe_output_line(output, "\t" + result + " =l add " + left + ", " + right)
+	qbe_output_line(output, "\t" + nonnegative + " =w cultl " + result + ", 9007199254740992")
+	qbe_output_branch(output, nonnegative, complete, remaining)
+	qbe_output_line(output, remaining)
+	qbe_output_line(output, "\t" + outside + " =w cultl " + result + ", -9007199254740991")
+	qbe_output_branch(output, outside, failure, complete)
+	qbe_output_line(output, complete)
+	return
+end
+
+def emit_guarded_integer_multiply(
+		mut context: QbeEmitContext,
+		mut output: QbeOutput,
+		result: String,
+		left: String,
+		right: String,
+	)
+	combined := emit_temporary(context)
+	small := emit_temporary(context)
+	slow := emit_label(context)
+	fast := emit_label(context)
+	complete := emit_label(context)
+	qbe_output_line(output, "\t" + combined + " =l or " + left + ", " + right)
+	qbe_output_line(output, "\t" + small + " =w cultl " + combined + ", 67108864")
+	qbe_output_branch(output, small, fast, slow)
+	qbe_output_line(output, slow)
+	emit_integer_call(output, result, "mul", left, right)
+	qbe_output_line(output, "\tjmp " + complete)
+	qbe_output_line(output, fast)
+	qbe_output_line(output, "\t" + result + " =l mul " + left + ", " + right)
+	qbe_output_line(output, complete)
+	return
+end
+
+# MIR proves the quotient-zero/one range and the correction-free reciprocal.
+# Unsigned guards exclude negative inputs. Other values retain signed remainder;
+# the reciprocal product stays below 2^63 and is never a portable Integer value.
+def emit_constant_integer_remainder(mut context: QbeEmitContext, mut output: QbeOutput, left: String, divisor: Integer, reciprocal: Integer, shift: Integer): String
+	result := emit_temporary(context)
+	small := emit_temporary(context)
+	near := emit_temporary(context)
+	zero := emit_temporary(context)
+	near_path := emit_label(context)
+	zero_path := emit_label(context)
+	one_path := emit_label(context)
+	wide := emit_label(context)
+	fast := emit_label(context)
+	slow := emit_label(context)
+	complete := emit_label(context)
+	right := integer_string(divisor)
+	qbe_output_line(output, "\t" + near + " =w cultl " + left + ", " + integer_string(divisor * 2))
+	qbe_output_branch(output, near, near_path, wide)
+	qbe_output_line(output, near_path)
+	qbe_output_line(output, "\t" + zero + " =w cultl " + left + ", " + right)
+	qbe_output_branch(output, zero, zero_path, one_path)
+	qbe_output_line(output, zero_path)
+	qbe_output_line(output, "\t" + result + " =l copy " + left)
+	qbe_output_line(output, "\tjmp " + complete)
+	qbe_output_line(output, one_path)
+	qbe_output_line(output, "\t" + result + " =l sub " + left + ", " + right)
+	qbe_output_line(output, "\tjmp " + complete)
+	qbe_output_line(output, wide)
+	qbe_output_line(output, "\t" + small + " =w cultl " + left + ", 2147483648")
+	qbe_output_branch(output, small, fast, slow)
+	qbe_output_line(output, slow)
+	qbe_output_line(output, "\t" + result + " =l rem " + left + ", " + right)
+	qbe_output_line(output, "\tjmp " + complete)
+	qbe_output_line(output, fast)
+	product := emit_temporary(context)
+	quotient := emit_temporary(context)
+	multiple := emit_temporary(context)
+	qbe_output_line(output, "\t" + product + " =l mul " + left + ", " + integer_string(reciprocal))
+	qbe_output_line(output, "\t" + quotient + " =l shr " + product + ", " + integer_string(shift))
+	qbe_output_line(output, "\t" + multiple + " =l mul " + quotient + ", " + right)
+	qbe_output_line(output, "\t" + result + " =l sub " + left + ", " + multiple)
+	qbe_output_line(output, "\tjmp " + complete)
+	qbe_output_line(output, complete)
+	return result
+end
+
+def emit_checked_integer_division(
+		mut context: QbeEmitContext,
+		mut output: QbeOutput,
+		result: String,
+		left: String,
+		right: String,
+		operation: String,
+	)
+	zero := emit_temporary(context)
+	failure := emit_label(context)
+	complete := emit_label(context)
+	qbe_output_line(output, "\t" + zero + " =w ceql " + right + ", 0")
+	qbe_output_branch(output, zero, failure, complete)
+	qbe_output_line(output, failure)
+	qbe_output_line(output, "\tcall $trbn_fail(l $trbn_division_error, l 24)")
+	qbe_output_line(output, "\thlt")
+	qbe_output_line(output, complete)
+	qbe_output_line(output, "\t" + result + " =l " + operation + " " + left + ", " + right)
+	return
+end
+
+def emit_integer_call(
+		mut output: QbeOutput,
+		result: String,
+		operation: String,
+		left: String,
+		right: String,
+	)
+	qbe_output_line(
+		output,
+		"\t" + result + " =l call $trbn_integer_" + operation + "(l " + left + ", l " + right + ")",
+	)
+	return
+end
+
+# Verified MIR selects expansion and bounds. The target adapter spells the
+# selected operation; checked additions and subtractions share a failure block.
+def lower_binary_operand(
+		mut context: QbeEmitContext,
+		mut output: QbeOutput,
+		operator_id: Integer,
+		left: QbeValue,
+		right: QbeValue,
+		result_type: String,
+		mode: Integer,
+	): String
+	left_float := left.type_name == "Float"
+	right_float := right.type_name == "Float"
+	mut float_operands := left_float
+	if right_float
+		float_operands = true
+	end
+	result := emit_temporary(context)
+	mut left_operand := left.operand
+	mut right_operand := right.operand
+	if operator_id == mir_scalar_boolean_and() || operator_id == mir_scalar_boolean_or()
+		mut operation := "and"
+		if operator_id == mir_scalar_boolean_or()
+			operation = "or"
+		end
+		qbe_output_line(output, "\t" + result + " =l " + operation + " " + left_operand + ", " + right_operand)
+		return result
+	end
+	if float_operands
+		if !left_float
+			converted_left := emit_temporary(context)
+			qbe_output_line(output, "\t" + converted_left + " =d sltof " + left_operand)
+			left_operand = converted_left
+		end
+		if !right_float
+			converted_right := emit_temporary(context)
+			qbe_output_line(output, "\t" + converted_right + " =d sltof " + right_operand)
+			right_operand = converted_right
+		end
+	end
+	if result_type == "Float"
+		if operator_id == binary_power()
+			qbe_output_line(output, "\t" + result + " =d call $pow(d " + left_operand + ", d " + right_operand + ")")
+			return result
+		end
+		mut operation := "add"
+		if operator_id == binary_subtract()
+			operation = "sub"
+		end
+		if operator_id == binary_multiply()
+			operation = "mul"
+		end
+		if operator_id == mir_scalar_contract_multiply()
+			operation = "mulc"
+		end
+		if operator_id == binary_divide()
+			operation = "div"
+		end
+		qbe_output_line(output, "\t" + result + " =d " + operation + " " + left_operand + ", " + right_operand)
+		return result
+	end
+	if operator_id == binary_add()
+		if mode == mir_numeric_proven_arithmetic_mode()
+			qbe_output_line(output, "\t" + result + " =l add " + left_operand + ", " + right_operand)
+		elsif mode == mir_numeric_guarded_add_mode()
+			emit_expanded_integer_add(context, output, result, left_operand, right_operand)
+		elsif mode > mir_numeric_default_mode()
+			if mode == mir_numeric_left_nonnegative_add_mode()
+				left_operand = right.operand
+				right_operand = left.operand
+			end
+			mut nonnegative := mode == mir_numeric_right_nonnegative_add_mode()
+			if mode == mir_numeric_left_nonnegative_add_mode()
+				nonnegative = true
+			end
+			emit_checked_integer_operation(context, output, result, left_operand, right_operand, "add", nonnegative)
+		else
+			emit_checked_integer_operation(context, output, result, left_operand, right_operand, "add", false)
+		end
+		return result
+	end
+	if operator_id == binary_subtract()
+		if mode == mir_numeric_proven_arithmetic_mode()
+			qbe_output_line(output, "\t" + result + " =l sub " + left_operand + ", " + right_operand)
+		else
+			emit_checked_integer_operation(context, output, result, left_operand, right_operand, "sub", false)
+		end
+		return result
+	end
+	if operator_id == binary_multiply()
+		if mode == mir_numeric_checked_mode()
+			emit_checked_integer_operation(context, output, result, left_operand, right_operand, "mul", false)
+		elsif mode == mir_numeric_guarded_multiply_mode()
+			emit_guarded_integer_multiply(context, output, result, left_operand, right_operand)
+		else
+			emit_integer_call(output, result, "mul", left_operand, right_operand)
+		end
+		return result
+	end
+	if operator_id == binary_power()
+		output.runtime_flags[qbe_runtime_integer_power_slot()] = 1
+		emit_integer_call(output, result, "power", left_operand, right_operand)
+		return result
+	end
+	if operator_id <= binary_remainder()
+		mut operation := "div"
+		mut helper := "divide"
+		if operator_id == binary_remainder()
+			operation = "rem"
+			helper = "remainder"
+		end
+		if mode == mir_numeric_checked_mode()
+			emit_checked_integer_division(context, output, result, left_operand, right_operand, operation)
+		else
+			emit_integer_call(output, result, helper, left_operand, right_operand)
+		end
+		return result
+	end
+	different := operator_id == binary_not_equal()
+	mut comparison := "eq"
+	if different
+		comparison = "ne"
+	end
+	if operator_id == binary_less()
+		comparison = "lt"
+	end
+	if operator_id == binary_less_equal()
+		comparison = "le"
+	end
+	if operator_id == binary_greater()
+		comparison = "gt"
+	end
+	if operator_id == binary_greater_equal()
+		comparison = "ge"
+	end
+	if float_operands
+		comparison = "c" + comparison + "d"
+	else
+		if operator_id >= binary_less()
+			comparison = "s" + comparison
+		end
+		comparison = "c" + comparison + "l"
+	end
+	qbe_output_line(
+		output,
+		"\t" + result + " =l " + comparison + " " + left_operand + ", " + right_operand,
+	)
+	return result
+end
+
+# For d=2^k, arithmetic shift rounds negative dividends down. Adding d-1 only
+# when x<0 instead preserves truncation toward zero. The adjusted value stays
+# within machine width for every portable Integer. MIR proves d and k. A
+# verified scalar guard can also prove nonnegativity, making the bias unnecessary.
+def emit_power_integer_division(mut context: QbeEmitContext, mut output: QbeOutput, left: String, divisor: Integer, shift: Integer, nonnegative: Boolean): String
+	if shift == 0
+		return left
+	end
+	if nonnegative
+		result := emit_temporary(context)
+		qbe_output_line(output, "\t" + result + " =l shr " + left + ", " + integer_string(shift))
+		return result
+	end
+	sign := emit_temporary(context)
+	bias := emit_temporary(context)
+	adjusted := emit_temporary(context)
+	result := emit_temporary(context)
+	qbe_output_line(output, "\t" + sign + " =l sar " + left + ", 63")
+	qbe_output_line(output, "\t" + bias + " =l and " + sign + ", " + integer_string(divisor - 1))
+	qbe_output_line(output, "\t" + adjusted + " =l add " + left + ", " + bias)
+	qbe_output_line(output, "\t" + result + " =l sar " + adjusted + ", " + integer_string(shift))
+	return result
+end
+
+# For d=2^k, bias is d-1 exactly when x<0. Masking x+bias and subtracting
+# bias implements truncation toward zero, including negative portable endpoints.
+# MIR supplies a verified positive power of two; zero division is impossible.
+def emit_power_integer_remainder(mut context: QbeEmitContext, mut output: QbeOutput, left: String, divisor: Integer, nonnegative: Boolean): String
+	if nonnegative
+		result := emit_temporary(context)
+		qbe_output_line(output, "\t" + result + " =l and " + left + ", " + integer_string(divisor - 1))
+		return result
+	end
+	sign := emit_temporary(context)
+	bias := emit_temporary(context)
+	adjusted := emit_temporary(context)
+	masked := emit_temporary(context)
+	result := emit_temporary(context)
+	mask := integer_string(divisor - 1)
+	qbe_output_line(output, "\t" + sign + " =l sar " + left + ", 63")
+	qbe_output_line(output, "\t" + bias + " =l and " + sign + ", " + mask)
+	qbe_output_line(output, "\t" + adjusted + " =l add " + left + ", " + bias)
+	qbe_output_line(output, "\t" + masked + " =l and " + adjusted + ", " + mask)
+	qbe_output_line(output, "\t" + result + " =l sub " + masked + ", " + bias)
+	return result
+end

@@ -1,0 +1,15 @@
+{
+  "architecture": "arm64",
+  "asset": "static-string-compactness-candidate",
+  "attestationSubjectSha256": "0a440ae99831a41049e72b13a4c54773374fa2743c719df4fce5f8206ed4d0c2",
+  "ccBoundary": "system-cc",
+  "mode": "0755",
+  "os": "linux",
+  "profile": "linux-arm64-v0",
+  "qbeBinarySha256": "510f15a1c724c204141d0b7531fe1641b983fe41dd008f5806470709a79a746c",
+  "qbeBinarySize": 714640,
+  "qbeTarget": "arm64",
+  "runnerImage": "ubuntu-24.04-arm",
+  "sha256": "0a440ae99831a41049e72b13a4c54773374fa2743c719df4fce5f8206ed4d0c2",
+  "size": 253632
+}

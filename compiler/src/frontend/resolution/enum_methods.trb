@@ -1,0 +1,45 @@
+import { declare_default_functions } from frontend/resolution/default_arguments
+import { find_enum_type } from frontend/types/enum_types
+import { find_function_in_module, find_generic_function_in_module } from frontend/resolution/declaration_lookup
+import { next_generic_depth } from frontend/types/generic_bindings
+import { instantiate_generic_function } from frontend/resolution/generic_functions
+import { generic_instance_for_type } from frontend/resolution/type_resolution
+import { CompilerState } from state/state
+import { sparse_string_at } from support/storage
+
+# Receiver identity selects a declaration before ordinary function MIR lowering.
+def enum_method_declaration_name(state: CompilerState, type_name: String, member: String): String
+	owner := find_enum_type(state, type_name)
+	if owner < 0
+		return ""
+	end
+	instance := generic_instance_for_type(state, type_name)
+	if instance >= 0
+		return state.type_resolution.generic_definitions[state.type_resolution.generic_instances[instance].definition].name + "::" + member
+	end
+	return state.nominal.enums[owner].name + "::" + member
+end
+
+def enum_method_function(mut state: CompilerState, type_name: String, member: String): Integer
+	owner := find_enum_type(state, type_name)
+	if owner < 0
+		return -1
+	end
+	definition := state.nominal.enums[owner]
+	name := enum_method_declaration_name(state, type_name, member)
+	instance := generic_instance_for_type(state, type_name)
+	if instance >= 0
+		method := find_generic_function_in_module(state, definition.source_id, name)
+		if method < 0 || state.type_resolution.generic_functions[method].receiver_type == ""
+			return -1
+		end
+		function := instantiate_generic_function(state, method, state.type_resolution.generic_instances[instance].arguments, next_generic_depth(state))
+		declare_default_functions(state)
+		return function
+	end
+	function := find_function_in_module(state, definition.source_id, name)
+	if function < 0 || sparse_string_at(state.nominal.function_receivers, function) != type_name
+		return -1
+	end
+	return function
+end

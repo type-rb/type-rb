@@ -1,0 +1,44 @@
+import { package_checksum, package_checksum_bytes } from project/package_checksum
+import { package_manifest_parse, package_version_valid } from project/package_manifest
+import { package_json_canonical, package_json_parse } from project/package_json
+import { describe, expect, test } from trb/std/test
+
+describe("Local package metadata") do
+	test("computes SHA-256 including padding block boundaries") do
+		expect(package_checksum("")).to_equal("sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+		expect(package_checksum("abc")).to_equal("sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+		expect(package_checksum("abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq")).to_equal("sha256:248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1")
+	end
+
+	test("hashes binary bytes without Unicode conversion") do
+		mut bytes := [0, 255, 1, 128]
+		expect(package_checksum_bytes(bytes)).to_equal("sha256:edc81f7e4ee358fb91e94bd9bd74079c3dcba36f40f2c8a36e7ae0567afecc8f")
+	end
+
+	test("normalizes JSON object order while preserving arrays and rejecting malformed input") do
+		document := package_json_parse("{\"b\":[true,null,-12.5e+2],\"a\":\"value\",\"b\":[2,1]}")
+		expect(document.error[0]).to_equal("")
+		expect(package_json_canonical(document, 0)).to_equal("{\"a\":\"value\",\"b\":[2,1]}")
+		["{} {}", "{\"a\":1,}", "[1,]", "/* comment */ {}", "[01]", "[.1]", "[1.]", "[1e]", "{\"a\":}", "{", "\"unterminated"].each do |source|
+			expect(package_json_parse(source).error[0].empty?()).to_be_false()
+		end
+	end
+
+	test("validates semantic versions and manifest defaults and local dependency boundaries") do
+		["1", "v1.2", "1.2.3", "v1.2.3-alpha.1+001", "v0.0.0"].each do |version|
+			expect(package_version_valid(version)).to_be_true()
+		end
+		["", "v", "1.02", "1.2.3.4", "1.2-alpha", "1.2.3-01", "1.2.3+", "1.2.3-"].each do |version|
+			expect(package_version_valid(version)).to_be_false()
+		end
+		manifest := package_manifest_parse("{\"formatVersion\":1,\"name\":\"local/widgets\",\"version\":\"1.0.0\"}")
+		expect(manifest.error).to_equal("")
+		expect(manifest.source_dir).to_equal("src")
+		expect(manifest.modes.size()).to_equal(4)
+		expect(manifest.modes[3]).to_equal("trb")
+		["\"sourceDir\":\"../src\"", "\"modes\":[\"go\",\"go\"]", "\"packages\":{\"local/other\":{\"path\":\"../other\"}}", "\"packages\":{\"local/other\":{\"path\":\"child\",\"version\":\"v1\"}}"].each do |invalid|
+			broken := package_manifest_parse("{\"formatVersion\":1,\"name\":\"local/widgets\",\"version\":\"1.0.0\"," + invalid + "}")
+			expect(broken.error.empty?()).to_be_false()
+		end
+	end
+end

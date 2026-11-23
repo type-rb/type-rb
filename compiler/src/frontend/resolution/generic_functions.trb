@@ -1,0 +1,189 @@
+import { test_provider_kind } from frontend/providers/test_declarations
+import { specialize_test_assertion } from frontend/providers/test_assertions
+import { TestCallOrigin, specialize_test_expectation, test_call_origin, test_origin_specialization_key } from frontend/providers/test_origins
+import { resource_type_arguments_valid } from frontend/types/resource_types
+import { specialize_web_context, web_context_kind } from frontend/providers/web_context
+import { time_codec_names_valid } from frontend/providers/time_codecs
+import { web_binding_kind } from frontend/providers/web_declarations
+import { specialize_web_binding } from frontend/providers/web_parameters
+import { specialize_web_input } from frontend/providers/web_inputs
+import { json_provider_kind } from frontend/providers/json_declarations
+import { specialize_json_codec } from frontend/providers/json_codecs
+import { default_parameter } from state/default_kinds
+import { object_abstract_method } from frontend/types/object_types
+import { namespace_parent } from frontend/types/namespace_model
+import { add_generic_binding } from frontend/types/generic_bindings
+import { find_function_in_module, find_generic_function_in_module, find_generic_in_module, find_record_in_module } from frontend/resolution/declaration_lookup
+import { find_enum_in_module } from frontend/types/enum_types
+import { generic_application, generic_substitute } from frontend/types/generic_arguments
+import { GenericFunctionInstance } from frontend/types/generic_model
+import { generic_field_type_valid } from frontend/resolution/generic_validation
+import { resolve_type_name } from frontend/resolution/type_resolution
+import { integer_string } from support/literals
+import { CompilerState, diagnostic, has_diagnostic } from state/state
+import { DefaultInitializer } from state/source_state
+import { store_integer, store_string } from support/storage
+
+def validate_generic_functions(mut state: CompilerState): Boolean
+	mut index := 0
+	while index < state.type_resolution.generic_functions.size() && !has_diagnostic(state)
+		row := state.type_resolution.generic_functions[index]
+		state.module_graph.active_module[0] = row.source_id
+		state.global_bindings.declaration_owner[0] = namespace_parent(row.name)
+		if find_generic_function_in_module(state, row.source_id, row.name) != index || find_function_in_module(state, row.source_id, row.name) >= 0 || find_generic_in_module(state, row.source_id, row.name) >= 0 || find_record_in_module(state, row.source_id, row.name) >= 0 || find_enum_in_module(state, row.source_id, row.name) >= 0
+			diagnostic(state, "TRBN4003", row.line, "duplicate function declaration " + row.name)
+		end
+		if row.name == "main" && row.source_id == state.module_graph.entry_module[0]
+			diagnostic(state, "TRBN4003", row.line, "main cannot have type parameters")
+		end
+		mut names: Hash<String, Integer> := {}
+		row.parameters.each do |parameter|
+			if names.key?(parameter.name)
+				diagnostic(state, "TRBN4003", parameter.line, "duplicate parameter declaration " + parameter.name)
+			end
+			names[parameter.name] = 1
+			if !generic_field_type_valid(state, row.source_id, parameter.type_name, row.type_parameters)
+				diagnostic(state, "TRBN4003", parameter.line, "invalid generic parameter type " + parameter.type_name)
+			end
+		end
+		if row.result_type != "Void" && !generic_field_type_valid(state, row.source_id, row.result_type, row.type_parameters)
+			diagnostic(state, "TRBN4003", row.line, "invalid generic result type " + row.result_type)
+		end
+		index += 1
+	end
+	return !has_diagnostic(state)
+end
+
+# Concrete instances share authored body origins, but own signatures and facts.
+# Publish the identity before visiting its body so recursion reuses the instance.
+def instantiate_generic_function(mut state: CompilerState, definition: Integer, arguments: Array<String>, depth: Integer): Integer
+	return instantiate_generic_function_at(state, definition, arguments, depth, -1)
+end
+
+def instantiate_generic_function_at(mut state: CompilerState, definition: Integer, arguments: Array<String>, depth: Integer, call_origin: Integer): Integer
+	if object_abstract_method(state, definition)
+		row := state.type_resolution.generic_functions[definition]
+		diagnostic(state, "TRBN4003", row.line, "interface method has no executable body")
+		return -1
+	end
+	return instantiate_method_signature(state, definition, arguments, depth, "", call_origin)
+end
+
+# Abstract contracts own signatures but never executable bodies. Inherited
+# methods specialize the receiver as well as the declaring class's arguments.
+def instantiate_method_signature(mut state: CompilerState, definition: Integer, arguments: Array<String>, depth: Integer, receiver: String, call_origin: Integer): Integer
+	row := state.type_resolution.generic_functions[definition]
+	if !resource_type_arguments_valid(state, arguments, row.source_id, row.line)
+		return -1
+	end
+	if arguments.size() != row.type_parameters.size()
+		diagnostic(state, "TRBN4003", row.line, "generic function type argument count differs")
+		return -1
+	end
+	mut valid := true
+	arguments.each do |argument|
+		if argument == ""
+			valid = false
+		end
+	end
+	if !valid
+		diagnostic(state, "TRBN4003", row.line, "invalid generic function type argument")
+		return -1
+	end
+	if (web_binding_kind(state, definition) > 0 || json_provider_kind(state, definition) > 0) && arguments.size() == 1
+		if !time_codec_names_valid(state, arguments[0], state.module_graph.active_module[0], row.line, 0, [], false)
+			return -1
+		end
+	end
+	test_provider := test_provider_kind(state, definition)
+	mut expectation_origin := TestCallOrigin.new(path: "", line: 0, column: 0)
+	if test_provider >= 1 && test_provider <= 3 && call_origin >= 0
+		expectation_origin = test_call_origin(state, call_origin)
+	end
+	mut key := generic_application(integer_string(definition), arguments) + test_origin_specialization_key(state, definition, call_origin)
+	if receiver != ""
+		key += ":" + receiver
+	end
+	if state.type_resolution.generic_function_lookup.key?(key)
+		return state.type_resolution.generic_function_instances[state.type_resolution.generic_function_lookup[key]].function
+	end
+	if depth >= 128
+		diagnostic(state, "TRBN4003", row.line, "generic function expansion exceeds the compiler nesting limit")
+		return -1
+	end
+	function := state.declarations.function_count[0]
+	parameter_start := state.declarations.parameter_count[0]
+	store_string(state.declarations.function_names, function, "$generic" + integer_string(definition) + ":" + generic_application(row.name, arguments))
+	store_integer(state.declarations.function_modules, function, row.source_id)
+	store_integer(state.declarations.function_parameter_starts, function, parameter_start)
+	store_integer(state.declarations.function_parameter_counts, function, row.parameters.size())
+	store_integer(state.declarations.function_body_starts, function, row.body_start)
+	store_integer(state.declarations.function_body_ends, function, row.body_finish)
+	store_integer(state.declarations.function_lines, function, row.line)
+	state.declarations.function_count[0] += 1
+	instance := state.type_resolution.generic_function_instances.size()
+	state.type_resolution.generic_function_instances.push(GenericFunctionInstance.new(application_key: key, definition: definition, arguments: arguments, function: function))
+	state.type_resolution.generic_function_lookup[key] = instance
+	store_integer(state.type_resolution.function_generic_bindings, function, add_generic_binding(state, row.source_id, row.type_parameters, arguments, depth))
+	saved_owner := state.global_bindings.declaration_owner[0]
+	state.global_bindings.declaration_owner[0] = namespace_parent(row.name)
+	saved_binding := state.callables.checked[0].generic_binding[0]
+	state.callables.checked[0].generic_binding[0] = 0
+	row.parameters.each do |parameter|
+		index := state.declarations.parameter_count[0]
+		mut type_name := resolve_type_name(state, row.source_id, generic_substitute(parameter.type_name, row.type_parameters, arguments), false)
+		if parameter.name == "self" && row.receiver_type != "" && receiver != ""
+			type_name = receiver
+		end
+		store_string(state.declarations.parameter_names, index, parameter.name)
+		store_string(state.declarations.parameter_types, index, type_name)
+		store_integer(state.declarations.parameter_lines, index, parameter.line)
+		store_integer(state.declarations.parameter_mutable, index, parameter.mutable)
+		store_integer(state.declarations.parameter_named_only, index, parameter.named_only)
+		if parameter.default_start >= 0
+			state.parsed.default_initializers.push(DefaultInitializer.new(kind: default_parameter(), owner: function, slot: index, start: parameter.default_start, finish: parameter.default_finish))
+			state.parsed.default_functions.push(-1)
+			store_integer(state.parsed.parameter_defaults, index, state.parsed.default_initializers.size())
+		end
+		state.declarations.parameter_count[0] += 1
+	end
+	if row.receiver_type != ""
+		mut receiver_type := receiver
+		if receiver_type == ""
+			receiver_type = resolve_type_name(state, row.source_id, generic_substitute(row.receiver_type, row.type_parameters, arguments), false)
+		end
+		store_string(state.nominal.function_receivers, function, receiver_type)
+	end
+	store_string(state.declarations.function_result_types, function, resolve_type_name(state, row.source_id, generic_substitute(row.result_type, row.type_parameters, arguments), true))
+	state.callables.checked[0].generic_binding[0] = saved_binding
+	state.global_bindings.declaration_owner[0] = saved_owner
+	context_kind := web_context_kind(state, definition)
+	if context_kind > 0
+		mut target := ""
+		if arguments.size() > 0
+			target = arguments[0]
+		end
+		if !specialize_web_context(state, function, target, context_kind)
+			return -1
+		end
+	end
+	kind := web_binding_kind(state, definition)
+	if kind == 3
+		if !specialize_web_input(state, function, arguments[0], call_origin)
+			return -1
+		end
+	elsif kind > 0 && !specialize_web_binding(state, function, arguments[0], kind, call_origin)
+		return -1
+	end
+	if test_provider >= 1 && test_provider <= 3 && !specialize_test_expectation(state, function, arguments, test_provider, expectation_origin)
+		return -1
+	end
+	if test_provider >= 10 && test_provider <= 16 && !specialize_test_assertion(state, function, arguments, test_provider, row.line)
+		return -1
+	end
+	codec := json_provider_kind(state, definition)
+	if codec > 0 && !specialize_json_codec(state, function, arguments[0], codec, call_origin)
+		return -1
+	end
+	return function
+end

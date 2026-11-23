@@ -1,0 +1,56 @@
+import { check } from compiler
+import { lex } from frontend/syntax/lexer
+import { logical_checked_source } from testing/pipeline
+import { verify_mir } from mir/verify/module
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { compiler_new } from state/state
+import { load_string } from support/storage
+import { describe, expect, test } from trb/std/test
+
+describe("Declaration attributes") do
+	test("retains record and enum metadata while checking argument expressions") do
+		mut state := logical_checked_source("def label(): String\nreturn \"item\"\nend\nrecord Item\ntext: String @display(name: label() + \" text\")\nend\nenum Flag\nYes @display(name: \"yes\")\nend\ndef main()\nputs(Item.new(text: \"ok\").text)\nend\n")
+		expect(state.parsed.attributes.size()).to_equal(2)
+		expect(state.parsed.attributes[0].owner).to_equal("Item")
+		expect(state.parsed.attributes[0].member).to_equal("text")
+		expect(state.parsed.attributes[0].name).to_equal("@display")
+		expect(state.parsed.attributes[0].arguments[0].name).to_equal("name")
+		expect(state.parsed.attributes[1].owner).to_equal("Flag")
+		expect(state.parsed.attributes[1].member).to_equal("Yes")
+		function_count := state.declarations.function_count[0]
+		expect(check(state)).to_be_true()
+		expect(state.declarations.function_count[0]).to_equal(function_count)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	end
+
+	test("retains attributes on generic declarations and raw enum values") do
+		sources := [
+			"record Box<T>\nvalue: T @display(name: \"value\")\nend\ndef main()\nreturn\nend\n",
+			"enum Choice<T>\nSome(value: T) @display(name: \"some\")\nend\ndef main()\nreturn\nend\n",
+			"enum Status\nReady = \"ready\" @display(name: \"ready\")\nDone = \"done\"\ndef label(): String\nreturn self.raw_value()\nend\nend\ndef main()\ncase Status.from_raw(\"ready\")\nwhen Result::Ok(value)\nputs(value.label())\nwhen Result::Err(error)\nputs(error.message)\nend\nend\n",
+		]
+		owners := ["Box", "Choice", "Status"]
+		mut index := 0
+		while index < sources.size()
+			source := sources[index]
+			mut state := compiler_new(source.size() + 1)
+			expect(lex(state, source)).to_be_true()
+			expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+			expect(resolve(state)).to_be_true()
+			expect(state.parsed.attributes.size()).to_equal(1)
+			expect(state.parsed.attributes[0].owner).to_equal(owners[index])
+			expect(check(state)).to_be_true()
+			index += 1
+		end
+	end
+
+	test("rejects unresolved arguments and Go-only field metadata") do
+		mut unresolved := logical_checked_source("record Item\ntext: String @display(name: missing)\nend\ndef main()\nreturn\nend\n")
+		expect(check(unresolved)).to_be_false()
+		expect(load_string(unresolved.diagnostics.messages, 0) != "").to_be_true()
+		mut mode_specific := logical_checked_source("record Item\ntext: String @gorm(column: \"text\")\nend\ndef main()\nreturn\nend\n")
+		expect(check(mode_specific)).to_be_false()
+		expect(load_string(mode_specific.diagnostics.messages, 0)).to_equal("@gorm is only available in mode: go")
+	end
+end

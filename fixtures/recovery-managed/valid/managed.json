@@ -1,0 +1,342 @@
+{
+  "format": "type-rb-bootstrap-snapshot",
+  "version": 4,
+  "module": "example",
+  "entryFunction": "example#main",
+  "sources": [
+    { "id": "main", "path": "src/main.trb" }
+  ],
+  "types": [
+    {
+      "kind": "record",
+      "id": "example#Point",
+      "fields": [
+        { "name": "x", "type": "Integer" },
+        { "name": "y", "type": "Integer" }
+      ]
+    },
+    {
+      "kind": "tagged",
+      "id": "example#Outcome",
+      "variants": [
+        {
+          "name": "Found",
+          "fields": [
+            { "name": "point", "type": "example#Point" }
+          ]
+        },
+        {
+          "name": "Missing",
+          "fields": [
+            { "name": "code", "type": "Integer" }
+          ]
+        }
+      ]
+    }
+  ],
+  "functions": [
+    {
+      "id": "example#main",
+      "name": "main",
+      "captures": [],
+      "parameters": [],
+      "result": "Void",
+      "entry": "b0",
+      "origin": {
+        "source": "main",
+        "startLine": 1,
+        "startColumn": 1,
+        "endLine": 18,
+        "endColumn": 4
+      },
+      "blocks": [
+        {
+          "id": "b0",
+          "parameters": [],
+          "origin": {
+            "source": "main",
+            "startLine": 2,
+            "startColumn": 1,
+            "endLine": 7,
+            "endColumn": 4
+          },
+          "instructions": [
+            {
+              "op": "integer_literal",
+              "result": "twenty",
+              "value": 20,
+              "origin": {
+                "source": "main",
+                "startLine": 2,
+                "startColumn": 1,
+                "endLine": 2,
+                "endColumn": 8
+              }
+            },
+            {
+              "op": "integer_literal",
+              "result": "twentyTwo",
+              "value": 22,
+              "origin": {
+                "source": "main",
+                "startLine": 3,
+                "startColumn": 1,
+                "endLine": 3,
+                "endColumn": 8
+              }
+            },
+            {
+              "op": "record_construct",
+              "result": "point",
+              "type": "example#Point",
+              "arguments": ["twenty", "twentyTwo"],
+              "origin": {
+                "source": "main",
+                "startLine": 4,
+                "startColumn": 1,
+                "endLine": 4,
+                "endColumn": 8
+              }
+            },
+            {
+              "op": "variant_construct",
+              "result": "outcome",
+              "type": "example#Outcome",
+              "variant": "Found",
+              "arguments": ["point"],
+              "origin": {
+                "source": "main",
+                "startLine": 5,
+                "startColumn": 1,
+                "endLine": 5,
+                "endColumn": 8
+              }
+            },
+            {
+              "op": "variant_test",
+              "result": "isFound",
+              "type": "example#Outcome",
+              "value": "outcome",
+              "variant": "Found",
+              "origin": {
+                "source": "main",
+                "startLine": 6,
+                "startColumn": 1,
+                "endLine": 6,
+                "endColumn": 8
+              }
+            }
+          ],
+          "terminator": {
+            "op": "branch",
+            "condition": "isFound",
+            "whenTrue": "b1",
+            "trueArguments": ["outcome"],
+            "whenFalse": "b3",
+            "falseArguments": [],
+            "origin": {
+              "source": "main",
+              "startLine": 7,
+              "startColumn": 1,
+              "endLine": 7,
+              "endColumn": 8
+            }
+          }
+        },
+        {
+          "id": "b1",
+          "parameters": [
+            {
+              "id": "matched",
+              "type": "example#Outcome",
+              "origin": {
+                "source": "main",
+                "startLine": 8,
+                "startColumn": 1,
+                "endLine": 8,
+                "endColumn": 8
+              }
+            }
+          ],
+          "origin": {
+            "source": "main",
+            "startLine": 8,
+            "startColumn": 1,
+            "endLine": 13,
+            "endColumn": 4
+          },
+          "instructions": [
+            {
+              "op": "variant_project",
+              "result": "payload",
+              "type": "example#Outcome",
+              "value": "matched",
+              "variant": "Found",
+              "field": "point",
+              "origin": {
+                "source": "main",
+                "startLine": 8,
+                "startColumn": 1,
+                "endLine": 8,
+                "endColumn": 8
+              }
+            },
+            {
+              "op": "record_project",
+              "result": "x",
+              "type": "example#Point",
+              "record": "payload",
+              "field": "x",
+              "origin": {
+                "source": "main",
+                "startLine": 9,
+                "startColumn": 1,
+                "endLine": 9,
+                "endColumn": 8
+              }
+            },
+            {
+              "op": "record_project",
+              "result": "y",
+              "type": "example#Point",
+              "record": "payload",
+              "field": "y",
+              "origin": {
+                "source": "main",
+                "startLine": 10,
+                "startColumn": 1,
+                "endLine": 10,
+                "endColumn": 8
+              }
+            },
+            {
+              "op": "integer_binary",
+              "result": "sum",
+              "operator": "add",
+              "left": "x",
+              "right": "y",
+              "origin": {
+                "source": "main",
+                "startLine": 11,
+                "startColumn": 1,
+                "endLine": 11,
+                "endColumn": 8
+              }
+            },
+            {
+              "op": "integer_literal",
+              "result": "expected",
+              "value": 42,
+              "origin": {
+                "source": "main",
+                "startLine": 12,
+                "startColumn": 1,
+                "endLine": 12,
+                "endColumn": 8
+              }
+            },
+            {
+              "op": "integer_compare",
+              "result": "matches",
+              "operator": "equal",
+              "left": "sum",
+              "right": "expected",
+              "origin": {
+                "source": "main",
+                "startLine": 13,
+                "startColumn": 1,
+                "endLine": 13,
+                "endColumn": 8
+              }
+            }
+          ],
+          "terminator": {
+            "op": "branch",
+            "condition": "matches",
+            "whenTrue": "b2",
+            "trueArguments": [],
+            "whenFalse": "b3",
+            "falseArguments": [],
+            "origin": {
+              "source": "main",
+              "startLine": 13,
+              "startColumn": 1,
+              "endLine": 13,
+              "endColumn": 8
+            }
+          }
+        },
+        {
+          "id": "b2",
+          "parameters": [],
+          "origin": {
+            "source": "main",
+            "startLine": 14,
+            "startColumn": 1,
+            "endLine": 15,
+            "endColumn": 4
+          },
+          "instructions": [
+            {
+              "op": "write_static",
+              "value": "recovery-managed-snapshot\n",
+              "origin": {
+                "source": "main",
+                "startLine": 14,
+                "startColumn": 1,
+                "endLine": 14,
+                "endColumn": 8
+              }
+            }
+          ],
+          "terminator": {
+            "op": "return",
+            "value": null,
+            "origin": {
+              "source": "main",
+              "startLine": 15,
+              "startColumn": 1,
+              "endLine": 15,
+              "endColumn": 8
+            }
+          }
+        },
+        {
+          "id": "b3",
+          "parameters": [],
+          "origin": {
+            "source": "main",
+            "startLine": 16,
+            "startColumn": 1,
+            "endLine": 17,
+            "endColumn": 4
+          },
+          "instructions": [
+            {
+              "op": "write_static",
+              "value": "bad\n",
+              "origin": {
+                "source": "main",
+                "startLine": 16,
+                "startColumn": 1,
+                "endLine": 16,
+                "endColumn": 8
+              }
+            }
+          ],
+          "terminator": {
+            "op": "return",
+            "value": null,
+            "origin": {
+              "source": "main",
+              "startLine": 17,
+              "startColumn": 1,
+              "endLine": 17,
+              "endColumn": 8
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

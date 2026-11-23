@@ -1,0 +1,345 @@
+{
+  "reference_revision": "cc8c734f73f5149464838825cdbb2165058ed26d",
+  "cases": [
+    {
+      "id": "compact-binding",
+      "source": "s:=123\ns+\"aaa\"\n",
+      "reference_status": 0,
+      "formatted": "s := 123\ns + \"aaa\"\n",
+      "reference_error": "",
+      "native_status": "supported"
+    },
+    {
+      "id": "comments",
+      "source": "# keep  heading\ns:=1 # keep  tail\n\n\nputs( s )\n",
+      "reference_status": 0,
+      "formatted": "# keep  heading\ns := 1 # keep  tail\n\nputs(s)\n",
+      "reference_error": "",
+      "native_status": "supported"
+    },
+    {
+      "id": "quoted-spelling",
+      "source": "a:=\"a  b\\n\\t\"\nb:='x  y'\n",
+      "reference_status": 0,
+      "formatted": "a := \"a  b\\n\\t\"\nb := 'x  y'\n",
+      "reference_error": "",
+      "native_status": "supported"
+    },
+    {
+      "id": "interpolation",
+      "source": "value:=\"a #{1+2} b\"\n",
+      "reference_status": 0,
+      "formatted": "value := \"a #{1+2} b\"\n",
+      "reference_error": "",
+      "native_status": "supported"
+    },
+    {
+      "id": "multiline-string",
+      "source": "value:=\"first\n  second\"\nputs( value )\n",
+      "reference_status": 0,
+      "formatted": "value := \"first\n  second\"\nputs(value)\n",
+      "reference_error": "",
+      "native_status": "unsupported",
+      "gap": "The Native syntax frontend rejects this spelling; reference formatter acceptance does not establish Native execution support."
+    },
+    {
+      "id": "nested-interpolation",
+      "source": "puts(\"#{\"inner\"}\")\n",
+      "reference_status": 0,
+      "formatted": "puts(\"#{\"inner\"}\")\n",
+      "reference_error": "",
+      "native_status": "supported"
+    },
+    {
+      "id": "unary-signs",
+      "source": "value:= - -1\nother:= + +2\nputs( 1- -2 )\n",
+      "reference_status": 0,
+      "formatted": "value := - -1\nother := + +2\nputs(1 - -2)\n",
+      "reference_error": "",
+      "native_status": "supported"
+    },
+    {
+      "id": "numeric-literals",
+      "source": "a:=1e-3\nb:=1.25e+4\nc:=0xff\nd:=1_000\n",
+      "reference_status": 0,
+      "formatted": "a := 1e-3\nb := 1.25e+4\nc := 0xff\nd := 1_000\n",
+      "reference_error": "",
+      "native_status": "unsupported",
+      "gap": "The Native syntax frontend rejects this spelling; reference formatter acceptance does not establish Native execution support."
+    },
+    {
+      "id": "ranges",
+      "source": "a:=1..3\nb:=1...4\n",
+      "reference_status": 0,
+      "formatted": "a := 1..3\nb := 1...4\n",
+      "reference_error": "",
+      "native_status": "supported"
+    },
+    {
+      "id": "calls",
+      "source": "puts(1, 2)\nvalues[ 0 ]\nvalues.size()\n",
+      "reference_status": 0,
+      "formatted": "puts(1, 2)\nvalues[0]\nvalues.size()\n",
+      "reference_error": "",
+      "native_status": "supported"
+    },
+    {
+      "id": "array-hash",
+      "source": "values:=[1,2,3]\nitems:={\"x\"=>1,\"y\"=>2}\n",
+      "reference_status": 0,
+      "formatted": "values := [1, 2, 3]\nitems := { \"x\" => 1, \"y\" => 2 }\n",
+      "reference_error": "",
+      "native_status": "supported"
+    },
+    {
+      "id": "labels",
+      "source": "value:=Thing.new(x:1,y:\"two\")\n",
+      "reference_status": 0,
+      "formatted": "value := Thing.new(x: 1, y: \"two\")\n",
+      "reference_error": "",
+      "native_status": "supported"
+    },
+    {
+      "id": "nullable-types",
+      "source": "value:String? :=nil\nvalues:Array<String?> :=[]\n",
+      "reference_status": 0,
+      "formatted": "value: String? := nil\nvalues: Array<String?> := []\n",
+      "reference_error": "",
+      "native_status": "supported"
+    },
+    {
+      "id": "generics",
+      "source": "def identity<T>(value:T):T\nreturn value\nend\nputs(identity<Integer>(1))\n",
+      "reference_status": 0,
+      "formatted": "def identity<T>(value: T): T\n\treturn value\nend\nputs(identity<Integer>(1))\n",
+      "reference_error": "",
+      "native_status": "supported"
+    },
+    {
+      "id": "nested-generics",
+      "source": "value:Hash<String,Array<Integer>> :={}\n",
+      "reference_status": 0,
+      "formatted": "value: Hash<String, Array<Integer>> := {}\n",
+      "reference_error": "",
+      "native_status": "supported"
+    },
+    {
+      "id": "function-type",
+      "source": "alias Handler = (Integer,String)-> Boolean\n",
+      "reference_status": 0,
+      "formatted": "alias Handler = (Integer, String) -> Boolean\n",
+      "reference_error": "",
+      "native_status": "supported"
+    },
+    {
+      "id": "function-defaults",
+      "source": "def f(x:Integer=1,y:String?=nil):Integer\nreturn x+2\nend\n",
+      "reference_status": 0,
+      "formatted": "def f(x: Integer = 1, y: String? = nil): Integer\n\treturn x + 2\nend\n",
+      "reference_error": "",
+      "native_status": "supported"
+    },
+    {
+      "id": "record",
+      "source": "record Point\nx:Integer\ny:Integer\nend\n",
+      "reference_status": 0,
+      "formatted": "record Point\n\tx: Integer\n\ty: Integer\nend\n",
+      "reference_error": "",
+      "native_status": "supported"
+    },
+    {
+      "id": "class",
+      "source": "class Point\n@x:Integer\ndef initialize(x:Integer)\n@x=x\nend\nend\n",
+      "reference_status": 0,
+      "formatted": "class Point\n\t@x: Integer\n\tdef initialize(x: Integer)\n\t\t@x = x\n\tend\nend\n",
+      "reference_error": "",
+      "native_status": "supported"
+    },
+    {
+      "id": "if-else",
+      "source": "if true\nputs(1)\nelse\nputs(2)\nend\n",
+      "reference_status": 0,
+      "formatted": "if true\n\tputs(1)\nelse\n\tputs(2)\nend\n",
+      "reference_error": "",
+      "native_status": "supported"
+    },
+    {
+      "id": "while",
+      "source": "mut n:=0\nwhile n<3\nn+=1\nend\n",
+      "reference_status": 0,
+      "formatted": "mut n := 0\nwhile n < 3\n\tn += 1\nend\n",
+      "reference_error": "",
+      "native_status": "supported"
+    },
+    {
+      "id": "case",
+      "source": "case value\nwhen 1\nputs(\"one\")\nelse\nputs(\"other\")\nend\n",
+      "reference_status": 0,
+      "formatted": "case value\nwhen 1\n\tputs(\"one\")\nelse\n\tputs(\"other\")\nend\n",
+      "reference_error": "",
+      "native_status": "supported"
+    },
+    {
+      "id": "block",
+      "source": "[1,2].each do |x|\nputs(x+1)\nend\n",
+      "reference_status": 0,
+      "formatted": "[1, 2].each do |x|\n\tputs(x + 1)\nend\n",
+      "reference_error": "",
+      "native_status": "supported"
+    },
+    {
+      "id": "brace-block",
+      "source": "[1,2].each { |x| puts(x); puts(x+1) }\n",
+      "reference_status": 0,
+      "formatted": "[1, 2].each { |x| puts(x); puts(x + 1) }\n",
+      "reference_error": "",
+      "native_status": "supported"
+    },
+    {
+      "id": "function-value",
+      "source": "f:=fn(x:Integer):Integer\nreturn x+1\nend\n",
+      "reference_status": 0,
+      "formatted": "f := fn(x: Integer): Integer\n\treturn x + 1\nend\n",
+      "reference_error": "",
+      "native_status": "supported"
+    },
+    {
+      "id": "nested-function",
+      "source": "def f(handler:(Integer)->Integer):Integer\nreturn handler(1)\nend\n",
+      "reference_status": 0,
+      "formatted": "def f(handler: (Integer) -> Integer): Integer\n\treturn handler(1)\nend\n",
+      "reference_error": "",
+      "native_status": "supported"
+    },
+    {
+      "id": "ternary",
+      "source": "value:=true ? 1 : 2\n",
+      "reference_status": 0,
+      "formatted": "value := true ? 1 : 2\n",
+      "reference_error": "",
+      "native_status": "supported"
+    },
+    {
+      "id": "nested-ternary",
+      "source": "value:=true ? (false ? 1:2):3\n",
+      "reference_status": 0,
+      "formatted": "value := true ?(false ? 1 : 2) : 3\n",
+      "reference_error": "",
+      "native_status": "supported"
+    },
+    {
+      "id": "symbols",
+      "source": "value:=:end\nvalues:=[:if,:when,:else]\n",
+      "reference_status": 0,
+      "formatted": "value :=:end\nvalues := [:if,:when,:else]\n",
+      "reference_error": "",
+      "native_status": "supported"
+    },
+    {
+      "id": "semicolons",
+      "source": "s:=1;puts(s);s+2\n",
+      "reference_status": 0,
+      "formatted": "s := 1\nputs(s)\ns + 2\n",
+      "reference_error": "",
+      "native_status": "supported"
+    },
+    {
+      "id": "multiline-array",
+      "source": "values:=[\n1,\n2,\n]\n",
+      "reference_status": 0,
+      "formatted": "values := [\n\t1,\n\t2,\n]\n",
+      "reference_error": "",
+      "native_status": "supported"
+    },
+    {
+      "id": "multiline-call",
+      "source": "puts(\n1,\n2,\n)\n",
+      "reference_status": 0,
+      "formatted": "puts(\n\t1,\n\t2,\n)\n",
+      "reference_error": "",
+      "native_status": "supported"
+    },
+    {
+      "id": "import",
+      "source": "import { Instant,TimeZone } from trb/std/time\n",
+      "reference_status": 0,
+      "formatted": "import { Instant, TimeZone } from trb/std/time\n",
+      "reference_error": "",
+      "native_status": "supported"
+    },
+    {
+      "id": "blank",
+      "source": "\n\n",
+      "reference_status": 0,
+      "formatted": "\n",
+      "reference_error": "",
+      "native_status": "supported"
+    },
+    {
+      "id": "comment-only",
+      "source": "  # keep me\n",
+      "reference_status": 0,
+      "formatted": "# keep me\n",
+      "reference_error": "",
+      "native_status": "supported"
+    },
+    {
+      "id": "utf8",
+      "source": "名前:=\"日本語\"\nputs(名前)\n",
+      "reference_status": 0,
+      "formatted": "名前 := \"日本語\"\nputs(名前)\n",
+      "reference_error": "",
+      "native_status": "supported"
+    },
+    {
+      "id": "conditional-transfer",
+      "source": "def f(value:Integer):Integer\nreturn 1 if value>0\nreturn 0\nend\n",
+      "reference_status": 0,
+      "formatted": "def f(value: Integer): Integer\n\treturn 1 if value > 0\n\treturn 0\nend\n",
+      "reference_error": "",
+      "native_status": "supported"
+    },
+    {
+      "id": "keyword-labels",
+      "source": "values:={if:1,end:2}\nputs(values)\n",
+      "reference_status": 0,
+      "formatted": "values := { if: 1, end: 2 }\nputs(values)\n",
+      "reference_error": "",
+      "native_status": "unsupported",
+      "gap": "The Native syntax parser rejects these keyword Hash labels; this control is not passing parity."
+    },
+    {
+      "id": "multiline-keyword-labels",
+      "source": "values:={\nif:1,\nend:2\n}\nputs(values)\n",
+      "reference_status": 0,
+      "formatted": "values := {\n\tif: 1,\n\tend: 2\n}\nputs(values)\n",
+      "reference_error": "",
+      "native_status": "unsupported",
+      "gap": "The Native syntax parser rejects these keyword Hash labels; this control is not passing parity."
+    },
+    {
+      "id": "from-identifier",
+      "source": "from:=4\nvalue:=from/2\nputs(value)\n",
+      "reference_status": 0,
+      "formatted": "from := 4\nvalue := from/2\nputs(value)\n",
+      "reference_error": "",
+      "native_status": "supported"
+    },
+    {
+      "id": "empty",
+      "source": "",
+      "reference_status": 0,
+      "formatted": "\n",
+      "reference_error": "",
+      "native_status": "supported"
+    },
+    {
+      "id": "trailing-comment",
+      "source": "s:=1 # keep  middle  \nputs(s)\n",
+      "reference_status": 0,
+      "formatted": "s := 1 # keep  middle\nputs(s)\n",
+      "reference_error": "",
+      "native_status": "supported"
+    }
+  ]
+}

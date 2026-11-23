@@ -1,0 +1,14 @@
+def increment(value: Integer): Integer
+	return value + 1
+end
+
+def main()
+	mut value := 9007199254740991
+	mut index := 0
+	while index < 1
+		value = increment(value)
+		index += 1
+	end
+	puts(value.to_s())
+	return
+end

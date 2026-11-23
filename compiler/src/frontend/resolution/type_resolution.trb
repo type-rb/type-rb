@@ -1,0 +1,638 @@
+import { resource_type_arguments_valid } from frontend/types/resource_types
+import { default_record_field } from state/default_kinds
+import { generic_record } from frontend/types/generic_kinds
+import { declaration_object } from frontend/types/declaration_kinds
+import { ObjectField, ObjectInstance } from frontend/types/object_model
+import { find_object_type, object_instance_type } from frontend/types/object_types
+import { find_visible_declaration } from frontend/resolution/declaration_lookup
+import { literal_type_base, literal_type_display } from frontend/types/literal_types
+import { find_newtype_type, newtype_type } from frontend/types/newtype_types
+import { find_visible_newtype } from frontend/resolution/declaration_lookup
+import { union_parts, union_type } from frontend/types/union_types
+import { namespace_parent } from frontend/types/namespace_model
+import { callable_parts, callable_type } from frontend/types/callable_types
+import { TypeAliasInstance } from frontend/types/alias_model
+import { abstract_generic_type_name, abstract_generic_type_valid, add_generic_binding, next_generic_depth } from frontend/types/generic_bindings
+import { find_visible_alias, find_visible_enum, find_visible_generic, find_visible_record } from frontend/resolution/declaration_lookup
+import { EnumDefinition, EnumField, EnumVariant } from frontend/types/enum_model
+import { GenericInstance } from frontend/types/generic_model
+import { generic_application, generic_arguments, generic_base, generic_substitute } from frontend/types/generic_arguments
+import { enum_type, find_enum_type } from frontend/types/enum_types
+import { nullable_common, nullable_element, nullable_type } from frontend/types/nullable_types
+import { hash_key_type, hash_scalar_key, hash_type, hash_value_type, semantic_value_type } from frontend/types/hash_types
+import { integer_string } from support/literals
+import { string_starts_with } from support/path
+import { CompilerState, diagnostic, has_diagnostic } from state/state
+import { DefaultInitializer } from state/source_state
+import { load_integer, load_string, store_integer, store_string } from support/storage
+
+def record_type(record_index: Integer): String
+	return "Record#" + integer_string(record_index)
+end
+
+def find_record_type(state: CompilerState, type_name: String): Integer
+	mut found := -1
+	mut index := 0
+	while index < state.declarations.record_count[0]
+		if record_type(index) == type_name
+			found = index
+		end
+		index += 1
+	end
+	return found
+end
+
+def type_display(state: CompilerState, type_name: String): String
+	if string_starts_with(type_name, "TypeParameter#")
+		name := abstract_generic_type_name(state, type_name)
+		if name != ""
+			return name
+		end
+	end
+	if literal_type_base(type_name) != ""
+		return literal_type_display(type_name)
+	end
+	alternatives := union_parts(type_name)
+	if alternatives.size() > 0
+		mut names: Array<String> := []
+		alternatives.each do |alternative|
+			names.push(type_display(state, alternative))
+		end
+		# Display order uses public names, independently of internal nominal IDs.
+		mut ordered := union_parts(union_type(names))
+		if ordered.size() == 0
+			ordered = names
+		end
+		mut display := ""
+		ordered.each do |name|
+			if display != ""
+				display += " | "
+			end
+			display += name
+		end
+		return display
+	end
+	parts := callable_parts(type_name)
+	if parts.size() > 0
+		mut display := "("
+		mut index := 1
+		while index < parts.size()
+			if index > 1
+				display += ", "
+			end
+			display += type_display(state, parts[index])
+			index += 1
+		end
+		return display + ") -> " + type_display(state, parts[0])
+	end
+	instance := generic_instance_for_type(state, type_name)
+	if instance >= 0
+		row := state.type_resolution.generic_instances[instance]
+		mut display := state.type_resolution.generic_definitions[row.definition].name + "<"
+		mut index := 0
+		row.arguments.each do |argument|
+			if index > 0
+				display += ", "
+			end
+			display += type_display(state, argument)
+			index += 1
+		end
+		return display + ">"
+	end
+	optional := nullable_element(type_name)
+	if optional != ""
+		if union_parts(optional).size() > 0 || callable_parts(optional).size() > 0
+			return "(" + type_display(state, optional) + ")?"
+		end
+		return type_display(state, optional) + "?"
+	end
+	if hash_key_type(type_name) != ""
+		return "Hash<" + type_display(state, hash_key_type(type_name)) + ", " + type_display(state, hash_value_type(type_name)) + ">"
+	end
+	object_index := find_object_type(state, type_name)
+	if object_index >= 0
+		row := state.nominal.object_instances[object_index]
+		mut arguments: Array<String> := []
+		row.arguments.each do |argument|
+			arguments.push(type_display(state, argument))
+		end
+		if arguments.size() == 0
+			return state.nominal.objects[row.definition].name
+		end
+		return generic_application(state.nominal.objects[row.definition].name, arguments)
+	end
+	newtype_index := find_newtype_type(state, type_name)
+	if newtype_index >= 0
+		return state.nominal.newtypes[newtype_index].name
+	end
+	enum_index := find_enum_type(state, type_name)
+	if enum_index >= 0
+		return state.nominal.enums[enum_index].name
+	end
+	record_index := find_record_type(state, type_name)
+	if record_index >= 0
+		return load_string(state.declarations.record_names, record_index)
+	end
+	element := array_element_type(type_name)
+	if element != ""
+		return "Array<" + type_display(state, element) + ">"
+	end
+	return type_name
+end
+
+def find_field(state: CompilerState, record_index: Integer, name: String): Integer
+	start := load_integer(state.declarations.record_field_starts, record_index)
+	mut index := start + load_integer(state.declarations.record_field_counts, record_index) - 1
+	while index >= start
+		if load_string(state.declarations.field_names, index) == name
+			return index
+		end
+		index -= 1
+	end
+	return -1
+end
+
+def builtin_type_exists(type_name: String, allow_void: Boolean): Boolean
+	if type_name == "Any" || type_name == "Nil" || type_name == "Integer" || type_name == "Range<Integer>"
+		return true
+	end
+	if type_name == "Float"
+		return true
+	end
+	if type_name == "Boolean"
+		return true
+	end
+	if type_name == "String" || type_name == "Bytes" || type_name == "StringBuilder"
+		return true
+	end
+	if type_name == "Void"
+		return allow_void
+	end
+	if array_element_type(type_name) != ""
+		return true
+	end
+	return false
+end
+
+def resolve_type_name(
+		mut state: CompilerState,
+		module_index: Integer,
+		type_name: String,
+		allow_void: Boolean,
+	): String
+	if literal_type_base(type_name) != ""
+		return type_name
+	end
+	encoded := state.callables.checked[0].generic_binding[0]
+	if encoded > 0
+		binding := state.type_resolution.generic_bindings[encoded - 1]
+		if module_index == binding.source_id
+			bound := generic_substitute(type_name, binding.parameters, binding.arguments)
+			if bound != type_name
+				return resolve_type_name(state, module_index, bound, allow_void)
+			end
+		end
+	end
+	if state.type_resolution.generic_template_mode[0] && abstract_generic_type_valid(state, type_name)
+		return type_name
+	end
+	alternatives := union_parts(type_name)
+	if alternatives.size() > 0
+		mut resolved: Array<String> := []
+		alternatives.each do |alternative|
+			resolved.push(resolve_type_name(state, module_index, alternative, false))
+		end
+		return union_type(resolved)
+	end
+	optional := nullable_element(type_name)
+	if optional != ""
+		return nullable_type(resolve_type_name(state, module_index, optional, false))
+	end
+	callable := callable_parts(type_name)
+	if callable.size() > 0
+		result := resolve_type_name(state, module_index, callable[0], true)
+		if result == ""
+			return ""
+		end
+		mut parameters: Array<String> := []
+		mut index := 1
+		while index < callable.size()
+			parameter := resolve_type_name(state, module_index, callable[index], false)
+			if parameter == ""
+				return ""
+			end
+			parameters.push(parameter)
+			index += 1
+		end
+		return callable_type(parameters, result)
+	end
+	if string_starts_with(type_name, "Record#") || string_starts_with(type_name, "Enum#") || string_starts_with(type_name, "Newtype#") || string_starts_with(type_name, "Class#") || string_starts_with(type_name, "Interface#")
+		if find_record_type(state, type_name) >= 0 || find_enum_type(state, type_name) >= 0 || find_newtype_type(state, type_name) >= 0 || find_object_type(state, type_name) >= 0
+			return type_name
+		end
+		return ""
+	end
+	parts := generic_arguments(type_name)
+	alias_index := find_visible_alias(state, module_index, generic_base(type_name))
+	if alias_index >= 0
+		mut arguments: Array<String> := []
+		parts.each do |part|
+			arguments.push(resolve_type_name(state, module_index, part, false))
+		end
+		return resolve_alias_type(state, alias_index, arguments)
+	end
+	if generic_base(type_name) == "Hash" && parts.size() == 2
+		key := resolve_type_name(state, module_index, parts[0], false)
+		value := resolve_type_name(state, module_index, parts[1], false)
+		if !hash_scalar_key(key) || value == ""
+			return ""
+		end
+		return hash_type(key, value)
+	end
+	if generic_base(type_name) == "Range" && parts.size() == 1
+		if resolve_type_name(state, module_index, parts[0], false) == "Integer"
+			return "Range<Integer>"
+		end
+		return ""
+	end
+	if builtin_type_exists(type_name, allow_void)
+		return type_name
+	end
+	object_definition := find_visible_declaration(state, module_index, generic_base(type_name), declaration_object())
+	if object_definition >= 0
+		mut object_arguments: Array<String> := []
+		parts.each do |argument|
+			object_arguments.push(resolve_type_name(state, module_index, argument, false))
+		end
+		return instantiate_object_type(state, object_definition, object_arguments)
+	end
+	if parts.size() > 0
+		definition := find_visible_generic(state, module_index, generic_base(type_name))
+		if definition >= 0
+			mut resolved: Array<String> := []
+			parts.each do |argument|
+				resolved.push(resolve_type_name(state, module_index, argument, false))
+			end
+			return instantiate_generic_nominal(state, definition, resolved)
+		end
+	end
+	newtype_index := find_visible_newtype(state, module_index, type_name)
+	if newtype_index >= 0
+		return newtype_type(newtype_index)
+	end
+	enum_index := find_visible_enum(state, module_index, type_name)
+	if enum_index >= 0
+		return enum_type(enum_index)
+	end
+	record_index := find_visible_record(state, module_index, type_name)
+	if record_index >= 0
+		return record_type(record_index)
+	end
+	element := array_inner_name(type_name)
+	if element != ""
+		resolved := resolve_type_name(state, module_index, element, false)
+		if resolved != ""
+			return "Array<" + resolved + ">"
+		end
+	end
+	return ""
+end
+
+def generic_instance_for_type(state: CompilerState, type_name: String): Integer
+	mut index := 0
+	while index < state.type_resolution.generic_instances.size()
+		if state.type_resolution.generic_instances[index].type_name == type_name
+			return index
+		end
+		index += 1
+	end
+	return -1
+end
+
+# Publish the complete shell before resolving fields. Recursion reuses its
+# nominal identity; nested instances cannot interleave this instance's spans.
+def instantiate_generic_nominal(mut state: CompilerState, definition: Integer, arguments: Array<String>): String
+	declaration := state.type_resolution.generic_definitions[definition]
+	if !resource_type_arguments_valid(state, arguments, declaration.source_id, declaration.line)
+		return ""
+	end
+	if arguments.size() != declaration.parameters.size()
+		return ""
+	end
+	mut valid := true
+	arguments.each do |argument|
+		if argument == ""
+			valid = false
+		end
+	end
+	if !valid
+		return ""
+	end
+	key := generic_application(integer_string(definition), arguments)
+	if state.type_resolution.generic_instance_lookup.key?(key)
+		return state.type_resolution.generic_instances[state.type_resolution.generic_instance_lookup[key]].type_name
+	end
+	depth := state.type_resolution.generic_depth[0] + next_generic_depth(state)
+	if depth >= 128
+		diagnostic(state, "TRBN4003", declaration.line, "generic type expansion exceeds the compiler nesting limit")
+		return ""
+	end
+	previous_module := state.module_graph.active_module[0]
+	previous_owner := state.global_bindings.declaration_owner[0]
+	state.global_bindings.declaration_owner[0] = namespace_parent(declaration.name)
+	saved_alias_depth := state.type_resolution.alias_expansion_depth[0]
+	mut saved_alias_path: Array<Integer> := []
+	mut alias_step := 0
+	while alias_step < saved_alias_depth
+		saved_alias_path.push(load_integer(state.type_resolution.alias_expansion_path, alias_step))
+		alias_step += 1
+	end
+	state.type_resolution.alias_expansion_depth[0] = 0
+	state.module_graph.active_module[0] = declaration.source_id
+	state.type_resolution.generic_depth[0] += 1
+	saved_binding := state.callables.checked[0].generic_binding[0]
+	state.callables.checked[0].generic_binding[0] = 0
+	name := generic_application(declaration.name, arguments)
+	mut type_name := ""
+	mut owner := 0
+	if declaration.kind == generic_record()
+		owner = state.declarations.record_count[0]
+		type_name = record_type(owner)
+		store_string(state.declarations.record_names, owner, name)
+		store_integer(state.declarations.record_modules, owner, declaration.source_id)
+		store_integer(state.declarations.record_lines, owner, declaration.line)
+		store_integer(state.declarations.record_field_starts, owner, state.declarations.field_count[0])
+		store_integer(state.declarations.record_field_counts, owner, declaration.variants[0].fields.size())
+		state.declarations.record_count[0] += 1
+		store_integer(state.type_resolution.record_generic_bindings, owner, add_generic_binding(state, declaration.source_id, declaration.parameters, arguments, depth))
+		declaration.variants[0].fields.each do |field|
+			slot := state.declarations.field_count[0]
+			store_string(state.declarations.field_names, slot, field.name)
+			store_string(state.declarations.field_types, slot, generic_substitute(field.type_name, declaration.parameters, arguments))
+			store_string(state.parsed.field_type_names, slot, generic_substitute(field.type_name, declaration.parameters, arguments))
+			store_integer(state.declarations.field_lines, slot, field.line)
+			if field.default_start >= 0
+				state.parsed.default_initializers.push(DefaultInitializer.new(kind: default_record_field(), owner: owner, slot: slot, start: field.default_start, finish: field.default_finish))
+				state.parsed.default_functions.push(-1)
+				store_integer(state.parsed.field_defaults, slot, state.parsed.default_initializers.size())
+			end
+			state.declarations.field_count[0] += 1
+		end
+	else
+		owner = state.nominal.enums.size()
+		type_name = enum_type(owner)
+		state.nominal.enums.push(EnumDefinition.new(name: name, source_id: declaration.source_id, line: declaration.line, variant_start: state.nominal.enum_variants.size(), variant_count: declaration.variants.size()))
+		declaration.variants.each do |variant|
+			state.nominal.enum_variants.push(EnumVariant.new(owner: owner, name: variant.name, line: variant.line, field_start: state.nominal.enum_fields.size(), field_count: variant.fields.size()))
+			variant.fields.each do |field|
+				state.nominal.enum_fields.push(EnumField.new(name: field.name, type_name: generic_substitute(field.type_name, declaration.parameters, arguments), line: field.line, named_only: field.named_only))
+			end
+		end
+	end
+	state.type_resolution.generic_instance_lookup[key] = state.type_resolution.generic_instances.size()
+	state.type_resolution.generic_instances.push(GenericInstance.new(definition: definition, arguments: arguments, type_name: type_name))
+	if declaration.kind == generic_record()
+		mut field := load_integer(state.declarations.record_field_starts, owner)
+		finish := field + load_integer(state.declarations.record_field_counts, owner)
+		while field < finish && !has_diagnostic(state)
+			raw := load_string(state.declarations.field_types, field)
+			resolved := resolve_type_name(state, declaration.source_id, raw, false)
+			if resolved == ""
+				diagnostic(state, "TRBN4003", load_integer(state.declarations.field_lines, field), "invalid instantiated field type " + raw)
+			end
+			store_string(state.declarations.field_types, field, resolved)
+			field += 1
+		end
+	else
+		mut variant := state.nominal.enums[owner].variant_start
+		finish := variant + state.nominal.enums[owner].variant_count
+		while variant < finish && !has_diagnostic(state)
+			mut field := state.nominal.enum_variants[variant].field_start
+			field_finish := field + state.nominal.enum_variants[variant].field_count
+			while field < field_finish && !has_diagnostic(state)
+				item := state.nominal.enum_fields[field]
+				resolved := resolve_type_name(state, declaration.source_id, item.type_name, false)
+				if resolved == ""
+					diagnostic(state, "TRBN4003", item.line, "invalid instantiated payload type " + item.type_name)
+				end
+				state.nominal.enum_fields[field] = EnumField.new(name: item.name, type_name: resolved, line: item.line, named_only: item.named_only)
+				field += 1
+			end
+			variant += 1
+		end
+	end
+	alias_step = 0
+	saved_alias_path.each do |entry|
+		store_integer(state.type_resolution.alias_expansion_path, alias_step, entry)
+		alias_step += 1
+	end
+	state.type_resolution.alias_expansion_depth[0] = saved_alias_depth
+	state.type_resolution.generic_depth[0] -= 1
+	state.callables.checked[0].generic_binding[0] = saved_binding
+	state.module_graph.active_module[0] = previous_module
+	state.global_bindings.declaration_owner[0] = previous_owner
+	return type_name
+end
+
+# Extract syntax only; declaration resolution or canonical element validation
+# must establish the type before this spelling reaches checked lowering.
+
+def array_inner_name(type_name: String): String
+	if type_name.size() < 8
+		return ""
+	end
+	if !string_starts_with(type_name, "Array<")
+		return ""
+	end
+	finish := type_name.size() - 1
+	if type_name[finish] != ">"
+		return ""
+	end
+	mut element := ""
+	mut index := 6
+	while index < finish
+		element += type_name[index]
+		index += 1
+	end
+	return element
+end
+
+def array_element_type(type_name: String): String
+	element := array_inner_name(type_name)
+	if element != "" && semantic_value_type(element)
+		return element
+	end
+	return ""
+end
+
+def array_type(element_type: String): String
+	result := "Array<" + element_type + ">"
+	if builtin_type_exists(result, false)
+		return result
+	end
+	return ""
+end
+
+def common_array_element_type(left: String, right: String): String
+	if left == ""
+		return right
+	end
+	common := nullable_common(left, right)
+	if common != ""
+		return common
+	end
+	return union_type([left, right])
+end
+
+def resolve_alias_type(mut state: CompilerState, index: Integer, arguments: Array<String>): String
+	row := state.type_resolution.type_aliases[index]
+	if row.parameters.size() != arguments.size()
+		return ""
+	end
+	mut valid := true
+	arguments.each do |argument|
+		if argument == ""
+			valid = false
+		end
+	end
+	if !valid
+		return ""
+	end
+	key := generic_application(integer_string(index), arguments)
+	if state.type_resolution.alias_instance_lookup.key?(key)
+		return state.type_resolution.alias_instances[state.type_resolution.alias_instance_lookup[key]].type_name
+	end
+	depth := state.type_resolution.alias_expansion_depth[0]
+	mut item := 0
+	while item < depth
+		if load_integer(state.type_resolution.alias_expansion_path, item) == index
+			state.module_graph.active_module[0] = row.source_id
+			diagnostic(state, "TRBN4003", row.line, "type alias cycle involving " + row.name)
+			return ""
+		end
+		item += 1
+	end
+	if depth >= 128
+		state.module_graph.active_module[0] = row.source_id
+		diagnostic(state, "TRBN4003", row.line, "type alias expansion exceeds the compiler nesting limit")
+		return ""
+	end
+	store_integer(state.type_resolution.alias_expansion_path, depth, index)
+	state.type_resolution.alias_expansion_depth[0] = depth + 1
+	saved_binding := state.callables.checked[0].generic_binding[0]
+	state.callables.checked[0].generic_binding[0] = 0
+	previous_owner := state.global_bindings.declaration_owner[0]
+	state.global_bindings.declaration_owner[0] = namespace_parent(row.name)
+	target := generic_substitute(row.target, row.parameters, arguments)
+	resolved := resolve_type_name(state, row.source_id, target, false)
+	state.global_bindings.declaration_owner[0] = previous_owner
+	state.callables.checked[0].generic_binding[0] = saved_binding
+	state.type_resolution.alias_expansion_depth[0] = depth
+	if resolved != "" && !has_diagnostic(state) && !state.type_resolution.alias_instance_lookup.key?(key)
+		state.type_resolution.alias_instance_lookup[key] = state.type_resolution.alias_instances.size()
+		state.type_resolution.alias_instances.push(TypeAliasInstance.new(definition: index, arguments: arguments, type_name: resolved))
+	end
+	return resolved
+end
+
+# Type resolution is recursive across aliases, containers and object fields.
+# A published nominal shell breaks valid recursive storage graphs; inheritance
+# cycles are rejected separately after the complete edge catalog is available.
+def instantiate_object_type(mut state: CompilerState, definition: Integer, arguments: Array<String>): String
+	declaration := state.nominal.objects[definition]
+	if !resource_type_arguments_valid(state, arguments, declaration.source_id, declaration.line)
+		return ""
+	end
+	if arguments.size() != declaration.parameters.size()
+		return ""
+	end
+	arguments.each do |argument|
+		if argument == "" || !semantic_value_type(argument)
+			return ""
+		end
+	end
+	key := generic_application(integer_string(definition), arguments)
+	if state.nominal.object_instance_lookup.key?(key)
+		return object_instance_type(state, state.nominal.object_instance_lookup[key])
+	end
+	if state.type_resolution.generic_depth[0] + next_generic_depth(state) >= 128
+		diagnostic(state, "TRBN4003", declaration.line, "generic type expansion exceeds the compiler nesting limit")
+		return ""
+	end
+	owner := state.nominal.object_instances.size()
+	state.nominal.object_instance_lookup[key] = owner
+	state.nominal.object_instances.push(ObjectInstance.new(definition: definition, arguments: arguments, superclass: -1, interfaces: [], fields: []))
+	previous_module := state.module_graph.active_module[0]
+	previous_owner := state.global_bindings.declaration_owner[0]
+	saved_binding := state.callables.checked[0].generic_binding[0]
+	state.module_graph.active_module[0] = declaration.source_id
+	state.global_bindings.declaration_owner[0] = namespace_parent(declaration.name)
+	state.callables.checked[0].generic_binding[0] = 0
+	state.type_resolution.generic_depth[0] += 1
+	# Crossing a nominal storage edge terminates a transparent alias expansion.
+	saved_alias_depth := state.type_resolution.alias_expansion_depth[0]
+	mut alias_path: Array<Integer> := []
+	mut step := 0
+	while step < saved_alias_depth
+		alias_path.push(load_integer(state.type_resolution.alias_expansion_path, step))
+		step += 1
+	end
+	state.type_resolution.alias_expansion_depth[0] = 0
+	mut superclass := -1
+	if declaration.superclass != ""
+		name := generic_substitute(declaration.superclass, declaration.parameters, arguments)
+		superclass = find_object_type(state, resolve_type_name(state, declaration.source_id, name, false))
+		mut valid := superclass >= 0
+		if valid
+			valid = !state.nominal.objects[state.nominal.object_instances[superclass].definition].interface_type
+		end
+		if !valid
+			diagnostic(state, "TRBN4003", declaration.line, "superclass must name a class")
+		end
+	end
+	mut interfaces: Array<Integer> := []
+	declaration.interfaces.each do |authored|
+		name := generic_substitute(authored, declaration.parameters, arguments)
+		contract := find_object_type(state, resolve_type_name(state, declaration.source_id, name, false))
+		mut valid := contract >= 0
+		if valid
+			valid = state.nominal.objects[state.nominal.object_instances[contract].definition].interface_type
+		end
+		if !valid
+			diagnostic(state, "TRBN4003", declaration.line, "implements must name an interface")
+		else
+			# Repeated declarations are accepted by the reference; the concrete
+			# edge catalog contains each interface identity only once.
+			mut present := false
+			interfaces.each do |previous|
+				if previous == contract
+					present = true
+				end
+			end
+			if !present
+				interfaces.push(contract)
+			end
+		end
+	end
+	mut fields: Array<ObjectField> := []
+	declaration.fields.each do |field|
+		name := generic_substitute(field.type_name, declaration.parameters, arguments)
+		type_name := resolve_type_name(state, declaration.source_id, name, false)
+		if type_name == ""
+			diagnostic(state, "TRBN4003", field.line, "unknown field type " + name)
+		end
+		fields.push(ObjectField.new(name: field.name, type_name: type_name, line: field.line, origin: field.origin, readonly: field.readonly, default_start: field.default_start, default_finish: field.default_finish))
+	end
+	state.nominal.object_instances[owner] = ObjectInstance.new(definition: definition, arguments: arguments, superclass: superclass, interfaces: interfaces, fields: fields)
+	step = 0
+	alias_path.each do |entry|
+		store_integer(state.type_resolution.alias_expansion_path, step, entry)
+		step += 1
+	end
+	state.type_resolution.alias_expansion_depth[0] = saved_alias_depth
+	state.type_resolution.generic_depth[0] -= 1
+	state.callables.checked[0].generic_binding[0] = saved_binding
+	state.module_graph.active_module[0] = previous_module
+	state.global_bindings.declaration_owner[0] = previous_owner
+	return object_instance_type(state, owner)
+end

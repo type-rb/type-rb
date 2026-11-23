@@ -1,0 +1,6 @@
+# Only the loader-owned SecureRandom wrapper can import this declaration.
+module Entropy
+end
+
+def read(length: Integer): String
+end

@@ -1,0 +1,95 @@
+import { literal_type_base } from frontend/types/literal_types
+import { nullable_element } from frontend/types/nullable_types
+import { union_parts } from frontend/types/union_types
+import { find_enum_type } from frontend/types/enum_types
+import { find_newtype_type } from frontend/types/newtype_types
+import { find_object_type } from frontend/types/object_types
+import { array_element_type, find_record_type } from frontend/resolution/type_resolution
+import { hash_key_type } from frontend/types/hash_types
+import { CompilerState } from state/state
+import { load_integer, load_string } from support/storage
+
+# A capture shares a value across element evaluations. Nominal identity and
+# recursively checked payloads matter; readonly bindings are not ownership.
+def concurrent_safe_type(state: CompilerState, name: String, visiting: Array<String>): Boolean
+	if name == "Integer" || name == "Float" || name == "Boolean" || name == "String" || name == "Bytes" || name == "Nil" || name == "Void" || name == "Range<Integer>" || literal_type_base(name) != ""
+		return true
+	end
+	optional := nullable_element(name)
+	if optional != ""
+		return concurrent_safe_type(state, optional, visiting)
+	end
+	parts := union_parts(name)
+	if parts.size() > 0
+		parts.each do |part|
+			if !concurrent_safe_type(state, part, visiting)
+				return false
+			end
+		end
+		return true
+	end
+	mut next_path: Array<String> := []
+	visiting.each do |previous|
+		if previous == name
+			return false
+		end
+		next_path.push(previous)
+	end
+	next_path.push(name)
+	newtype_index := find_newtype_type(state, name)
+	if newtype_index >= 0
+		return concurrent_safe_type(state, state.nominal.newtypes[newtype_index].representation, next_path)
+	end
+	record_index := find_record_type(state, name)
+	if record_index >= 0
+		mut field := load_integer(state.declarations.record_field_starts, record_index)
+		finish := field + load_integer(state.declarations.record_field_counts, record_index)
+		while field < finish
+			if !concurrent_safe_type(state, load_string(state.declarations.field_types, field), next_path)
+				return false
+			end
+			field += 1
+		end
+		return true
+	end
+	enum_index := find_enum_type(state, name)
+	if enum_index >= 0
+		definition := state.nominal.enums[enum_index]
+		mut variant := definition.variant_start
+		while variant < definition.variant_start + definition.variant_count
+			row := state.nominal.enum_variants[variant]
+			mut field := row.field_start
+			while field < row.field_start + row.field_count
+				if !concurrent_safe_type(state, state.nominal.enum_fields[field].type_name, next_path)
+					return false
+				end
+				field += 1
+			end
+			variant += 1
+		end
+		return true
+	end
+	return false
+end
+
+def concurrent_borrowed_type(state: CompilerState, name: String): Boolean
+	if concurrent_safe_type(state, name, [])
+		return false
+	end
+	optional := nullable_element(name)
+	if optional != ""
+		return concurrent_borrowed_type(state, optional)
+	end
+	union_parts(name).each do |part|
+		if concurrent_borrowed_type(state, part)
+			return true
+		end
+	end
+	if array_element_type(name) != "" || hash_key_type(name) != "" || name == "Array" || name == "Hash" || name == "StringBuilder"
+		return true
+	end
+	if find_record_type(state, name) >= 0 || find_enum_type(state, name) >= 0 || find_newtype_type(state, name) >= 0 || find_object_type(state, name) >= 0
+		return true
+	end
+	return false
+end

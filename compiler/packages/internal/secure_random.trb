@@ -1,0 +1,19 @@
+import trb/internal/entropy as Entropy
+import trb/internal/runtime as Runtime
+
+module SecureRandom
+end
+
+# The public bound is checked TypeRB behavior. The private host bridge only
+# transfers OS entropy; it never substitutes a deterministic or weak generator.
+def bytes(value: Integer): Bytes
+	length := value
+	if length < 0 || length > 65536
+		return Runtime.fail<Bytes>("secure_random.bytes length must be between 0 and 65536")
+	end
+	data := Entropy.read(length).to_bytes()
+	if data.size() != length
+		return Runtime.fail<Bytes>("secure_random.bytes could not read operating system entropy")
+	end
+	return data
+end

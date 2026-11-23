@@ -1,0 +1,149 @@
+import { check, emit_qbe } from compiler
+import { mir_hash_membership_equal, mir_hash_membership_find, mir_hash_membership_plans } from mir/analysis/hash_membership
+import { MirHashMembershipReuse } from mir/model/module
+import { optimize_verified_mir } from mir/passes/optimize
+import { verify_mir } from mir/verify/module
+import { CompilerState } from state/state
+import { expect_compiler_phase, logical_checked_source } from testing/pipeline
+import { array_mir_test_read } from testing/mir/arrays
+import { control_test_output } from testing/mir/control
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { logical_run_qbe } from testing/qbe_runner
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+def hash_membership_checked(source: String): CompilerState
+	mut state := logical_checked_source(source)
+	expect_compiler_phase(state, "check", check(state))
+	expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	return state
+end
+
+def hash_membership_source(body: String): String
+	return "def step(mut table: Hash<String, Integer>, mut other: Hash<String, Integer>, key: String, peer: String): Integer\n" + body + "\nreturn 0\nend\ndef scalar(value: Integer): Integer\nreturn value + 1\nend\ndef main()\nmut table := {\"a\" => 2}\nputs(step(table, table, \"a\", \"a\"))\nend\n"
+end
+
+describe("MIR Hash membership reuse") do
+	test("reuses the successful probe and composes with existing update reuse") do
+		state := hash_membership_checked(hash_membership_source("if table.key?(key)\ntable[key] = table[key] + 1\nend"))
+		plans := state.scalar_mir.hash_membership_reuse[0]
+		expect(plans.size()).to_equal(1)
+		expect(state.scalar_mir.hash_lookup_reuse[0].size()).to_equal(1)
+		expect(mir_hash_membership_find(plans, plans[0].membership, true)).to_equal(plans[0].membership)
+		expect(mir_hash_membership_find(plans, plans[0].lookup, false)).to_equal(plans[0].membership)
+		expect(mir_hash_membership_find(plans, -1, false)).to_equal(-1)
+		qbe := control_test_output(emit_qbe(state))
+		expect(qbe.include?(" =l copy %hash_membership_")).to_be_true()
+		expect(qbe.include?("call $trbn_hash_existing_slot_string(")).to_be_false()
+	end
+
+	test("invalidates on changed identities effects merges and the absent edge") do
+		bodies := [
+			"if table.key?(key)\nother[peer] = 9\nreturn table[key]\nend",
+			"if table.key?(key)\ntable.delete(key)\nreturn table[key]\nend",
+			"if table.key?(key)\ntable.update(other)\nreturn table[key]\nend",
+			"if table.key?(key)\nvalue := scalar(1)\nreturn table[key] + value\nend",
+			"if table.key?(key)\narray := [1]\nreturn table[key] + array[0]\nend",
+			"if table.key?(key)\nreturn other[key]\nend",
+			"if table.key?(key)\nreturn table[peer]\nend",
+			"if table.key?(key)\nreturn 1\nelse\nreturn table[key]\nend",
+			"if !table.key?(key)\nreturn table[key]\nend",
+			"if table.key?(key)\n_value := 1\nend\nputs(table[key])",
+			"found := table.key?(key)\ntable.delete(key)\nif found\nreturn table[key]\nend",
+			"if table.key?(key)\nmut selected := key\nselected = peer\nreturn table[selected]\nend",
+		]
+		bodies.each do |body|
+			state := hash_membership_checked(hash_membership_source(body))
+			expect(state.scalar_mir.hash_membership_reuse[0].size()).to_equal(0)
+		end
+	end
+
+	test("retains only the first read before another effect") do
+		state := hash_membership_checked(hash_membership_source("if table.key?(key)\nfirst := table[key]\ntable.delete(key)\nreturn first + table[key]\nend"))
+		expect(state.scalar_mir.hash_membership_reuse[0].size()).to_equal(1)
+		qbe := control_test_output(emit_qbe(state))
+		expect(qbe.include?("call $trbn_hash_get_string(")).to_be_true()
+	end
+
+	test("keeps boxed literal-union keys on their existing representation path") do
+		state := hash_membership_checked("alias Key = \"a\" | \"b\"\ndef main()\nkey: Key := \"a\"\nmut table: Hash<Key, Integer> := {key => 1}\nif table.key?(key)\nputs(table[key])\nend\nend\n")
+		expect(state.scalar_mir.hash_membership_reuse[0].size()).to_equal(0)
+	end
+
+	test("selects both unchanged Hash workloads through loop-carried aliases") do
+		root := Process.environment("TYPE_RB_NATIVE_ROOT")
+		if root != nil
+			integer := hash_membership_checked(array_mir_test_read(root + "/benchmarks/features/hash-integer-keys/src/main.trb"))
+			expect(integer.scalar_mir.hash_membership_reuse[0].size()).to_equal(2)
+			strings := hash_membership_checked(array_mir_test_read(root + "/benchmarks/features/hash-string-keys/src/main.trb"))
+			expect(strings.scalar_mir.hash_membership_reuse[0].size()).to_equal(1)
+		end
+	end
+
+	test("executes equal String content Float payloads and an absent key") do
+		source := "def get(table: Hash<String, Float>, key: String): Float\nif table.key?(key)\nreturn table[key]\nend\nreturn -1.5\nend\ndef main()\nmut table := {\"ab\" => 2.5}\nputs(get(table, \"a\" + \"b\"))\nputs(get(table, \"missing\"))\nend\n"
+		state := hash_membership_checked(source)
+		expect(state.scalar_mir.hash_membership_reuse[0].size()).to_equal(1)
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+			when Result::Ok(actual)
+				expect(actual).to_equal("2.5\n-1.5\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("rejects forged missing duplicated and unoptimized plans") do
+		mut mode := 0
+		while mode < 5
+			mut state := hash_membership_checked(hash_membership_source("if table.key?(key)\nreturn table[key]\nend"))
+			original := state.scalar_mir.hash_membership_reuse[0][0]
+			if mode == 0
+				state.scalar_mir.hash_membership_reuse[0] = []
+			elsif mode == 1
+				state.scalar_mir.hash_membership_reuse[0].push(original)
+			elsif mode == 2
+				state.scalar_mir.hash_membership_reuse[0][0] = MirHashMembershipReuse.new(membership: original.membership + 1, lookup: original.lookup)
+			elsif mode == 3
+				state.scalar_mir.hash_membership_reuse[0][0] = MirHashMembershipReuse.new(membership: original.membership, lookup: original.lookup + 1)
+			else
+				expect(verify_mir(state.scalar_mir, false)).to_equal("MIR input cannot supply Hash membership plans")
+				state.scalar_mir.hash_membership_reuse[0] = []
+			end
+			expect(verify_mir(state.scalar_mir, true)).to_equal("MIR Hash membership plan differs")
+			mode += 1
+		end
+	end
+
+	test("rederives proofs after source erasure physical block reordering and optimization") do
+		mut state := hash_membership_checked(hash_membership_source("if table.key?(key)\nreturn table[key]\nend"))
+		before := state.scalar_mir.hash_membership_reuse[0]
+		intrinsic_mir_erase(state)
+		state.scalar_mir.functions.each do |function|
+			mut left := function.block_start
+			mut right := left + function.block_count - 1
+			while left < right
+				saved := state.scalar_mir.blocks[left]
+				state.scalar_mir.blocks[left] = state.scalar_mir.blocks[right]
+				state.scalar_mir.blocks[right] = saved
+				left += 1
+				right -= 1
+			end
+		end
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(mir_hash_membership_equal(before, state.scalar_mir.hash_membership_reuse[0])).to_be_true()
+	end
+
+	test("rejects shared physical instruction ownership") do
+		mut state := hash_membership_checked(hash_membership_source("if table.key?(key)\nreturn table[key]\nend"))
+		expect(state.scalar_mir.hash_membership_reuse[0].size()).to_equal(1)
+		state.scalar_mir.functions.push(state.scalar_mir.functions[0])
+		expect(mir_hash_membership_plans(state.scalar_mir).empty?()).to_be_true()
+		expect(verify_mir(state.scalar_mir, true).empty?()).to_be_false()
+	end
+end

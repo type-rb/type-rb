@@ -1,0 +1,8 @@
+def main()
+if false
+return
+elsif true
+value := 1; puts(value)
+end
+puts(value)
+end

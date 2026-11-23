@@ -1,0 +1,303 @@
+import { check, emit_qbe, load_file_root, load_file_root_with_mode } from compiler
+import { lex } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { CompilerState, compiler_new } from state/state
+import { load_integer, load_string } from support/storage
+import { native_create_directory, native_write_text } from project/native_file_system
+import { describe, expect, test } from trb/std/test
+import { frontend_test_source, output_source } from testing/compiler
+import { QbeOutput } from backend/qbe/output
+import trb/std/process
+import trb/std/result
+
+describe("Native TypeRB frontend") do
+	test("selects LLD only for compiler-driven Linux links") do
+		compiler_source := "def compiler_main(source: String, path: String, check_only: Boolean): Integer\n\treturn 0\nend\n\ndef main()\n\treturn\nend\n"
+		mut compiler_state := compiler_new(compiler_source.size() + 1)
+		expect(lex(compiler_state, compiler_source)).to_be_true()
+		expect(parse_module(compiler_state, 0, compiler_state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(compiler_state)).to_be_true()
+		expect(check(compiler_state)).to_be_true()
+		compiler_qbe := output_source(emit_qbe(compiler_state))
+		expect(compiler_qbe.include?("data $trbn_project_linker_lld = { b \"-fuse-ld=lld\", b 0 }")).to_be_true()
+		expect(
+			compiler_qbe.include?(
+				"data $trbn_dead_strip_linux = { b \"-Wl,--gc-sections,--strip-all,--no-eh-frame-hdr\", b 0 }",
+			),
+		).to_be_true()
+		expect(compiler_qbe.include?("data $trbn_profile_linux_amd64 = { b \"linux-amd64-v0\", b 0 }")).to_be_true()
+		expect(compiler_qbe.include?("data $trbn_qbe_linux_amd64 = { b \"amd64_sysv\", b 0 }")).to_be_true()
+		expect(compiler_qbe.include?("@target_linux_amd64_check")).to_be_true()
+		expect(compiler_qbe.include?("storel $trbn_qbe_linux_amd64, $trbn_selected_qbe_target")).to_be_true()
+		expect(compiler_qbe.include?("storel $trbn_project_linker_lld, $trbn_project_selected_linker")).to_be_true()
+		expect(compiler_qbe.include?("%has_linker =w cnel %linker, 0")).to_be_true()
+		expect(compiler_qbe.include?("%tail =l phi @linker %linker_tail, @default %default_tail")).to_be_true()
+
+		application_source := "def main()\n\treturn\nend\n"
+		mut application_state := compiler_new(application_source.size() + 1)
+		expect(lex(application_state, application_source)).to_be_true()
+		expect(parse_module(application_state, 0, application_state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(application_state)).to_be_true()
+		expect(check(application_state)).to_be_true()
+		application_qbe := output_source(emit_qbe(application_state))
+		expect(application_qbe.include?("trbn_project_linker_lld")).to_be_false()
+	end
+
+	test("checks and emits portable benchmark entry primitives") do
+		source := "import trb/std/process\nimport trb/std/math as Numeric\n\ndef main()\n\tmut first := Process.argv()\n\tfirst.push(\"local\")\n\tsecond := Process.argv()\n\tparsed := second[0].to_i()\n\troot := Numeric.sqrt(parsed)\n\ttruncated := root.to_i()\n\tputs(first.size().to_s())\n\tputs(second.size().to_s())\n\tputs(truncated.to_s())\n\tnan := Numeric.sqrt(- 1)\n\tif nan != nan\n\t\tputs(\"nan\")\n\telse\n\t\tputs(\"number\")\n\tend\n\tputs(\"+9007199254740991\".to_i().to_s())\n\tputs(\"-9007199254740991\".to_i().to_s())\n\tvalue := - 2.75\n\tputs(value.to_i().to_s())\n\treturn\nend\n"
+		mut state := compiler_new(source.size() + 1)
+		expect(lex(state, source)).to_be_true()
+		expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_true()
+		emitted := emit_qbe(state)
+		expect(emitted.runtime_flags[1]).to_equal(1)
+		expect(emitted.runtime_flags[2]).to_equal(0)
+		expect(emitted.runtime_flags.size()).to_equal(8)
+		expect(emitted.runtime_flags[5]).to_equal(0)
+		qbe := output_source(emitted)
+		expect(qbe.include?("storel %process_argc, $trbn_process_argc")).to_be_true()
+		expect(qbe.include?("function l $trbn_process_argv()")).to_be_true()
+		expect(qbe.include?("function l $trbn_string_to_integer(l %string)")).to_be_true()
+		expect(qbe.include?("function l $trbn_integer_to_string(l %value)")).to_be_true()
+		expect(qbe.include?("function l $trbn_float_to_integer(d %value)")).to_be_true()
+		expect(qbe.include?("=d sqrt ")).to_be_true()
+		expect(qbe.include?("call $sqrt(")).to_be_false()
+		expect(qbe.include?("=d sltof ")).to_be_true()
+		expect(qbe.include?("=l dtosi ")).to_be_true()
+		qbe_path := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe_path == nil
+			expect(true).to_be_true()
+		else
+			workspace := "/tmp/type-rb-native-portable-entry"
+			case native_create_directory(workspace)
+			when Result::Ok(_unit)
+			when Result::Err(_error)
+			end
+			case native_write_text(workspace + "/module.ssa", qbe)
+			when Result::Ok(_unit)
+			when Result::Err(error)
+				puts(error.operation + ": " + error.message)
+				expect(false).to_be_true()
+			end
+			case Process.run(qbe_path, ["-t", "arm64_apple", workspace + "/module.ssa"])
+			when Result::Ok(qbe_result)
+				if !qbe_result.success
+					puts(qbe_result.stderr)
+				end
+				expect(qbe_result.success).to_be_true()
+				case native_write_text(workspace + "/module.s", qbe_result.stdout)
+				when Result::Ok(_unit)
+				when Result::Err(error)
+					puts(error.operation + ": " + error.message)
+					expect(false).to_be_true()
+				end
+			when Result::Err(error)
+				puts(error.operation + ": " + error.message)
+				expect(false).to_be_true()
+			end
+			case Process.run("/usr/bin/cc", [workspace + "/module.s", "-lm", "-o", workspace + "/program"])
+			when Result::Ok(link_result)
+				if !link_result.success
+					puts(link_result.stderr)
+				end
+				expect(link_result.success).to_be_true()
+			when Result::Err(error)
+				puts(error.operation + ": " + error.message)
+				expect(false).to_be_true()
+			end
+			case Process.run(workspace + "/program", ["9"])
+			when Result::Ok(result)
+				expect(result.success).to_be_true()
+				expect(result.stdout).to_equal("2\n1\n3\nnan\n9007199254740991\n-9007199254740991\n-2\n")
+				expect(result.stderr).to_equal("")
+			when Result::Err(error)
+				puts(error.operation + ": " + error.message)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("preserves portable numeric conversion failure classes") do
+		source := "import trb/std/process\nimport trb/std/math\n\ndef main()\n\tmode := Process.argv()[0]\n\tif mode == \"invalid-format\"\n\t\tputs(\"12x\".to_i().to_s())\n\t\treturn\n\tend\n\tif mode == \"sign-only\"\n\t\tputs(\"+\".to_i().to_s())\n\t\treturn\n\tend\n\tif mode == \"integer-range\"\n\t\tputs(\"9007199254740992\".to_i().to_s())\n\t\treturn\n\tend\n\tif mode == \"nan\"\n\t\tputs(Math.sqrt(- 1).to_i().to_s())\n\t\treturn\n\tend\n\tif mode == \"infinity\"\n\t\tzero := 0.0\n\t\tinfinite := 1.0 / zero\n\t\tputs(infinite.to_i().to_s())\n\t\treturn\n\tend\n\tif mode == \"float-range\"\n\t\toutside := 9007199254740992.0\n\t\tputs(outside.to_i().to_s())\n\t\treturn\n\tend\n\treturn\nend\n"
+		mut state := compiler_new(source.size() + 1)
+		expect(lex(state, source)).to_be_true()
+		expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(state)).to_be_true()
+		checked := check(state)
+		if !checked
+			puts(load_integer(state.diagnostics.lines, 0).to_s() + ": " + load_string(state.diagnostics.messages, 0))
+		end
+		expect(checked).to_be_true()
+		qbe_path := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe_path == nil
+			expect(true).to_be_true()
+		else
+			workspace := "/tmp/type-rb-native-portable-entry-failures"
+			case native_create_directory(workspace)
+			when Result::Ok(_unit)
+			when Result::Err(_error)
+			end
+			case native_write_text(workspace + "/module.ssa", output_source(emit_qbe(state)))
+			when Result::Ok(_unit)
+			when Result::Err(error)
+				puts(error.operation + ": " + error.message)
+				expect(false).to_be_true()
+			end
+			case Process.run(qbe_path, ["-t", "arm64_apple", workspace + "/module.ssa"])
+			when Result::Ok(qbe_result)
+				if !qbe_result.success
+					puts(qbe_result.stderr)
+				end
+				expect(qbe_result.success).to_be_true()
+				case native_write_text(workspace + "/module.s", qbe_result.stdout)
+				when Result::Ok(_unit)
+				when Result::Err(error)
+					puts(error.operation + ": " + error.message)
+					expect(false).to_be_true()
+				end
+			when Result::Err(error)
+				puts(error.operation + ": " + error.message)
+				expect(false).to_be_true()
+			end
+			case Process.run("/usr/bin/cc", [workspace + "/module.s", "-lm", "-o", workspace + "/program"])
+			when Result::Ok(link_result)
+				if !link_result.success
+					puts(link_result.stderr)
+				end
+				expect(link_result.success).to_be_true()
+			when Result::Err(error)
+				puts(error.operation + ": " + error.message)
+				expect(false).to_be_true()
+			end
+			modes := ["invalid-format", "sign-only", "integer-range", "nan", "infinity", "float-range"]
+			expected := ["panic: invalid Integer\n", "panic: invalid Integer\n", "panic: Integer is outside the portable range\n", "panic: Float cannot be converted to Integer\n", "panic: Float cannot be converted to Integer\n", "panic: Integer is outside the portable range\n"]
+			mut index := 0
+			while index < modes.size()
+				case Process.run(workspace + "/program", [modes[index]])
+				when Result::Ok(result)
+					expect(result.success).to_be_false()
+					expect(result.stdout).to_equal("")
+					expect(result.stderr).to_equal(expected[index])
+				when Result::Err(error)
+					puts(error.operation + ": " + error.message)
+					expect(false).to_be_true()
+				end
+				index += 1
+			end
+		end
+	end
+
+	test("selects checking mode before loading valid or rejected file sources") do
+		source := "def main()\nreturn\nend\n"
+		ordinary := load_file_root(source, "/tmp/checking-mode.trb")
+		interactive := load_file_root_with_mode(source, "/tmp/checking-mode.trb", true)
+		rejected := load_file_root_with_mode("def main(\n", "/tmp/checking-mode.trb", true)
+		expect(ordinary.interactive).to_be_false()
+		expect(interactive.interactive).to_be_true()
+		expect(rejected.interactive).to_be_true()
+		expect(load_string(rejected.diagnostics.codes, 0)).to_equal("TRBN4002")
+	end
+
+	test("rejects unsupported benchmark entry boundaries deterministically") do
+		unsupported_package := load_file_root(
+			"import trb/std/random\n\ndef main()\n\treturn\nend\n",
+			"/tmp/portable-unsupported-package.trb",
+		)
+		expect(load_string(unsupported_package.diagnostics.codes, 0)).to_equal("TRBN4003")
+		expect(load_string(unsupported_package.diagnostics.messages, 0)).to_equal("package imports are not supported by this compiler subset")
+
+		member_source := "import trb/std/process\n\ndef main()\n\tvalue := Process.environment()\n\treturn\nend\n"
+		mut member_state := compiler_new(member_source.size() + 1)
+		expect(lex(member_state, member_source)).to_be_true()
+		expect(parse_module(member_state, 0, member_state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(member_state)).to_be_true()
+		expect(check(member_state)).to_be_false()
+		expect(load_string(member_state.diagnostics.codes, 0)).to_equal("TRBN4004")
+		expect(load_string(member_state.diagnostics.messages, 0)).to_equal("call argument count does not match Process::environment")
+
+		type_source := "import trb/std/math\n\ndef main()\n\tvalue := Math.sqrt(\"nine\")\n\treturn\nend\n"
+		mut type_state := compiler_new(type_source.size() + 1)
+		expect(lex(type_state, type_source)).to_be_true()
+		expect(parse_module(type_state, 0, type_state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(type_state)).to_be_true()
+		expect(check(type_state)).to_be_false()
+		expect(load_string(type_state.diagnostics.codes, 0)).to_equal("TRBN4004")
+		expect(load_string(type_state.diagnostics.messages, 0)).to_equal("expected Float, found String")
+
+		arity_source := "import trb/std/process\n\ndef main()\n\tvalue := Process.argv(1)\n\treturn\nend\n"
+		mut arity_state := compiler_new(arity_source.size() + 1)
+		expect(lex(arity_state, arity_source)).to_be_true()
+		expect(parse_module(arity_state, 0, arity_state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(arity_state)).to_be_true()
+		expect(check(arity_state)).to_be_false()
+		expect(load_string(arity_state.diagnostics.codes, 0)).to_equal("TRBN4004")
+		expect(load_string(arity_state.diagnostics.messages, 0)).to_equal("call argument count does not match Process::argv")
+	end
+
+	test("emits deterministic QBE and executes the registered source subset") do
+		source := frontend_test_source()
+		mut state := compiler_new(source.size() + 1)
+		expect(lex(state, source)).to_be_true()
+		expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+		expect(resolve(state)).to_be_true()
+		expect(check(state)).to_be_true()
+		first := output_source(emit_qbe(state))
+		second := output_source(emit_qbe(state))
+		expect(first).to_equal(second)
+		expect(first.include?("function l $trbnf0(l %p0, l %p1) {")).to_be_true()
+		expect(first.include?("export function w $main(w %argc, l %argv) {")).to_be_true()
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe == nil
+			expect(true).to_be_true()
+		else
+			workspace := "/tmp/type-rb-native-native-emitter"
+			case native_create_directory(workspace)
+			when Result::Ok(_unit)
+			when Result::Err(_error)
+			end
+			case native_write_text(workspace + "/module.ssa", first)
+			when Result::Ok(_unit)
+			when Result::Err(error)
+				puts(error.operation + ": " + error.message)
+				expect(false).to_be_true()
+			end
+			case Process.run(qbe, ["-t", "arm64_apple", workspace + "/module.ssa"])
+			when Result::Ok(qbe_result)
+				if !qbe_result.success
+					puts(qbe_result.stderr)
+				end
+				expect(qbe_result.success).to_be_true()
+				case native_write_text(workspace + "/module.s", qbe_result.stdout)
+				when Result::Ok(_unit)
+				when Result::Err(error)
+					puts(error.operation + ": " + error.message)
+					expect(false).to_be_true()
+				end
+			when Result::Err(error)
+				puts(error.operation + ": " + error.message)
+				expect(false).to_be_true()
+			end
+			case Process.run("/usr/bin/cc", [workspace + "/module.s", "-o", workspace + "/program"])
+			when Result::Ok(link_result)
+				if !link_result.success
+					puts(link_result.stderr)
+				end
+				expect(link_result.success).to_be_true()
+			when Result::Err(error)
+				puts(error.operation + ": " + error.message)
+				expect(false).to_be_true()
+			end
+			case Process.run(workspace + "/program", [])
+			when Result::Ok(result)
+				expect(result.success).to_be_true()
+				expect(result.stdout).to_equal("ok\n")
+				expect(result.stderr).to_equal("")
+			when Result::Err(error)
+				puts(error.operation + ": " + error.message)
+				expect(false).to_be_true()
+			end
+		end
+	end
+end

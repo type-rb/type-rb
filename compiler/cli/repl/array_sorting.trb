@@ -1,0 +1,123 @@
+import { union_parts } from frontend/types/union_types
+import { ReplStore, repl_get, repl_value } from repl/model
+import { compiler_string_bytes } from support/compiler_bytes
+
+# Byte order agrees with code-point order for UTF-8 and preserves the reference
+# behavior for externally supplied invalid bytes, prefixes and embedded NULs.
+def repl_sort_string_before(first: String, second: String): Boolean
+	left := compiler_string_bytes(first)
+	right := compiler_string_bytes(second)
+	mut index := 0
+	while index < left.size() && index < right.size()
+		if left[index] != right[index]
+			return left[index] < right[index]
+		end
+		index += 1
+	end
+	return left.size() < right.size()
+end
+
+def repl_sort_before(store: ReplStore, first_value: Integer, second_value: Integer, descending: Boolean): Boolean
+	mut first := first_value
+	mut second := second_value
+	if union_parts(store.types[first]).size() > 0
+		first = store.children[first][0]
+	end
+	if union_parts(store.types[second]).size() > 0
+		second = store.children[second][0]
+	end
+	if repl_get(store, first).type_name == "String"
+		if descending
+			return repl_sort_string_before(store.texts[second], store.texts[first])
+		end
+		return repl_sort_string_before(store.texts[first], store.texts[second])
+	elsif store.types[first] == "Float"
+		left := store.floats[first]
+		right := store.floats[second]
+		if left != left
+			return false
+		elsif right != right
+			return true
+		end
+		if descending
+			return left > right
+		end
+		return left < right
+	end
+	if descending
+		return store.integers[first] > store.integers[second]
+	end
+	return store.integers[first] < store.integers[second]
+end
+
+def repl_sort_bound(start: Integer, width: Integer, limit: Integer): Integer
+	if width <= limit - start
+		return start + width
+	end
+	return limit
+end
+
+def repl_array_sort_keys(mut store: ReplStore, receiver: Integer, keys: Array<Integer>, descending: Boolean): Integer
+	mut source: Array<Integer> := []
+	mut destination: Array<Integer> := []
+	mut source_keys: Array<Integer> := []
+	mut destination_keys: Array<Integer> := []
+	store.children[receiver].each do |value|
+		source.push(value)
+		destination.push(value)
+	end
+	keys.each do |key|
+		source_keys.push(key)
+		destination_keys.push(key)
+	end
+	mut width := 1
+	while width < source.size()
+		mut start := 0
+		while start < source.size()
+			middle := repl_sort_bound(start, width, source.size())
+			finish := repl_sort_bound(middle, width, source.size())
+			mut left := start
+			mut right := middle
+			mut cursor := start
+			while cursor < finish
+				mut take_left := left < middle
+				if take_left && right < finish
+					mut first := source[right]
+					mut second := source[left]
+					if keys.size() > 0
+						first = source_keys[right]
+						second = source_keys[left]
+					end
+					take_left = !repl_sort_before(store, first, second, descending)
+				end
+				if take_left
+					destination[cursor] = source[left]
+					if keys.size() > 0
+						destination_keys[cursor] = source_keys[left]
+					end
+					left += 1
+				else
+					destination[cursor] = source[right]
+					if keys.size() > 0
+						destination_keys[cursor] = source_keys[right]
+					end
+					right += 1
+				end
+				cursor += 1
+			end
+			start = finish
+		end
+		previous := source
+		source = destination
+		destination = previous
+		previous_keys := source_keys
+		source_keys = destination_keys
+		destination_keys = previous_keys
+		width = repl_sort_bound(width, width, source.size())
+	end
+	return repl_value(store, store.types[receiver], 0, 0.0, "", source)
+end
+
+def repl_array_sort(mut store: ReplStore, receiver: Integer, descending: Boolean): Integer
+	return repl_array_sort_keys(store, receiver, [], descending)
+end

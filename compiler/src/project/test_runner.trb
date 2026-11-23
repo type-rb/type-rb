@@ -1,0 +1,106 @@
+import { compiler_reserve_source } from state/source_capacity
+import { test_origin_quote } from frontend/providers/test_origins
+import { TestDeclaration } from state/source_state
+import { lex_module } from frontend/syntax/lexer
+import { append_import, parse_module } from frontend/syntax/parser
+import { package_sorted_indices } from project/package_json
+import { native_test_reporter_source } from project/test_sources
+import { import_kind_named } from state/import_kinds
+import { standard_source_test_host, standard_source_test_runner } from state/standard_source_kinds
+import { CompilerState, add_module, diagnostic, has_diagnostic } from state/state
+import { integer_string } from support/literals
+import { load_integer, load_string, sparse_integer_at, store_integer } from support/storage
+
+# The reference visits modules in lexical order and cases in declaration order.
+# Identical case names in different files keep separate executable identities.
+def ordered_test_cases(state: CompilerState): Array<TestDeclaration>
+	mut names: Array<String> := []
+	mut source := 0
+	while source < state.module_graph.module_count[0]
+		names.push(load_string(state.module_graph.module_names, source))
+		source += 1
+	end
+	mut cases: Array<TestDeclaration> := []
+	package_sorted_indices(names).each do |owner|
+		state.parsed.tests.each do |item|
+			if item.source_id == owner && item.function_id >= 0
+				cases.push(item)
+			end
+		end
+	end
+	return cases
+end
+
+def native_test_entry_source(state: CompilerState, cases: Array<TestDeclaration>, reporter: String): String
+	mut source := native_test_reporter_source() + "\ndef main()\nmut cases: Array<NativeTestCase> := []\n"
+	mut index := 0
+	cases.each do |item|
+		path := load_string(state.module_graph.module_files, item.source_id)
+		line := load_integer(state.source_tokens.token_lines, item.origin)
+		column := load_integer(state.source_tokens.token_columns, item.origin)
+		source += "cases.push(NativeTestCase.new(name: " + test_origin_quote(item.full_name) + ", path: " + test_origin_quote(path) + ", line: " + integer_string(line) + ", column: " + integer_string(column) + ", action: test_case_" + integer_string(index) + "))\n"
+		index += 1
+	end
+	return source + "run_tests(cases, " + test_origin_quote(reporter) + ")\nend\n"
+end
+
+# Append after authored imports have been resolved. This source is not reachable
+# by an authored import path. Every case binding is assigned its parsed identity,
+# with an ordinary module edge for global initialization and call checking.
+def append_native_test_runner(mut state: CompilerState, reporter: String): Boolean
+	if has_diagnostic(state)
+		return false
+	end
+	if reporter != "human" && reporter != "json"
+		diagnostic(state, "TRBN4010", 1, "test reporter must be human or json")
+		return false
+	end
+	cases := ordered_test_cases(state)
+	if cases.size() == 0
+		diagnostic(state, "TRBN4010", 1, "no tests found")
+		return false
+	end
+	mut host := -1
+	mut index := 0
+	while index < state.module_graph.module_count[0]
+		if sparse_integer_at(state.standard_modules, index) == standard_source_test_host()
+			host = index
+		end
+		if sparse_integer_at(state.standard_modules, index) == standard_source_test_runner()
+			diagnostic(state, "TRBN4010", 1, "test runner already exists")
+			return false
+		end
+		index += 1
+	end
+	if host < 0
+		diagnostic(state, "TRBN4003", 1, "test declarations require the standard test provider")
+		return false
+	end
+	source := native_test_entry_source(state, cases, reporter)
+	compiler_reserve_source(state, source.size())
+	owner := add_module(state, "$test:runner", "<test runner>")
+	store_integer(state.standard_modules, owner, standard_source_test_runner())
+	state.module_graph.active_module[0] = owner
+	start := state.source_tokens.token_count[0]
+	lex_module(state, source, owner)
+	if !has_diagnostic(state)
+		parse_module(state, start, owner)
+	end
+	if has_diagnostic(state)
+		return false
+	end
+	mut binding := load_integer(state.module_graph.module_import_starts, owner)
+	while binding < state.module_graph.import_count[0]
+		store_integer(state.module_graph.import_targets, binding, host)
+		binding += 1
+	end
+	index = 0
+	cases.each do |item|
+		binding = append_import(state, load_string(state.module_graph.module_names, item.source_id), load_string(state.declarations.function_names, item.function_id), "test_case_" + integer_string(index), import_kind_named(), 1)
+		store_integer(state.module_graph.import_targets, binding, item.source_id)
+		store_integer(state.module_graph.module_import_counts, owner, load_integer(state.module_graph.module_import_counts, owner) + 1)
+		index += 1
+	end
+	state.module_graph.entry_module[0] = owner
+	return true
+end

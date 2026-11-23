@@ -1,0 +1,15 @@
+class Box
+	@value: String
+	def initialize(value: String)
+		@value = value
+	end
+	def replace(value: String)
+		@value = value
+	end
+end
+
+def main()
+	mut box := Box.new("a" + "日本")
+	box.replace("b" + "𐐨")
+	puts(box.value)
+end

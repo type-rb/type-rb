@@ -1,0 +1,148 @@
+--- a/gcm.c
++++ b/gcm.c
+@@ -344,6 +344,15 @@
+ 	vins = vnew(0, sizeof vins[0], PHeap);
+ 	for (b=fn->start; b; b=b->link) {
+ 		nins = 0;
++		/* GVN can place a pure expression before the pinned definition
++		 * it uses. Schedule pinned groups in their original order before
++		 * the remaining expressions, so recursion cannot move a later
++		 * call or load across an earlier side effect. */
++		for (i=b->ins; i<&b->ins[b->nins];)
++			if (pinned(i))
++				i = schedins(fn, b, i, &vins, &nins);
++			else
++				i++;
+ 		for (i=b->ins; i<&b->ins[b->nins];)
+ 			i = schedins(fn, b, i, &vins, &nins);
+ 		idup(b, vins, nins);
+@@ -376,9 +385,9 @@
+ }
+ 
+ static void
+-sinkref(Fn *fn, Blk *b, Ref *pr)
+-{
+-	Ins i;
++sinkref(Fn *fn, Blk *b, Ref *pr, int branch)
++{
++	Ins i, *copy;
+ 	Tmp *t;
+ 	Ref r;
+ 
+@@ -387,6 +396,8 @@
+ 	t = &fn->tmp[pr->val];
+ 	if (!t->def
+ 	|| t->bid == b->id
++	|| (branch && (t->def->op == Oand || t->def->op == Oor)
++	    && fn->rpo[t->bid]->loop < b->loop)
+ 	|| pinned(t->def)
+ 	|| !cheap(t->def))
+ 		return;
+@@ -399,8 +410,9 @@
+ 	i.to = r;
+ 	fn->tmp[r.val].gcmbid = b->id;
+ 	emiti(i);
+-	sinkref(fn, b, &i.arg[0]);
+-	sinkref(fn, b, &i.arg[1]);
++	copy = curi;
++	sinkref(fn, b, &copy->arg[0], branch);
++	sinkref(fn, b, &copy->arg[1], branch);
+ }
+ 
+ /* redistribute trivial ops to point of
+@@ -416,12 +428,83 @@
+ 	for (b=fn->start; b; b=b->link) {
+ 		for (i=b->ins; i<&b->ins[b->nins]; i++)
+ 			if (isload(i->op))
+-				sinkref(fn, b, &i->arg[0]);
++				sinkref(fn, b, &i->arg[0], 0);
+ 			else if (isstore(i->op))
+-				sinkref(fn, b, &i->arg[1]);
+-		sinkref(fn, b, &b->jmp.arg);
++				sinkref(fn, b, &i->arg[1], 0);
++		sinkref(fn, b, &b->jmp.arg, b->jmp.type == Jjnz);
+ 	}
+ 	addgcmins(fn, curi, &insb[NIns] - curi);
++}
++
++/* Phi-only cycles have no observable use, but the scheduling walk treats
++ * every phi argument as live. Mark from non-copy uses before scheduling;
++ * retain all ordinary instructions and let existing GCM own their removal. */
++static void
++copyuse(Ref r, BSet *live, uint *work, uint *count)
++{
++	if (req(r, R) || rtype(r) != RTmp || bshas(live, r.val))
++		return;
++	bsset(live, r.val);
++	work[(*count)++] = r.val;
++}
++
++static void
++prunecopies(Fn *fn)
++{
++	Blk *b;
++	Phi *p, **pp, **phis;
++	Ins *i;
++	BSet live;
++	uint *work, count, t, n;
++	int changed;
++
++	for (b=fn->start; b && !b->phi; b=b->link)
++		;
++	if (!b)
++		return;
++	phis = alloc(fn->ntmp * sizeof phis[0]);
++	work = alloc(fn->ntmp * sizeof work[0]);
++	bsinit(&live, fn->ntmp);
++	count = 0;
++	for (b=fn->start; b; b=b->link) {
++		for (p=b->phi; p; p=p->link)
++			phis[p->to.val] = p;
++		for (i=b->ins; i<&b->ins[b->nins]; i++)
++			if (i->op != Ocopy) {
++				copyuse(i->arg[0], &live, work, &count);
++				copyuse(i->arg[1], &live, work, &count);
++			}
++		copyuse(b->jmp.arg, &live, work, &count);
++	}
++	while (count) {
++		t = work[--count];
++		p = phis[t];
++		if (p) {
++			for (n=0; n<p->narg; n++)
++				copyuse(p->arg[n], &live, work, &count);
++		} else {
++			i = fn->tmp[t].def;
++			if (i && i->op == Ocopy)
++				copyuse(i->arg[0], &live, work, &count);
++		}
++	}
++	changed = 0;
++	for (b=fn->start; b; b=b->link) {
++		for (pp=&b->phi; (p=*pp);)
++			if (!bshas(&live, p->to.val)) {
++				*pp = p->link;
++				changed = 1;
++			} else
++				pp = &p->link;
++		for (i=b->ins; i<&b->ins[b->nins]; i++)
++			if (i->op == Ocopy && rtype(i->to) == RTmp)
++			if (!bshas(&live, i->to.val)) {
++				*i = (Ins){.op = Onop};
++				changed = 1;
++			}
++	}
++	if (changed)
++		filluse(fn);
+ }
+ 
+ /* requires use dom
+@@ -434,7 +517,8 @@
+ 	Tmp *t;
+ 	uint bid;
+ 
++	prunecopies(fn);
+ 	filldepth(fn);
+ 	fillloop(fn);
+ 
+ 	for (t=fn->tmp; t<&fn->tmp[fn->ntmp]; t++) {

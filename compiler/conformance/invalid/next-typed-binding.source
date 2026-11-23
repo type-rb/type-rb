@@ -1,0 +1,4 @@
+def main()
+	next: Integer := 1
+	puts(next.to_s())
+end

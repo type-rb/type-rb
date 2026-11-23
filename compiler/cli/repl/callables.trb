@@ -1,0 +1,56 @@
+import { CompilerState } from state/state
+import { ReplStore, ReplEnvironment, repl_value, repl_environment } from repl/model
+import { repl_find, repl_binding_value, repl_capture_binding, repl_bind, repl_coerce } from repl/values
+import { load_integer, load_string, sparse_integer_at } from support/storage
+
+# Checked capture rows select only lexical dependencies. Cells preserve mutable
+# identity; immutable values retain their ordinary aggregate identity.
+def repl_closure(state: CompilerState, origin: Integer, mut store: ReplStore, mut environment: ReplEnvironment): Integer
+	state.callables.checked[0].lambdas.each do |lambda|
+		if lambda.origin == origin
+			mut captures: Array<Integer> := []
+			lambda.captures.each do |capture|
+				binding := repl_find(environment, capture.name)
+				if binding < 0
+					store.error[0] = "checked capture is outside its lexical environment"
+					return 0
+				end
+				if capture.mutable > 0
+					captures.push(repl_capture_binding(store, environment, binding))
+				else
+					captures.push(repl_binding_value(store, environment, binding))
+				end
+			end
+			return repl_value(store, lambda.type_name, lambda.function[0], 0.0, "", captures)
+		end
+	end
+	store.error[0] = "fn has no checked closure body"
+	return 0
+end
+
+def repl_closure_environment(state: CompilerState, mut store: ReplStore, id: Integer, arguments: Array<Integer>): ReplEnvironment
+	function := store.integers[id]
+	mut environment := repl_environment()
+	mut slot := 0
+	encoded := sparse_integer_at(state.callables.function_lambdas, function)
+	if encoded > 0
+		lambda := state.callables.checked_lambdas[encoded - 1]
+		lambda.captures.each do |capture|
+			value := store.children[id][slot]
+			repl_bind(environment, capture.name, value, capture.mutable)
+			if capture.mutable > 0
+				environment.cells[slot] = value
+				environment.values[slot] = 0
+			end
+			slot += 1
+		end
+	end
+	start := load_integer(state.declarations.function_parameter_starts, function) + slot
+	mut index := 0
+	while index < arguments.size()
+		value := repl_coerce(store, arguments[index], load_string(state.declarations.parameter_types, start + index))
+		repl_bind(environment, load_string(state.declarations.parameter_names, start + index), value, load_integer(state.declarations.parameter_mutable, start + index))
+		index += 1
+	end
+	return environment
+end

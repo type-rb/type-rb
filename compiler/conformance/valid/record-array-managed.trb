@@ -1,0 +1,20 @@
+record Entry
+	label: String
+	values: Array<Integer>
+end
+def main()
+	mut kept := [[Entry.new(label: "initial", values: [0])]]
+	mut index := 0
+	while index < 70000
+		mut entries := [Entry.new(label: "entry" + index.to_s(), values: [index])]
+		if index % 2 == 0
+			entries.push(Entry.new(label: "extra", values: [index + 1]))
+		end
+		kept[0] = entries
+		index += 1
+	end
+	puts(index)
+	puts(kept[0][0].label)
+	puts(kept[0][0].values[0])
+	puts(kept[0].size())
+end

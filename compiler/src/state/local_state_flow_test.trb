@@ -1,0 +1,46 @@
+import { nullable_apply, nullable_fact, nullable_lookup, nullable_replace, nullable_version } from frontend/checking/nominal/nullable_flow
+import { local_bind, local_find, local_identity, local_slot, locals_new } from state/local_state
+import { load_integer, store_integer } from support/storage
+import { describe, expect, test } from trb/std/test
+
+describe("Native TypeRB frontend") do
+	test("keeps lexical identities and flow facts separate across shadowing and reused slots") do
+		mut locals := locals_new(2)
+		outer := local_bind(locals, "value", "Integer?", 1)
+		identity := local_identity(locals, outer)
+		nullable_replace(locals, outer, "Integer")
+		mut iteration := 0
+		while iteration < 8
+			inner := local_bind(locals, "value", "String?", 1)
+			inner_id := local_identity(locals, inner)
+			expect(inner_id > identity).to_be_true()
+			expect(local_find(locals, "value")).to_equal(inner)
+			expect(nullable_version(locals, inner)).to_equal(0)
+			expect(nullable_lookup(locals, inner, -1, "String?")).to_equal("String?")
+			fact := nullable_fact(locals, inner, -1, "String", -1)
+			nullable_apply(locals, fact)
+			expect(nullable_lookup(locals, inner, -1, "String?")).to_equal("String")
+			store_integer(locals.binding_use_obligations, inner, 1)
+			store_integer(locals.binding_use_counts, inner, 1)
+			store_integer(locals.hash_literal_origins, inner, 123)
+			locals.count[0] = 1
+			expect(local_slot(locals, inner_id)).to_equal(-1)
+			expect(local_slot(locals, identity)).to_equal(outer)
+			expect(local_find(locals, "value")).to_equal(outer)
+			replacement := local_bind(locals, "value", "String?", 1)
+			expect(replacement).to_equal(inner)
+			expect(local_identity(locals, replacement) > inner_id).to_be_true()
+			expect(local_slot(locals, inner_id)).to_equal(-1)
+			nullable_apply(locals, fact)
+			expect(nullable_lookup(locals, replacement, -1, "String?")).to_equal("String?")
+			expect(load_integer(locals.binding_use_obligations, replacement)).to_equal(0)
+			expect(load_integer(locals.binding_use_counts, replacement)).to_equal(0)
+			expect(load_integer(locals.hash_literal_origins, replacement)).to_equal(0)
+			expect(nullable_lookup(locals, outer, -1, "Integer?")).to_equal("Integer")
+			locals.count[0] = 1
+			iteration += 1
+		end
+		expect(local_slot(locals, -1)).to_equal(-1)
+		expect(local_slot(locals, 9007199254740991)).to_equal(-1)
+	end
+end

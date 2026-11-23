@@ -1,0 +1,50 @@
+import { integer_string } from support/literals
+import { QbeOutput, qbe_output_line } from backend/qbe/output
+
+# Trace iteratively so graph depth never becomes native call-stack depth.
+# A local 64-pointer frontier avoids allocation for narrow graphs. Broader
+# graphs grow raw storage, with overflow/OOM checks, and release it before
+# returning. Descriptor/mark bits and object payloads keep their existing ABI.
+def gc_mark_inline_capacity(): Integer
+	return 64
+end
+
+def emit_gc_mark_runtime(mut output: QbeOutput)
+	inline_capacity := integer_string(gc_mark_inline_capacity())
+	inline_bytes := integer_string(gc_mark_inline_capacity() * 8)
+	qbe_output_line(output, "function $trbn_gc_scan_fixed(l %work, l %object, l %descriptor) {\n")
+	qbe_output_line(output, "@start\n\t%count_address =l add %descriptor, 8\n\t%count =l loadl %count_address\n\tjmp @loop\n")
+	qbe_output_line(output, "@loop\n\t%index =l phi @start 0, @visit %next\n\t%done =w cslel %count, %index\n\tjnz %done, @finish, @visit\n")
+	qbe_output_line(output, "@visit\n\t%scaled =l mul %index, 8\n\t%entries =l add %descriptor, 24\n\t%entry =l add %entries, %scaled\n\t%offset =l loadl %entry\n\t%field =l add %object, %offset\n\t%reference =l loadl %field\n\tcall $trbn_gc_enqueue(l %work, l %reference)\n\t%next =l add %index, 1\n\tjmp @loop\n")
+	qbe_output_line(output, "@finish\n\tret\n}\n\nfunction $trbn_gc_scan_array(l %work, l %object, l %descriptor) {\n")
+	qbe_output_line(output, "@start\n\t%managed_address =l add %descriptor, 8\n\t%managed =l loadl %managed_address\n\t%scalar =w ceql %managed, 0\n\tjnz %scalar, @finish, @prepare\n")
+	qbe_output_line(output, "@prepare\n\t%length_address =l add %object, 8\n\t%length =l loadl %length_address\n\t%data_address =l add %object, 24\n\t%data =l loadl %data_address\n\tjmp @loop\n")
+	qbe_output_line(output, "@loop\n\t%index =l phi @prepare 0, @visit %next\n\t%done =w cslel %length, %index\n\tjnz %done, @finish, @visit\n")
+	qbe_output_line(output, "@visit\n\t%scaled =l mul %index, 8\n\t%entry =l add %data, %scaled\n\t%reference =l loadl %entry\n\tcall $trbn_gc_enqueue(l %work, l %reference)\n\t%next =l add %index, 1\n\tjmp @loop\n")
+	qbe_output_line(output, "@finish\n\tret\n}\n\n\nfunction $trbn_gc_mark_grow(l %work) {\n")
+	qbe_output_line(output, "@start\n\t%capacity_slot =l add %work, 16\n\t%capacity =l loadl %capacity_slot\n\t# Doubling pointer capacity must fit a signed 64-bit byte count.\n\t%overflow =w cugtl %capacity, 576460752303423487\n\tjnz %overflow, @fail, @grow\n")
+	qbe_output_line(output, "@grow\n\t%next_capacity =l mul %capacity, 2\n\t%bytes =l mul %next_capacity, 8\n\t%data =l loadl %work\n\t%inline =w ceql %capacity, " + inline_capacity + "\n\tjnz %inline, @first, @resize\n")
+	qbe_output_line(output, "@first\n\t%first =l call $malloc(l %bytes)\n\t%first_failed =w ceql %first, 0\n\tjnz %first_failed, @fail, @copy\n")
+	qbe_output_line(output, "@copy\n\tcall $memcpy(l %first, l %data, l " + inline_bytes + ")\n\tjmp @ready\n")
+	qbe_output_line(output, "@resize\n\t%resized =l call $realloc(l %data, l %bytes)\n\t%resize_failed =w ceql %resized, 0\n\tjnz %resize_failed, @fail, @ready\n")
+	qbe_output_line(output, "@ready\n\t%new_data =l phi @copy %first, @resize %resized\n\tstorel %new_data, %work\n\tstorel %next_capacity, %capacity_slot\n\tret\n")
+	qbe_output_line(output, "@fail\n\tcall $trbn_fatal(l $trbn_allocation_error, l 26)\n\thlt\n}\n\nfunction $trbn_gc_enqueue(l %work, l %object) {\n")
+	qbe_output_line(output, "@start\n\t%nil =w ceql %object, 0\n\tjnz %nil, @finish, @descriptor\n")
+	qbe_output_line(output, "@descriptor\n\t%descriptor_mark =l loadl %object\n\t%static =w ceql %descriptor_mark, 0\n\tjnz %static, @finish, @check_mark\n")
+	qbe_output_line(output, "@check_mark\n\t%mark =l and %descriptor_mark, 1\n\t%seen =w cnel %mark, 0\n\tjnz %seen, @finish, @mark\n")
+	qbe_output_line(output, "@mark\n\t# Mark before enqueueing: shared edges and cycles enter the worklist once.\n\t%marked_descriptor =l or %descriptor_mark, 1\n\tstorel %marked_descriptor, %object\n\t%descriptor =l and %descriptor_mark, -2\n\t%kind =l loadl %descriptor\n\t%leaf =w ceql %kind, 0\n\tjnz %leaf, @finish, @references\n")
+	qbe_output_line(output, "@references\n\t# Fixed layouts store their reference count here, Arrays their managed flag.\n\t%references_slot =l add %descriptor, 8\n\t%references =l loadl %references_slot\n\t%scalar =w ceql %references, 0\n\tjnz %scalar, @finish, @append\n")
+	qbe_output_line(output, "@append\n\t%count_slot =l add %work, 8\n\t%count =l loadl %count_slot\n\t%capacity_slot =l add %work, 16\n\t%capacity =l loadl %capacity_slot\n\t%full =w ceql %count, %capacity\n\tjnz %full, @grow, @store\n")
+	qbe_output_line(output, "@grow\n\tcall $trbn_gc_mark_grow(l %work)\n")
+	qbe_output_line(output, "@store\n\t%data =l loadl %work\n\t%offset =l mul %count, 8\n\t%slot =l add %data, %offset\n\tstorel %object, %slot\n\t%next_count =l add %count, 1\n\tstorel %next_count, %count_slot\n")
+	qbe_output_line(output, "@finish\n\tret\n}\n\nfunction $trbn_gc_mark(l %object) {\n")
+	qbe_output_line(output, "@start\n\t# The worklist owns raw storage only; growing it cannot collect or call users.\n\t%inline_data =l alloc8 " + inline_bytes + "\n\t%work =l alloc8 24\n\t%count_slot =l add %work, 8\n\t%capacity_slot =l add %work, 16\n\tstorel %inline_data, %work\n\tstorel 0, %count_slot\n\tstorel " + inline_capacity + ", %capacity_slot\n\tcall $trbn_gc_enqueue(l %work, l %object)\n\tjmp @loop\n")
+	qbe_output_line(output, "@loop\n\t%count =l loadl %count_slot\n\t%empty =w ceql %count, 0\n\tjnz %empty, @finish, @pop\n")
+	qbe_output_line(output, "@pop\n\t%next_count =l sub %count, 1\n\tstorel %next_count, %count_slot\n\t%data =l loadl %work\n\t%offset =l mul %next_count, 8\n\t%slot =l add %data, %offset\n\t%next =l loadl %slot\n\t%descriptor_mark =l loadl %next\n\t%descriptor =l and %descriptor_mark, -2\n\t%kind =l loadl %descriptor\n\t%fixed =w ceql %kind, 1\n\tjnz %fixed, @fixed, @array\n")
+	qbe_output_line(output, "@fixed\n\tcall $trbn_gc_scan_fixed(l %work, l %next, l %descriptor)\n\tjmp @loop\n")
+	qbe_output_line(output, "@array\n\tcall $trbn_gc_scan_array(l %work, l %next, l %descriptor)\n\tjmp @loop\n")
+	qbe_output_line(output, "@finish\n\t%final_data =l loadl %work\n\t%on_stack =w ceql %final_data, %inline_data\n\tjnz %on_stack, @return, @release\n")
+	qbe_output_line(output, "@release\n\tcall $free(l %final_data)\n")
+	qbe_output_line(output, "@return\n\tret\n}\n")
+	return
+end

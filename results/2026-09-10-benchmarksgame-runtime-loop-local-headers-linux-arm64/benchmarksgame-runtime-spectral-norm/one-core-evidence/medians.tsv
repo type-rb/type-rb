@@ -1,0 +1,8 @@
+case	lane	candidate	retained	passed	walltime_median_seconds	cputime_median_seconds	memory_median_bytes	status
+spectral-norm	one-core	typerb-native	11	11	2.25684	2.25478	1478656	pass
+spectral-norm	one-core	typerb-go	11	11	5.63669	5.63005	7196672	pass
+spectral-norm	one-core	c	11	11	1.78836	1.78547	950272	pass
+spectral-norm	one-core	cpp	11	11	1.84013	1.83697	1216512	pass
+spectral-norm	one-core	go	11	11	3.21985	3.21286	4173824	pass
+spectral-norm	one-core	rust	11	11	1.79962	1.79587	1716224	pass
+spectral-norm	one-core	java	11	11	1.93929	1.89156	50565120	pass

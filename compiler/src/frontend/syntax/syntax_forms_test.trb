@@ -1,0 +1,16 @@
+import { binary_operator_id, syntax_expression_precedence } from frontend/syntax/syntax_forms
+import { describe, expect, test } from trb/std/test
+
+describe("Compiler syntax primitives") do
+	test("shares exact binary and compound operator identities with lowering") do
+		operators := ["+", "-", "*", "/", "%", "==", "!=", "<", "<=", ">", ">=", "+=", "-=", "*=", "/=", "unknown", "||", "&&", "**", "||=", "&&="]
+		identities := [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 17, 18, 19, 20, 0, 12, 13, 14, 21, 22]
+		precedences := [6, 6, 7, 7, 7, 4, 4, 5, 5, 5, 5, 0, 0, 0, 0, 0, 1, 2, 8, 0, 0]
+		mut index := 0
+		while index < operators.size()
+			expect(binary_operator_id(operators[index])).to_equal(identities[index])
+			expect(syntax_expression_precedence(operators[index])).to_equal(precedences[index])
+			index += 1
+		end
+	end
+end

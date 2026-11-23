@@ -1,0 +1,9 @@
+def multiply(left: Integer, right: Integer): Integer
+	return left * right
+end
+
+def main()
+	value := 94906266
+	puts(multiply(value, value).to_s())
+	return
+end

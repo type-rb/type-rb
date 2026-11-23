@@ -1,0 +1,5 @@
+scope	kind	bytes
+native-controlled	raw	1047080
+native-controlled	stripped	679664
+go-controlled	raw	276002107
+go-controlled	stripped-compiler	265589917

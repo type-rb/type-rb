@@ -1,0 +1,11 @@
+import { managed_mir_test_fixture } from testing/mir/managed
+import { describe, test } from trb/std/test
+
+describe("Structured mapping execution") do
+
+	test("owns mapping MIR independently of checked syntax and under forced collection") do
+		managed_mir_test_fixture("concurrent-map-values", 1)
+		managed_mir_test_fixture("concurrent-map-owned", 1)
+	end
+
+end

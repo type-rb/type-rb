@@ -1,0 +1,19 @@
+def probe()
+	mut visits := 0
+	[1, 2, 3].each do |value|
+		found := "abc".include?(if value == 1
+				next
+			elsif value == 3
+				break
+			else
+				"b"
+			end)
+		puts(found)
+		visits += 1
+	end
+	puts(visits)
+end
+
+def main()
+	probe()
+end

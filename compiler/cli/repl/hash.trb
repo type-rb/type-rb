@@ -1,0 +1,191 @@
+import { union_parts } from frontend/types/union_types
+import { ReplStore, ReplHashTable, repl_get, repl_value } from repl/model
+import { native_cli_byte } from host
+
+# Buckets contain pool identities. Zero is empty and -1 is deleted.
+def repl_hash_table(capacity: Integer, order: Array<Integer>): ReplHashTable
+	mut keys: Array<Integer> := []
+	mut values: Array<Integer> := []
+	while keys.size() < capacity
+		keys.push(0)
+		values.push(0)
+	end
+	return ReplHashTable.new(keys: keys, values: values, sizes: [0, 0], order: order)
+end
+
+def repl_hash_new(mut store: ReplStore, type_name: String, capacity: Integer): Integer
+	index := store.hashes.size()
+	store.hashes.push(repl_hash_table(capacity, []))
+	return repl_value(store, type_name, index, 0.0, "", [])
+end
+
+def repl_hash_key_payload(store: ReplStore, key: Integer): Integer
+	if union_parts(store.types[key]).size() > 0
+		return store.children[key][0]
+	end
+	return key
+end
+
+def repl_hash_code(store: ReplStore, input: Integer): Integer
+	key := repl_hash_key_payload(store, input)
+	if repl_get(store, key).type_name == "Integer"
+		value := store.integers[key]
+		mut low := value % 67108864
+		mut high := value / 67108864
+		if low < 0
+			low = -low
+		end
+		if high < 0
+			high = -high
+		end
+		return (low * 65599 + high * 8191) % 2147483647
+	end
+	text := store.texts[key]
+	mut result := 0
+	mut index := 0
+	while index < text.size()
+		result = (result * 131 + native_cli_byte(text, index)) % 2147483647
+		index += 1
+	end
+	return result
+end
+
+def repl_hash_slot(store: ReplStore, table: ReplHashTable, key: Integer): Integer
+	capacity := table.keys.size()
+	if capacity == 0
+		return -1
+	end
+	mut slot := repl_hash_code(store, key) % capacity
+	query := repl_hash_key_payload(store, key)
+	mut deleted := -1
+	mut count := 0
+	while count < capacity
+		stored := table.keys[slot]
+		if stored == 0
+			if deleted >= 0
+				return -1 - deleted
+			end
+			return -1 - slot
+		end
+		if stored < 0
+			if deleted < 0
+				deleted = slot
+			end
+		else
+			payload := repl_hash_key_payload(store, stored)
+			if repl_get(store, query).type_name == "Integer"
+				if store.integers[payload] == store.integers[query]
+					return slot
+				end
+			else
+				if store.texts[payload] == store.texts[query]
+					return slot
+				end
+			end
+		end
+		slot = (slot + 1) % capacity
+		count += 1
+	end
+	return -1 - deleted
+end
+
+def repl_hash_rebuild(mut store: ReplStore, id: Integer, capacity: Integer)
+	index := store.integers[id]
+	old := store.hashes[index]
+	mut table := repl_hash_table(capacity, old.order)
+	mut slot := 0
+	while slot < old.keys.size()
+		key := old.keys[slot]
+		if key > 0
+			target := -1 - repl_hash_slot(store, table, key)
+			table.keys[target] = key
+			table.values[target] = old.values[slot]
+			table.sizes[0] += 1
+		end
+		slot += 1
+	end
+	store.hashes[index] = table
+end
+
+def repl_hash_set(mut store: ReplStore, id: Integer, key: Integer, value: Integer)
+	index := store.integers[id]
+	mut table := store.hashes[index]
+	mut slot := repl_hash_slot(store, table, key)
+	if slot >= 0
+		table.values[slot] = value
+		return
+	end
+	capacity := table.keys.size()
+	if capacity == 0
+		repl_hash_rebuild(store, id, 8)
+	elsif(table.sizes[0] + table.sizes[1] + 1) * 4 > capacity * 3
+		mut next_capacity := capacity
+		if (table.sizes[0] + 1) * 4 > capacity * 3
+			next_capacity *= 2
+		end
+		repl_hash_rebuild(store, id, next_capacity)
+	end
+	table = store.hashes[index]
+	slot = -1 - repl_hash_slot(store, table, key)
+	if table.keys[slot] < 0
+		table.sizes[1] -= 1
+	end
+	table.keys[slot] = key
+	table.values[slot] = value
+	table.sizes[0] += 1
+	table.order.push(key)
+end
+
+def repl_hash_get(mut store: ReplStore, id: Integer, key: Integer): Integer
+	table := store.hashes[store.integers[id]]
+	slot := repl_hash_slot(store, table, key)
+	if slot < 0
+		store.error[0] = "panic: Hash key is missing"
+		return 0
+	end
+	return table.values[slot]
+end
+
+def repl_hash_delete(mut store: ReplStore, id: Integer, key: Integer): Integer
+	index := store.integers[id]
+	mut table := store.hashes[index]
+	slot := repl_hash_slot(store, table, key)
+	if slot < 0
+		store.error[0] = "panic: Hash key is missing"
+		return 0
+	end
+	value := table.values[slot]
+	mut order_index := 0
+	while order_index < table.order.size()
+		if table.order[order_index] == table.keys[slot]
+			table.order[order_index] = 0
+			break
+		end
+		order_index += 1
+	end
+	table.keys[slot] = -1
+	table.values[slot] = 0
+	table.sizes[0] -= 1
+	table.sizes[1] += 1
+	if table.sizes[0] == 0
+		store.hashes[index] = repl_hash_table(0, [])
+	elsif table.keys.size() > 8 && table.sizes[0] * 8 < table.keys.size()
+		repl_hash_rebuild(store, id, table.keys.size() / 2)
+	end
+	return value
+end
+
+def repl_hash_update(mut store: ReplStore, target: Integer, source: Integer)
+	table := store.hashes[store.integers[source]]
+	mut index := 0
+	while index < table.order.size()
+		key := table.order[index]
+		if key > 0
+			slot := repl_hash_slot(store, table, key)
+			if slot >= 0
+				repl_hash_set(store, target, table.keys[slot], table.values[slot])
+			end
+		end
+		index += 1
+	end
+end

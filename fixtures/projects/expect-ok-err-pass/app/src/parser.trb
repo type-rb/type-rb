@@ -1,0 +1,8 @@
+import trb/std/result
+
+def parse(text: String): Result<Integer, String>
+	if text == "one"
+		return Result<Integer, String>::Ok(1)
+	end
+	return Result<Integer, String>::Err("bad " + text)
+end

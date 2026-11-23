@@ -1,0 +1,132 @@
+def slice_case_0()
+	empty: Array<Integer> := []
+	empty.each_slice(2) { |_batch| puts(99) }
+	[1, 2, 3, 4, 5].each_slice(2).with_index do |batch, index|
+		puts(index)
+		puts(batch.size())
+		batch.each { |value| puts(value) }
+	end
+	[7, 8].each_slice(20) { |batch| puts(batch.size()) }
+
+end
+
+def slice_case_1()
+	mut values := [1, 2]
+	values.each_slice(2).with_index() do |batch, index|
+		puts(index)
+		puts(batch[0])
+		puts(batch.size())
+		if index == 0
+			values.push(3)
+			values.push(4)
+		end
+	end
+
+end
+
+def slice_case_2()
+	mut values := [1, 2, 3]
+	values.each_slice(2).with_index do |batch, index|
+		puts(index)
+		puts(batch.size())
+		if index == 1
+			values.push(4)
+			values.push(5)
+		end
+	end
+	puts(values.size())
+
+end
+
+def slice_case_3()
+	mut values := [1]
+	mut visits := 0
+	values.each_slice(3) do |batch|
+		visits += 1
+		puts(batch.size())
+		if visits == 1
+			values.push(2)
+		end
+	end
+	puts(visits)
+
+end
+
+def slice_case_4()
+	mut values := [1, 2, 3, 4]
+	mut retained := values
+	mut size := 2
+	values.each_slice(size).with_index do |batch, index|
+		puts(batch[0])
+		puts(batch.size())
+		if index == 0
+			size = 1
+			values = [9]
+			retained[2] = 7
+			retained.push(5)
+		end
+	end
+	puts(values[0])
+
+end
+
+def slice_case_5()
+	mut values := [1, 2, 3, 4]
+	values.each_slice(2) do |batch|
+		puts(batch[0])
+		while values.size() > 0
+			_removed := values.pop()
+		end
+	end
+	puts(values.size())
+
+end
+
+def slice_case_6()
+	mut held: Array<Array<Integer>> := []
+	mut values := [1, 2, 3]
+	values.each_slice(2) do |batch|
+		held.push(batch)
+		batch.push(9)
+	end
+	values[0] = 7
+	puts(held[0][0])
+	puts(held[0].size())
+	puts(held[1][0])
+	puts(held[1].size())
+	puts(values.size())
+
+end
+
+def slice_test_7_first(values: Array<Integer>): Integer
+	values.each_slice(2) do |batch|
+		if batch[0] == 3
+			return batch[-1]
+		end
+	end
+	return 0
+end
+
+def slice_case_7()
+	puts(slice_test_7_first([1, 2, 3, 4, 5]))
+	puts(slice_test_7_first([]))
+	mut total := 0
+	[1, 2, 3, 4, 5, 6, 7].each_slice(2) do |batch|
+		next if batch[0] == 1
+		break if batch[0] == 5
+		total += batch[0]
+	end
+	puts(total)
+
+end
+
+def main()
+	slice_case_0()
+	slice_case_1()
+	slice_case_2()
+	slice_case_3()
+	slice_case_4()
+	slice_case_5()
+	slice_case_6()
+	slice_case_7()
+end

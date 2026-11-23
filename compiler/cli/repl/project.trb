@@ -1,0 +1,614 @@
+import { resolve_without_entry } from frontend/checking/program/resolution
+import { ProjectedType } from state/source_state
+import { import_kind_module, import_kind_named } from state/import_kinds
+import { standard_source_process, standard_source_result, standard_source_unit, standard_source_url } from state/standard_source_kinds
+import { find_object_type, object_instance_type } from frontend/types/object_types
+import { literal_type_base, literal_type_display } from frontend/types/literal_types
+import { find_newtype_type, newtype_type } from frontend/types/newtype_types
+import { union_parts } from frontend/types/union_types
+import { namespace_parent } from frontend/types/namespace_model
+import { callable_parts } from frontend/types/callable_types
+import { generic_application, generic_arguments, generic_base } from frontend/types/generic_arguments
+import { standard_source_kind } from project/standard_library
+import { nullable_element } from frontend/types/nullable_types
+import { hash_key_type, hash_value_type } from frontend/types/hash_types
+import { compiler_collect_project_sources, compiler_read_source, load_project_packages, load_configured_sources_with_mode, load_project_sources_with_entry, project_module_name } from compiler
+import { compiler_source_slice, lex } from frontend/syntax/lexer
+import { native_cli_cwd } from host
+import { parse_module } from frontend/syntax/parser
+import { path_directory, path_join, string_starts_with } from support/path
+import { parse_project_config } from project/config
+import { enum_type, find_enum_type } from frontend/types/enum_types
+import { standard_package_root, standard_package_target } from frontend/resolution/import_resolution
+import { array_element_type, find_record_type, generic_instance_for_type, record_type } from frontend/resolution/type_resolution
+import { CompilerState, compiler_new, has_diagnostic } from state/state
+import { load_integer, load_string } from support/storage
+
+record ReplProject
+	configuration: String
+	imports: String
+	root: String
+	error: String
+	configured: Boolean
+end
+
+def repl_project(config: String): ReplProject
+	if config == ""
+		return ReplProject.new(configuration: "", configured: false, imports: repl_standard_imports([]), root: native_cli_cwd(), error: "")
+	end
+	project := parse_project_config(compiler_read_source(config))
+	if project.error != ""
+		return ReplProject.new(configuration: "", configured: false, imports: "", root: "", error: project.error)
+	end
+	mut configuration := ""
+	if project.local_packages.size() > 0 || project.packages.size() > 0
+		configuration = config
+		packages := load_project_packages(project, config)
+		if packages.error[0] != ""
+			return ReplProject.new(configuration: "", configured: false, imports: "", root: "", error: packages.error[0])
+		end
+	end
+	root := path_join(path_directory(config), project.source_dir)
+	bundle := compiler_collect_project_sources(root, path_join(path_directory(config), project.out_dir))
+	if bundle.error != ""
+		return ReplProject.new(configuration: "", configured: false, imports: "", root: root, error: bundle.error)
+	end
+	mut web := false
+	mut routes := false
+	mut names: Array<String> := []
+	mut modules: Array<String> := []
+	mut index := 0
+	while index < bundle.paths.size()
+		mut state := compiler_new(bundle.sources[index].size() * 3 + 16)
+		lex(state, bundle.sources[index])
+		if !has_diagnostic(state)
+			parse_module(state, 0, 0)
+		end
+		if has_diagnostic(state)
+			return ReplProject.new(configuration: "", configured: false, imports: "", root: root, error: "cannot parse project module " + bundle.paths[index])
+		end
+		module_name := project_module_name(state, root, bundle.paths[index])
+		if string_starts_with(module_name, "routes/")
+			routes = true
+		end
+		mut imported := 0
+		while imported < state.module_graph.import_count[0]
+			path := load_string(state.module_graph.import_paths, imported)
+			if path == "trb/web" || string_starts_with(path, "trb/web/")
+				web = true
+			end
+			imported += 1
+		end
+		mut item := 0
+		while item < state.declarations.function_count[0]
+			name := load_string(state.declarations.function_names, item)
+			if name != "main"
+				names.push(name)
+				modules.push(module_name)
+			end
+			item += 1
+		end
+		item = 0
+		while item < state.declarations.record_count[0]
+			names.push(load_string(state.declarations.record_names, item))
+			modules.push(module_name)
+			item += 1
+		end
+		state.type_resolution.generic_functions.each do |definition|
+			names.push(definition.name)
+			modules.push(module_name)
+		end
+		state.type_resolution.generic_definitions.each do |definition|
+			names.push(definition.name)
+			modules.push(module_name)
+		end
+		state.type_resolution.type_aliases.each do |definition|
+			names.push(definition.name)
+			modules.push(module_name)
+		end
+		state.global_bindings.globals.each do |definition|
+			if definition.constant
+				names.push(definition.name)
+				modules.push(module_name)
+			end
+		end
+		state.global_bindings.namespaces.each do |definition|
+			names.push(definition.name)
+			modules.push(module_name)
+		end
+		state.nominal.objects.each do |definition|
+			names.push(definition.name)
+			modules.push(module_name)
+		end
+		state.nominal.enums.each do |definition|
+			names.push(definition.name)
+			modules.push(module_name)
+		end
+		index += 1
+	end
+	# Route diagnostics belong to project startup, including files whose handler
+	# names collide and therefore are not imported into the session prelude.
+	# A REPL project does not require an executable main entry.
+	if web && routes
+		mut validation := load_project_sources_with_entry(config, root, bundle, false)
+		if configuration != ""
+			validation = load_configured_sources_with_mode(project, config, root, path_join(path_directory(config), project.out_dir), bundle, false, false)
+		end
+		if !has_diagnostic(validation)
+			resolve_without_entry(validation)
+		end
+		if has_diagnostic(validation)
+			return ReplProject.new(configuration: "", configured: false, imports: "", root: root, error: load_string(validation.diagnostics.messages, 0))
+		end
+	end
+	mut imports := repl_standard_imports(names)
+	index = 0
+	while index < names.size()
+		mut count := 0
+		mut peer := 0
+		while peer < names.size()
+			if names[index] == names[peer]
+				count += 1
+			end
+			peer += 1
+		end
+		if count == 1 && namespace_parent(names[index]) == ""
+			imports += "import { " + names[index] + " } from " + modules[index] + "\n"
+		end
+		index += 1
+	end
+	return ReplProject.new(configuration: configuration, configured: true, imports: imports, root: root, error: "")
+end
+
+# Filter generated imports using parsed declarations, never tokens in comments
+# or literals. Blank lines preserve submission and diagnostic source positions.
+def repl_project_source(source: String, prelude: String): String
+	authored := compiler_source_slice(source, prelude.size(), source.size())
+	mut session := compiler_new(authored.size() * 3 + 16)
+	lex(session, authored)
+	if !has_diagnostic(session)
+		parse_module(session, 0, 0)
+	end
+	if has_diagnostic(session)
+		return source
+	end
+	mut explicit: Hash<String, Integer> := {}
+	mut paths: Hash<String, Integer> := {}
+	mut index := 0
+	while index < session.declarations.function_count[0]
+		explicit[load_string(session.declarations.function_names, index)] = 1
+		index += 1
+	end
+	index = 0
+	while index < session.declarations.record_count[0]
+		explicit[load_string(session.declarations.record_names, index)] = 1
+		index += 1
+	end
+	session.type_resolution.generic_functions.each do |definition|
+		explicit[definition.name] = 1
+	end
+	session.type_resolution.generic_definitions.each do |definition|
+		explicit[definition.name] = 1
+	end
+	session.type_resolution.type_aliases.each do |definition|
+		explicit[definition.name] = 1
+	end
+	session.global_bindings.globals.each do |definition|
+		explicit[definition.name] = 1
+	end
+	session.global_bindings.namespaces.each do |definition|
+		explicit[definition.name] = 1
+	end
+	session.nominal.objects.each do |definition|
+		explicit[definition.name] = 1
+	end
+	session.nominal.enums.each do |definition|
+		explicit[definition.name] = 1
+	end
+	index = 0
+	while index < session.module_graph.import_count[0]
+		if load_integer(session.module_graph.import_kinds, index) == import_kind_named()
+			# Match the original declaration, including when it has an alias.
+			explicit[load_string(session.module_graph.import_declarations, index)] = 1
+		else
+			# A bare alias still owns the package's one exported root.
+			# Suppress its generated import under the original spelling too.
+			paths[load_string(session.module_graph.import_paths, index)] = 1
+		end
+		index += 1
+	end
+	mut generated := compiler_new(prelude.size() * 3 + 16)
+	lex(generated, prelude)
+	parse_module(generated, 0, 0)
+	if has_diagnostic(generated)
+		return source
+	end
+	mut lines: Array<String> := []
+	mut start := 0
+	index = 0
+	while index < prelude.size()
+		if prelude[index] == "\n"
+			lines.push(compiler_source_slice(prelude, start, index))
+			start = index + 1
+		end
+		index += 1
+	end
+	mut hidden: Array<Boolean> := []
+	lines.each do |_line|
+		hidden.push(false)
+	end
+	index = 0
+	while index < generated.module_graph.import_count[0]
+		path := load_string(generated.module_graph.import_paths, index)
+		mut name := load_string(generated.module_graph.import_declarations, index)
+		if load_integer(generated.module_graph.import_kinds, index) == import_kind_module()
+			kind := standard_source_kind(path)
+			if kind == standard_source_result()
+				name = "Result"
+			elsif kind == standard_source_unit()
+				name = "Unit"
+			elsif kind == standard_source_process()
+				name = "Process"
+			elsif kind == standard_source_url()
+				name = "URL"
+			else
+				name = standard_package_root(standard_package_target(path))
+			end
+		end
+		if explicit.key?(name) || paths.key?(path)
+			hidden[load_integer(generated.module_graph.import_lines, index) - 1] = true
+		end
+		index += 1
+	end
+	mut filtered := ""
+	index = 0
+	while index < lines.size()
+		if !hidden[index]
+			filtered += lines[index]
+		end
+		filtered += "\n"
+		index += 1
+	end
+	return filtered + authored
+end
+
+def repl_type_name(state: CompilerState, type_name: String): String
+	if type_name == "Array"
+		return "Array<Any>"
+	end
+	if literal_type_base(type_name) != ""
+		return literal_type_display(type_name)
+	end
+	alternatives := union_parts(type_name)
+	if alternatives.size() > 0
+		mut text := ""
+		mut union_index := 0
+		alternatives.each do |alternative|
+			if union_index > 0
+				text += " | "
+			end
+			text += repl_type_name(state, alternative)
+			union_index += 1
+		end
+		return text
+	end
+	parts := callable_parts(type_name)
+	if parts.size() > 0 && nullable_element(type_name) == ""
+		mut text := "("
+		mut parameter := 1
+		while parameter < parts.size()
+			if parameter > 1
+				text += ", "
+			end
+			text += repl_type_name(state, parts[parameter])
+			parameter += 1
+		end
+		return text + ") -> " + repl_type_name(state, parts[0])
+	end
+	if nullable_element(type_name) != ""
+		element := nullable_element(type_name)
+		if callable_parts(element).size() > 0 || union_parts(element).size() > 0
+			return "(" + repl_type_name(state, element) + ")?"
+		end
+		return repl_type_name(state, element) + "?"
+	end
+	if hash_key_type(type_name) != ""
+		return "Hash<" + repl_type_name(state, hash_key_type(type_name)) + ", " + repl_type_name(state, hash_value_type(type_name)) + ">"
+	end
+	element := array_element_type(type_name)
+	if element != ""
+		return "Array<" + repl_type_name(state, element) + ">"
+	end
+	instance := generic_instance_for_type(state, type_name)
+	if instance >= 0
+		row := state.type_resolution.generic_instances[instance]
+		definition := state.type_resolution.generic_definitions[row.definition]
+		mut application_name := repl_visible_type_name(state, definition.source_id, definition.name) + "<"
+		mut argument_index := 0
+		row.arguments.each do |argument|
+			if argument_index > 0
+				application_name += ", "
+			end
+			application_name += repl_type_name(state, argument)
+			argument_index += 1
+		end
+		return application_name + ">"
+	end
+	object_index := find_object_type(state, type_name)
+	if object_index >= 0
+		row := state.nominal.object_instances[object_index]
+		definition := state.nominal.objects[row.definition]
+		name := repl_visible_type_name(state, definition.source_id, definition.name)
+		if row.arguments.size() == 0
+			return name
+		end
+		mut arguments: Array<String> := []
+		row.arguments.each do |argument|
+			arguments.push(repl_type_name(state, argument))
+		end
+		return generic_application(name, arguments)
+	end
+	newtype_index := find_newtype_type(state, type_name)
+	if newtype_index >= 0
+		definition := state.nominal.newtypes[newtype_index]
+		return repl_visible_type_name(state, definition.source_id, definition.name)
+	end
+	mut name := ""
+	mut owner := -1
+	enum_index := find_enum_type(state, type_name)
+	if enum_index >= 0
+		name = state.nominal.enums[enum_index].name
+		owner = state.nominal.enums[enum_index].source_id
+	else
+		record_index := find_record_type(state, type_name)
+		if record_index < 0
+			return type_name
+		end
+		name = load_string(state.declarations.record_names, record_index)
+		owner = load_integer(state.declarations.record_modules, record_index)
+	end
+	return repl_visible_type_name(state, owner, name)
+end
+
+def repl_visible_type_name(state: CompilerState, owner: Integer, name: String): String
+	if owner == state.module_graph.entry_module[0]
+		return name
+	end
+	visible := repl_imported_name(state, owner, name)
+	if visible != ""
+		return visible
+	end
+	return name
+end
+
+def repl_imported_name(state: CompilerState, owner: Integer, name: String): String
+	start := load_integer(state.module_graph.module_import_starts, state.module_graph.entry_module[0])
+	finish := start + load_integer(state.module_graph.module_import_counts, state.module_graph.entry_module[0])
+	mut index := start
+	while index < finish
+		if load_integer(state.module_graph.import_targets, index) == owner
+			declaration := load_string(state.module_graph.import_declarations, index)
+			mut root := name
+			while root != ""
+				if root == declaration
+					return load_string(state.module_graph.import_symbols, index) + compiler_source_slice(name, root.size(), name.size())
+				end
+				root = namespace_parent(root)
+			end
+		end
+		index += 1
+	end
+	return ""
+end
+
+# The reference REPL makes these portable declaration roots available by
+# default. A project declaration with the same root retains its own identity.
+def repl_standard_imports(names: Array<String>): String
+	mut result := "import trb/std/math\nimport trb/std/process\n"
+	mut result_root := true
+	mut unit_root := true
+	names.each do |name|
+		if name == "Result"
+			result_root = false
+		end
+		if name == "Unit"
+			unit_root = false
+		end
+	end
+	if result_root
+		result += "import trb/std/result\n"
+	end
+	["EnumValueError", "IndexLookupError", "SliceRangeError", "KeyLookupError", "NumberParseError", "NumberParseErrorKind"].each do |error_name|
+		mut available := true
+		names.each do |name|
+			if name == error_name
+				available = false
+			end
+		end
+		if available
+			result += "import { " + error_name + " } from trb/std/errors\n"
+		end
+	end
+	if unit_root
+		result += "import trb/std/unit\n"
+	end
+	return result
+end
+
+# Witness names carry only an opaque catalog key. Their declaration descriptors
+# rebind within the next checked catalog and only inside generated source spans.
+def repl_projection_name(type_name: String): String
+	return "__retained_" + type_name.split("#").join("_")
+end
+
+def repl_witness_type_name(state: CompilerState, type_name: String): String
+	return repl_witness_type_name_at(state, type_name, [])
+end
+
+def repl_witness_type_name_at(state: CompilerState, type_name: String, blocked: Array<Integer>): String
+	if find_object_type(state, type_name) >= 0 || find_record_type(state, type_name) >= 0 || find_enum_type(state, type_name) >= 0 || find_newtype_type(state, type_name) >= 0
+		return repl_projection_name(type_name)
+	end
+	mut index := 0
+	while index < state.type_resolution.alias_instances.size()
+		instance := state.type_resolution.alias_instances[index]
+		mut available := true
+		blocked.each do |used|
+			if used == index
+				available = false
+			end
+		end
+		if instance.type_name == type_name && available
+			definition := state.type_resolution.type_aliases[instance.definition]
+			mut visible := ""
+			if definition.source_id == state.module_graph.entry_module[0]
+				visible = definition.name
+			else
+				visible = repl_imported_name(state, definition.source_id, definition.name)
+			end
+			if visible != ""
+				if instance.arguments.size() == 0
+					return visible
+				end
+				mut names: Array<String> := []
+				mut nested: Array<Integer> := []
+				blocked.each do |used|
+					nested.push(used)
+				end
+				nested.push(index)
+				instance.arguments.each do |argument|
+					names.push(repl_witness_type_name_at(state, argument, nested))
+				end
+				return generic_application(visible, names)
+			end
+		end
+		index += 1
+	end
+	if literal_type_base(type_name) != ""
+		return literal_type_display(type_name)
+	end
+
+	alternatives := union_parts(type_name)
+	if alternatives.size() > 0
+		mut text := ""
+		mut union_index := 0
+		alternatives.each do |alternative|
+			if union_index > 0
+				text += " | "
+			end
+			text += repl_witness_type_name_at(state, alternative, blocked)
+			union_index += 1
+		end
+		return text
+	end
+	parts := callable_parts(type_name)
+	if parts.size() > 0 && nullable_element(type_name) == ""
+		mut text := "("
+		mut parameter := 1
+		while parameter < parts.size()
+			if parameter > 1
+				text += ", "
+			end
+			text += repl_witness_type_name_at(state, parts[parameter], blocked)
+			parameter += 1
+		end
+		return text + ") -> " + repl_witness_type_name_at(state, parts[0], blocked)
+	end
+	if nullable_element(type_name) != ""
+		element := nullable_element(type_name)
+		name := repl_witness_type_name_at(state, element, blocked)
+		if callable_parts(element).size() > 0 && name.size() > 0 && name[0] == "("
+			return "(" + name + ")?"
+		end
+		return name + "?"
+	end
+	element := array_element_type(type_name)
+	if element != ""
+		return "Array<" + repl_witness_type_name_at(state, element, blocked) + ">"
+	end
+	if hash_key_type(type_name) != ""
+		return "Hash<" + repl_witness_type_name_at(state, hash_key_type(type_name), blocked) + "," + repl_witness_type_name_at(state, hash_value_type(type_name), blocked) + ">"
+	end
+	return repl_type_name(state, type_name)
+end
+
+# Metadata keeps the canonical structure of literals, unions and callables;
+# only nominal leaves are replaced by their ownership descriptor keys.
+def repl_descriptor_type_name(state: CompilerState, type_name: String): String
+	if find_object_type(state, type_name) >= 0 || find_record_type(state, type_name) >= 0 || find_enum_type(state, type_name) >= 0 || find_newtype_type(state, type_name) >= 0
+		return repl_projection_name(type_name)
+	end
+	optional := nullable_element(type_name)
+	if optional != ""
+		return repl_descriptor_type_name(state, optional) + "?"
+	end
+	parts := generic_arguments(type_name)
+	if parts.size() > 0
+		mut arguments: Array<String> := []
+		parts.each do |part|
+			arguments.push(repl_descriptor_type_name(state, part))
+		end
+		return generic_application(generic_base(type_name), arguments)
+	end
+	return type_name
+end
+
+def repl_projected_types(state: CompilerState): Array<ProjectedType>
+	mut bindings: Array<ProjectedType> := []
+	mut index := 0
+	while index < state.nominal.object_instances.size()
+		row := state.nominal.object_instances[index]
+		definition := state.nominal.objects[row.definition]
+		mut arguments: Array<String> := []
+		row.arguments.each do |argument|
+			arguments.push(repl_descriptor_type_name(state, argument))
+		end
+		bindings.push(ProjectedType.new(name: repl_projection_name(object_instance_type(state, index)), module_name: load_string(state.module_graph.module_names, definition.source_id), declaration: definition.name, arguments: arguments))
+		index += 1
+	end
+	index = 0
+	while index < state.declarations.record_count[0]
+		name := record_type(index)
+		instance := generic_instance_for_type(state, name)
+		mut owner := load_integer(state.declarations.record_modules, index)
+		mut declaration := load_string(state.declarations.record_names, index)
+		mut arguments: Array<String> := []
+		if instance >= 0
+			row := state.type_resolution.generic_instances[instance]
+			definition := state.type_resolution.generic_definitions[row.definition]
+			owner = definition.source_id
+			declaration = definition.name
+			row.arguments.each do |argument|
+				arguments.push(repl_descriptor_type_name(state, argument))
+			end
+		end
+		bindings.push(ProjectedType.new(name: repl_projection_name(name), module_name: load_string(state.module_graph.module_names, owner), declaration: declaration, arguments: arguments))
+		index += 1
+	end
+	index = 0
+	while index < state.nominal.enums.size()
+		name := enum_type(index)
+		instance := generic_instance_for_type(state, name)
+		mut owner := state.nominal.enums[index].source_id
+		mut declaration := state.nominal.enums[index].name
+		mut arguments: Array<String> := []
+		if instance >= 0
+			row := state.type_resolution.generic_instances[instance]
+			definition := state.type_resolution.generic_definitions[row.definition]
+			owner = definition.source_id
+			declaration = definition.name
+			row.arguments.each do |argument|
+				arguments.push(repl_descriptor_type_name(state, argument))
+			end
+		end
+		bindings.push(ProjectedType.new(name: repl_projection_name(name), module_name: load_string(state.module_graph.module_names, owner), declaration: declaration, arguments: arguments))
+		index += 1
+	end
+	index = 0
+	while index < state.nominal.newtypes.size()
+		definition := state.nominal.newtypes[index]
+		bindings.push(ProjectedType.new(name: repl_projection_name(newtype_type(index)), module_name: load_string(state.module_graph.module_names, definition.source_id), declaration: definition.name, arguments: []))
+		index += 1
+	end
+	return bindings
+end

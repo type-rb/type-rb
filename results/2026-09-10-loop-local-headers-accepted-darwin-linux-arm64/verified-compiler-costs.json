@@ -1,0 +1,115 @@
+{
+  "source": "b230d34c1a415eab9f8eaa98c7ed418b57b5bafa",
+  "allJobs": 17,
+  "combinedBytes": 698256,
+  "targets": [
+    {
+      "target": "darwin-arm64",
+      "identities": {
+        "target": "darwin-arm64",
+        "baseline_compiler_bytes": "365800",
+        "candidate_compiler_bytes": "365816",
+        "candidate_compiler_limit": "366000",
+        "baseline_text_bytes": "263348",
+        "candidate_text_bytes": "265248",
+        "native_mir_policy_mode": "ordinary",
+        "induction_phi_recovery": "0",
+        "array_reduction_transition": "0",
+        "array_loop_recovery": "0",
+        "float_array_reduction": "0",
+        "guarded_multiply": "0",
+        "guarded_add": "0",
+        "stable_array_header": "0",
+        "compiler_ratio_limit": "1.05",
+        "build_ratio_limit": "1.05",
+        "baseline_fixed_point_qbe_size": "1183966",
+        "fixed_point_qbe_size": "1195739",
+        "fixed_point_qbe_sha256": "ab9c8729308823f7c12e26c3616587032569e19e8eddc2e710b59cd1cf35de7a"
+      },
+      "comparisons": [
+        {
+          "metric": "compiler_bytes",
+          "stage": "fixed-point",
+          "baseline": "365800",
+          "candidate": "365816",
+          "candidate_baseline_ratio": "1.000044",
+          "maximum": "1.05",
+          "status": "pass"
+        },
+        {
+          "metric": "build_elapsed",
+          "stage": "fixed-point-build",
+          "baseline": "1.895000",
+          "candidate": "1.930000",
+          "candidate_baseline_ratio": "1.018470",
+          "maximum": "1.05",
+          "status": "pass"
+        },
+        {
+          "metric": "build_peak_rss",
+          "stage": "fixed-point-build",
+          "baseline": "41320448.000000",
+          "candidate": "41353216.000000",
+          "candidate_baseline_ratio": "1.000793",
+          "maximum": "1.05",
+          "status": "pass"
+        }
+      ],
+      "rows": 36
+    },
+    {
+      "target": "linux-arm64",
+      "identities": {
+        "target": "linux-arm64",
+        "baseline_compiler_bytes": "330384",
+        "candidate_compiler_bytes": "332440",
+        "candidate_compiler_limit": "334000",
+        "baseline_text_bytes": "266032",
+        "candidate_text_bytes": "268064",
+        "native_mir_policy_mode": "ordinary",
+        "induction_phi_recovery": "0",
+        "array_reduction_transition": "0",
+        "array_loop_recovery": "0",
+        "float_array_reduction": "0",
+        "guarded_multiply": "0",
+        "guarded_add": "0",
+        "stable_array_header": "0",
+        "compiler_ratio_limit": "1.05",
+        "build_ratio_limit": "1.05",
+        "baseline_fixed_point_qbe_size": "1183966",
+        "fixed_point_qbe_size": "1195739",
+        "fixed_point_qbe_sha256": "ab9c8729308823f7c12e26c3616587032569e19e8eddc2e710b59cd1cf35de7a"
+      },
+      "comparisons": [
+        {
+          "metric": "compiler_bytes",
+          "stage": "fixed-point",
+          "baseline": "330384",
+          "candidate": "332440",
+          "candidate_baseline_ratio": "1.006223",
+          "maximum": "1.05",
+          "status": "pass"
+        },
+        {
+          "metric": "build_elapsed",
+          "stage": "fixed-point-build",
+          "baseline": "1.420000",
+          "candidate": "1.420000",
+          "candidate_baseline_ratio": "1.000000",
+          "maximum": "1.05",
+          "status": "pass"
+        },
+        {
+          "metric": "build_peak_rss",
+          "stage": "fixed-point-build",
+          "baseline": "64737280.000000",
+          "candidate": "64708608.000000",
+          "candidate_baseline_ratio": "0.999557",
+          "maximum": "1.05",
+          "status": "pass"
+        }
+      ],
+      "rows": 36
+    }
+  ]
+}

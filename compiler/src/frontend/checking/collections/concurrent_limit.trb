@@ -1,0 +1,59 @@
+import { TransformSyntax } from frontend/types/transform_model
+import { literal_integer_text } from frontend/types/literal_types
+import { CheckedValue, checked_mir_value, scalar_mir_binary, scalar_mir_instruction, scalar_mir_literal } from frontend/checking/body/values
+import { check_expression } from frontend/checking/body/expressions
+import { mir_control_active, mir_control_prepare } from mir/build/control
+import { mir_op_guard } from mir/model/instructions
+import { mir_guard_concurrent_limit } from mir/model/operation_modes
+import { CompilerState, diagnostic_at } from state/state
+import { CheckedLocals } from state/local_state
+import { mir_state_failure_block_slot } from state/local_slots
+import { token_kind_newline } from state/token_kinds
+import { load_integer, load_string } from support/storage
+
+# Admission is serial on the single mutator. Checking the requested upper
+# bound is still required, including for empty input and nested groups.
+def checked_concurrent_limit(mut state: CompilerState, mut locals: CheckedLocals, syntax: TransformSyntax): CheckedValue
+	origin := syntax.iteration.origin
+	mut limit := scalar_mir_literal(state, locals, "Integer", origin, "8")
+	if syntax.initial_start >= 0
+		mut position := [syntax.initial_start]
+		limit = check_expression(state, position, locals, 1, "Integer")
+		if position[0] != syntax.initial_finish
+			diagnostic_at(state, "TRBN4004", origin, "invalid concurrent_map limit boundary")
+		end
+		mut text := ""
+		mut cursor := syntax.initial_start
+		while cursor < syntax.initial_finish
+			if load_integer(state.source_tokens.token_kinds, cursor) != token_kind_newline()
+				text += load_string(state.source_tokens.token_texts, cursor)
+			end
+			cursor += 1
+		end
+		# Parentheses preserve a literal; unary signs are expressions in the
+		# reference checker and therefore use the runtime contract below.
+		while text.size() > 2 && text[0] == "(" && text[text.size() - 1] == ")"
+			mut inner := ""
+			mut index := 1
+			while index < text.size() - 1
+				inner += text[index]
+				index += 1
+			end
+			text = inner
+		end
+		literal := literal_integer_text(text)
+		if literal == "0"
+			diagnostic_at(state, "TRBN4004", syntax.initial_start, "concurrent_map limit must be greater than zero")
+		end
+	end
+	if limit.type_name == "Never"
+		return limit
+	end
+	mir_control_prepare(state, locals)
+	if mir_control_active(locals)
+		zero := scalar_mir_literal(state, locals, "Integer", origin, "0")
+		valid := scalar_mir_binary(state, locals, ">", limit, zero, "Boolean", origin)
+		scalar_mir_instruction(state, locals, mir_op_guard(), -1, checked_mir_value(valid), -1, mir_guard_concurrent_limit(), locals.mir_state[mir_state_failure_block_slot()], load_integer(state.source_tokens.token_lines, origin))
+	end
+	return limit
+end

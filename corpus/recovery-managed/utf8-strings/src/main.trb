@@ -1,0 +1,31 @@
+def main()
+	empty := ""
+	ascii := "Type" + "RB"
+	multibyte := "A😀" + "é"
+	mut checksum := 0
+	mut index := 0
+	while index < 200000
+		value := "A😀" + "é"
+		checksum += value.size()
+		if value[-1] == "é"
+			checksum += 1
+		end
+		index += 1
+	end
+	if empty.size() == 0
+		if ascii == "TypeRB"
+			if multibyte.size() == 3
+				if multibyte[0] == "A"
+					if multibyte[-1] == "é"
+						if checksum == 800000
+							puts("recovery-managed-utf8-strings")
+							return
+						end
+					end
+				end
+			end
+		end
+	end
+	puts("recovery-managed-utf8-strings-failed")
+	return
+end

@@ -1,0 +1,48 @@
+import { check } from compiler
+import { logical_checked_source } from testing/pipeline
+import { CompilerState, has_diagnostic } from state/state
+import { load_string } from support/storage
+import { describe, expect, test } from trb/std/test
+
+def binding_usage_checked(source: String): CompilerState
+	mut state := logical_checked_source(source)
+	check(state)
+	return state
+end
+
+describe("Authored binding usage") do
+	test("rejects an unused local and permits an explicit named discard") do
+		unused := binding_usage_checked("def probe()\nunused := 1\nputs(\"ok\")\nend\ndef main()\nprobe()\nend\n")
+		expect(load_string(unused.diagnostics.messages, 0)).to_equal("local variable unused is not used")
+		expect(load_string(unused.diagnostics.codes, 0)).to_equal("TRBN4004")
+		used := binding_usage_checked("def probe()\n_unused := 1\nputs(\"ok\")\nend\ndef main()\nprobe()\nend\n")
+		expect(has_diagnostic(used)).to_be_false()
+	end
+
+	test("rejects unused block, pattern and catch bindings") do
+		block := binding_usage_checked("def main()\n[1].each do |item|\nputs(\"ok\")\nend\nend\n")
+		expect(load_string(block.diagnostics.messages, 0)).to_equal("block parameter item is not used")
+		pattern := binding_usage_checked("enum Outcome\nValue(value: Integer)\nend\ndef probe(outcome: Outcome): Integer\ncase outcome\nwhen Outcome::Value(value)\nreturn 1\nend\nend\ndef main()\nend\n")
+		expect(load_string(pattern.diagnostics.messages, 0)).to_equal("pattern binding value is not used")
+		caught := binding_usage_checked("import trb/std/result\ndef read(): Result<Integer, String>\nreturn Result<Integer, String>::Err(\"missing\")\nend\ndef main()\nvalue := read() catch |error|\n0\nend\nputs(value)\nend\n")
+		expect(load_string(caught.diagnostics.messages, 0)).to_equal("catch binding error is not used")
+	end
+
+	test("counts closure captures and checks closure parameters") do
+		captured := binding_usage_checked("def probe(): Integer\nvalue := 3\ncallback := fn(): Integer; return value; end\nreturn callback()\nend\ndef main()\nputs(probe())\nend\n")
+		expect(has_diagnostic(captured)).to_be_false()
+		unused := binding_usage_checked("def main()\ncallback := fn(value: Integer); puts(\"ok\"); end\ncallback(1)\nend\n")
+		expect(load_string(unused.diagnostics.messages, 0)).to_equal("block parameter value is not used")
+	end
+
+	test("checks each reused lexical slot and keeps the Result obligation") do
+		shadowed := binding_usage_checked("def main()\nif true\nfirst := 1\nputs(first)\nend\nif true\nsecond := 2\nend\nend\n")
+		expect(load_string(shadowed.diagnostics.messages, 0)).to_equal("local variable second is not used")
+		result := binding_usage_checked("import trb/std/result\ndef main()\nvalue := Result<Integer, String>::Ok(1)\nend\n")
+		expect(load_string(result.diagnostics.messages, 0)).to_equal("Result binding value must be used")
+		prefixed := binding_usage_checked("import trb/std/result\ndef main()\n_value := Result<Integer, String>::Ok(1)\nend\n")
+		expect(load_string(prefixed.diagnostics.messages, 0)).to_equal("Result binding _value must be used")
+		assigned := binding_usage_checked("def main()\nmut value := 1\nvalue = 2\nend\n")
+		expect(has_diagnostic(assigned)).to_be_false()
+	end
+end

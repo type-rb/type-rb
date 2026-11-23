@@ -1,0 +1,56 @@
+import { compiler_new } from state/state
+import { load_string } from support/storage
+import { lex } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { check } from compiler
+import { expect_compiler_phase } from testing/pipeline
+import { describe, expect, test } from trb/std/test
+
+describe("Scoped resource declarations") do
+	test("rejects storage even in unused generic and aliased declarations") do
+		[
+			"alias Handle = File\n",
+			"alias Handles<T> = Array<File>\n",
+			"record Holder\nfile: File\nend\n",
+			"record Holder<T>\nfile: File\nend\n",
+			"class Holder<T>\n@file: File\nend\n",
+			"enum Holder\nValue(file: File)\nend\n",
+			"def escape(file: File): File\nreturn file\nend\n",
+			"def escape(file: File): Array<File>\nreturn [file]\nend\n",
+			"def escape(mut file: File)\nreturn\nend\n",
+			"def escape(file: File?)\nreturn\nend\n",
+			"def escape(callback: (File) -> Void)\nreturn\nend\n",
+			"interface Reader\nread(file: File): String\nend\n",
+		].each do |declarations|
+			mut state := compiler_new(1048576)
+			source := "import trb/std/file\n" + declarations + "def main()\nreturn\nend\n"
+			expect_compiler_phase(state, "lex", lex(state, source))
+			expect_compiler_phase(state, "parse", parse_module(state, 0, 0))
+			expect(resolve(state)).to_be_false()
+			expect(load_string(state.diagnostics.messages, 0).include?("scoped resource File")).to_be_true()
+		end
+	end
+
+	test("recognizes imported aliases as borrowed parameter identities") do
+		mut state := compiler_new(1048576)
+		source := "import { File as Handle } from trb/std/file\ndef borrow(_file: Handle)\nreturn\nend\ndef main()\nreturn\nend\n"
+		expect_compiler_phase(state, "lex", lex(state, source))
+		expect_compiler_phase(state, "parse", parse_module(state, 0, 0))
+		expect_compiler_phase(state, "resolve", resolve(state))
+		expect_compiler_phase(state, "check", check(state))
+	end
+
+	test("does not reserve authored names or symbolic generic parameters") do
+		[
+			"class File\nend\nrecord Holder\nfile: File\nend\ndef borrow(file: File): File\nreturn file\nend\n",
+			"import trb/std/file\nrecord Holder<File>\nvalue: File\nend\ndef borrow(_file: File)\nreturn\nend\n",
+		].each do |declarations|
+			mut state := compiler_new(1048576)
+			expect_compiler_phase(state, "lex", lex(state, declarations + "def main()\nreturn\nend\n"))
+			expect_compiler_phase(state, "parse", parse_module(state, 0, 0))
+			expect_compiler_phase(state, "resolve", resolve(state))
+			expect_compiler_phase(state, "check", check(state))
+		end
+	end
+end

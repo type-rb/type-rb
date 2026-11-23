@@ -1,0 +1,16 @@
+def sliced(text: String, bounds: Range<Integer>): String
+	return text.slice(bounds)
+end
+def main()
+	text := "A" + "BCD"
+	puts(sliced(text, 1...3))
+	puts(sliced(text, 1..2))
+	puts(sliced(text, 0...4))
+	puts(sliced(text, 4...4).size())
+	puts(sliced("", 0...0).size())
+	mut index := 0
+	while index < text.size()
+		puts(sliced(text, index..index))
+		index += 1
+	end
+end

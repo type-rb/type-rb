@@ -1,0 +1,21 @@
+import { mir_adapter_entropy, mir_signature_standard } from mir/model/call_kinds
+import { MirModule } from mir/model/module
+import { QbeOutput, qbe_output_line } from backend/qbe/output
+
+# Supported libc profiles provide getentropy: each call fills at most 256 bytes
+# or fails. The checked wrapper owns public bounds and failure behavior. No
+# allocation follows the managed result, so no extra temporary root is needed.
+def emit_entropy_runtime(native_module: MirModule, mut output: QbeOutput)
+	mut needed := false
+	if native_module.program.size() == 1 && native_module.program[0].cli_function >= 0
+		needed = true
+	end
+	native_module.signatures.each do |signature|
+		if signature.kind == mir_signature_standard() && signature.adapter == mir_adapter_entropy()
+			needed = true
+		end
+	end
+	if needed
+		qbe_output_line(output, "data $trbn_entropy_empty = align 8 { l 0, l 0, l 0, b 0 }\nfunction l $trbn_entropy_read(l %length) {\n@start\n %negative =w csltl %length, 0\n %excess =w csgtl %length, 65536\n %invalid =w or %negative, %excess\n jnz %invalid, @fail, @allocate\n@allocate\n %size =l add %length, 17\n %result =l call $trbn_string_alloc(l %size)\n %length_address =l add %result, 8\n storel %length, %length_address\n %points_address =l add %result, 16\n storel %length, %points_address\n %data =l add %result, 24\n jmp @loop\n@loop\n %offset =l phi @allocate 0, @advance %next\n %done =w ceql %offset, %length\n jnz %done, @finish, @chunk\n@chunk\n %remaining =l sub %length, %offset\n %large =w csgtl %remaining, 256\n jnz %large, @full, @tail\n@full\n jmp @read\n@tail\n jmp @read\n@read\n %count =l phi @full 256, @tail %remaining\n %target =l add %data, %offset\n %status =w call $getentropy(l %target, l %count)\n %failed =w cnew %status, 0\n jnz %failed, @fail, @advance\n@advance\n %next =l add %offset, %count\n jmp @loop\n@finish\n %end =l add %data, %length\n storeb 0, %end\n ret %result\n@fail\n ret $trbn_entropy_empty\n}\n")
+	end
+end

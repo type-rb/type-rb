@@ -1,0 +1,237 @@
+import { contained_scoped_resource } from frontend/types/resource_types
+import { checked_category_value } from frontend/types/value_categories
+import { record_collection_capture } from frontend/checking/collections/context_analysis
+import { binding_use_parameter } from state/binding_kinds
+import { mir_state_function_slot, nullable_state_head_slot } from state/local_slots
+import { checking_discovery, checking_lowering } from state/checking_phases
+import { ResolutionLocals, resolution_local_bind, resolution_locals_new } from state/resolution_locals
+import { CheckedLambda, LambdaCapture, LambdaSyntax, callable_parts } from frontend/types/callable_types
+import { nullable_fact, nullable_lookup } from frontend/checking/nominal/nullable_flow
+import { CompilerState, diagnostic, has_diagnostic, local_add } from state/state
+import { CheckedLocals, local_bind, local_find, local_identity, local_require_use, local_slot, locals_new } from state/local_state
+import { load_integer, load_string, sparse_integer_at, store_integer, store_string } from support/storage
+import { declare_lambda, lower_lambda } from mir/lowering/lambdas
+import { declare_default_functions } from frontend/resolution/default_arguments
+import { checked_body_new } from state/checked_body
+import { binding_scope_check } from frontend/checking/nominal/results
+import { type_diagnostic } from frontend/checking/body/types
+import { CheckedValue, checked_value } from frontend/checking/body/values
+import { resolve_body_names } from frontend/resolution/body_resolution
+import { check_block_value } from frontend/checking/body/statements
+
+# Clone visible declarations as an inherited prefix, without their SSA values,
+# mutable/field proofs, Result obligations, loops or reusable slot identities.
+def captured_body_locals(mut state: CompilerState, parent: CheckedLocals): CheckedLocals
+	mut locals := locals_new(state.source_tokens.token_count[0] + 1)
+	if parent.concurrent_function[0] > 0
+		locals.concurrent_function[0] = 2
+	end
+	mut concurrent_boundary := -1
+	mut concurrent_inherited := 0
+	if parent.concurrent_scope[0] >= 0
+		concurrent_boundary = parent.concurrent_scope[0]
+	end
+	mut slot := 0
+	while slot < parent.count[0]
+		name := load_string(parent.names, slot)
+		if name.size() > 0 && name[0] != "$" && local_find(parent, name) == slot
+			declared := load_string(parent.types, slot)
+			mutable := load_integer(parent.mutable, slot)
+			inherited := local_bind(locals, name, declared, mutable)
+			if slot < concurrent_boundary
+				concurrent_inherited += 1
+			end
+			if sparse_integer_at(parent.concurrent_borrowed, local_identity(parent, slot)) > 0
+				store_integer(locals.concurrent_borrowed, local_identity(locals, inherited), 1)
+			end
+			store_string(locals.presentations, inherited, load_string(parent.presentations, slot))
+			if state.callables.collection_inference_only[0]
+				store_integer(locals.array_literal_origins, inherited, load_integer(parent.array_literal_origins, slot))
+				store_integer(locals.array_declaration_origins, inherited, load_integer(parent.array_declaration_origins, slot))
+				store_integer(locals.array_inference_regions, inherited, load_integer(parent.array_inference_regions, slot))
+				store_integer(locals.hash_literal_origins, inherited, load_integer(parent.hash_literal_origins, slot))
+				store_integer(locals.hash_declaration_origins, inherited, load_integer(parent.hash_declaration_origins, slot))
+				store_integer(locals.hash_inference_regions, inherited, load_integer(parent.hash_inference_regions, slot))
+				store_integer(locals.collection_scopes, inherited, load_integer(parent.collection_scopes, slot))
+			end
+			if mutable == 0
+				flow := nullable_lookup(parent, slot, -1, declared)
+				if flow != declared
+					locals.nullable_state[nullable_state_head_slot()] = nullable_fact(locals, inherited, -1, flow, locals.nullable_state[nullable_state_head_slot()])
+				end
+			end
+			locals.capture_parents.push(local_identity(parent, slot))
+			locals.capture_uses.push(0)
+			if mutable > 0
+				store_integer(locals.mir_cell_plans, local_identity(locals, inherited), 1)
+			end
+		end
+		slot += 1
+	end
+	if concurrent_boundary >= 0
+		locals.concurrent_scope[0] = concurrent_inherited
+	end
+	if state.callables.collection_inference_only[0]
+		mut region := 0
+		while region < parent.collection_region_count[0]
+			locals.collection_statement_regions.push(parent.collection_statement_regions[region])
+			region += 1
+		end
+		locals.collection_region_count[0] = parent.collection_region_count[0]
+	end
+	return locals
+end
+
+def lambda_locals(mut state: CompilerState, parent: CheckedLocals, syntax: LambdaSyntax, type_name: String): CheckedLocals
+	mut locals := captured_body_locals(state, parent)
+	parts := callable_parts(type_name)
+	if parts.size() != syntax.parameters.size() + 1
+		diagnostic(state, "TRBN4004", load_integer(state.source_tokens.token_lines, syntax.origin), "fn requires a resolved signature")
+		return locals
+	end
+	parts.each do |part|
+		if contained_scoped_resource(state, part) != ""
+			diagnostic(state, "TRBN4004", load_integer(state.source_tokens.token_lines, syntax.origin), "scoped resource cannot appear in a callback signature")
+		end
+	end
+	locals.lambda_result.push(parts[0])
+	mut parameter := 0
+	while parameter < syntax.parameters.size()
+		row := syntax.parameters[parameter]
+		if local_add(state, locals, row.name, parts[parameter + 1], row.mutable, load_integer(state.source_tokens.token_lines, row.origin))
+			local_require_use(locals, locals.count[0] - 1, row.name, row.origin, binding_use_parameter())
+		end
+		parameter += 1
+	end
+	return locals
+end
+
+# Name discovery may register future declarations. It must not alter the typed
+# lexical environment that the statement checker advances in source order.
+def lambda_names(locals: CheckedLocals, capacity: Integer): ResolutionLocals
+	mut names := resolution_locals_new(capacity)
+	mut slot := 0
+	while slot < locals.count[0]
+		resolution_local_bind(names, load_string(locals.names, slot), load_string(locals.types, slot))
+		slot += 1
+	end
+	return names
+end
+
+def lambda_use_binding(mut locals: CheckedLocals, slot: Integer)
+	if slot >= 0 && slot < locals.capture_uses.size()
+		locals.capture_uses[slot] = 1
+	end
+end
+
+# A nested closure's use also makes that declaration a use of its containing
+# closure. Unreferenced inherited values never become retained captures.
+def lambda_captures(mut state: CompilerState, mut parent: CheckedLocals, locals: CheckedLocals, origin: Integer, scoped: Boolean): Array<LambdaCapture>
+	mut captures: Array<LambdaCapture> := []
+	mut index := 0
+	while index < locals.capture_parents.size()
+		if locals.capture_uses[index] > 0
+			identity := locals.capture_parents[index]
+			slot := local_slot(parent, identity)
+			if slot < 0
+				diagnostic(state, "TRBN4004", load_integer(state.source_tokens.token_lines, origin), "fn capture is outside its lexical parent")
+				return captures
+			end
+			record_collection_capture(state, parent, slot)
+			if load_integer(parent.mutable, slot) > 0
+				mut planned := false
+				state.callables.checked[0].shared_bindings.each do |binding|
+					if binding == identity
+						planned = true
+					end
+				end
+				if !planned
+					state.callables.checked[0].shared_bindings.push(identity)
+				end
+				store_integer(parent.mir_cell_plans, identity, 1)
+			end
+			declared := load_string(parent.types, slot)
+			if !scoped && contained_scoped_resource(state, declared) != ""
+				diagnostic(state, "TRBN4004", load_integer(state.source_tokens.token_lines, origin), "scoped resource cannot be captured by a callback")
+				return captures
+			end
+			mut flow := declared
+			if load_integer(parent.mutable, slot) == 0
+				flow = nullable_lookup(parent, slot, -1, declared)
+			end
+			captures.push(LambdaCapture.new(identity: identity, child_identity: index, name: load_string(parent.names, slot), type_name: declared, flow_type: flow, mutable: load_integer(parent.mutable, slot)))
+			lambda_use_binding(parent, slot)
+			store_integer(parent.binding_use_counts, slot, sparse_integer_at(parent.binding_use_counts, slot) + 1)
+		end
+		index += 1
+	end
+	return captures
+end
+
+def checked_return_type(state: CompilerState, locals: CheckedLocals): String
+	if locals.lambda_result.size() > 0
+		return locals.lambda_result[0]
+	end
+	return load_string(state.declarations.function_result_types, locals.mir_state[mir_state_function_slot()])
+end
+
+def check_lambda_value(mut state: CompilerState, mut position: Array<Integer>, mut parent: CheckedLocals): CheckedValue
+	origin := position[0]
+	line := load_integer(state.source_tokens.token_lines, origin)
+	encoded := sparse_integer_at(state.callables.lambda_origins, origin)
+	if encoded <= 0 || encoded > state.callables.lambdas.size()
+		return type_diagnostic(state, line, "fn requires an owned syntax region")
+	end
+	syntax := state.callables.lambdas[encoded - 1]
+	if state.callables.lambda_phase[0] == checking_lowering()
+		position[0] = syntax.finish
+		return lower_lambda(state, parent, origin)
+	end
+	previous := state.callables.checked[0]
+	type_name := load_string(previous.lambda_types, origin)
+	mut locals := lambda_locals(state, parent, syntax, type_name)
+	if has_diagnostic(state)
+		return checked_value("Invalid", checked_category_value(), origin, 0)
+	end
+	body := state.callables.checked_bodies.size()
+	state.callables.checked_bodies.push(checked_body_new(-1, syntax.body_start, syntax.body_finish + 1))
+	state.callables.checked[0] = state.callables.checked_bodies[body]
+	state.callables.checked[0].generic_binding[0] = previous.generic_binding[0]
+	state.callables.checked[0].collection_contexts[0] = previous.collection_contexts[0]
+	state.callables.checked[0].collection_witnesses[0] = previous.collection_witnesses[0]
+	state.callables.checked[0].collection_context_regions[0] = previous.collection_context_regions[0]
+	state.callables.checked[0].collection_contexts_checked[0] = previous.collection_contexts_checked[0]
+	mut names := lambda_names(locals, state.source_tokens.token_count[0] + 1)
+	if resolve_body_names(state, syntax.body_start, syntax.body_finish, names)
+		declare_default_functions(state)
+		mut inner := [syntax.body_start]
+		result_type := checked_return_type(state, locals)
+		completion := check_block_value(state, inner, locals, result_type, -1, false, "", locals.capture_parents.size())
+		binding_scope_check(state, locals, locals.capture_parents.size())
+		if !has_diagnostic(state)
+			if inner[0] != syntax.body_finish
+				diagnostic(state, "TRBN4004", line, "checker did not consume the complete fn body")
+			elsif result_type != "Void" && completion.type_name != "Never"
+				diagnostic(state, "TRBN4004", line, "fn must return on every completing path")
+			end
+		end
+	end
+	state.callables.checked[0] = previous
+	position[0] = syntax.finish
+	if has_diagnostic(state)
+		return checked_value("Invalid", checked_category_value(), origin, 0)
+	end
+	captures := lambda_captures(state, parent, locals, origin, false)
+	if has_diagnostic(state)
+		return checked_value("Invalid", checked_category_value(), origin, 0)
+	end
+	mut lambda := CheckedLambda.new(origin: origin, type_name: type_name, body: body, inherited_count: locals.capture_parents.size(), function: [-1], captures: captures)
+	state.callables.checked[0].lambdas.push(lambda)
+	if state.callables.lambda_phase[0] == checking_discovery()
+		declare_lambda(state, lambda)
+	end
+	return checked_value(type_name, checked_category_value(), origin, 0)
+end
+
+# Transform values are loop-carried bindings above the receiver/cursor boundary.
+# The same checked statement body supplies analysis, MIR and the REPL projection.

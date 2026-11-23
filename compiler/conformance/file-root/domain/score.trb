@@ -1,0 +1,25 @@
+import { adjust } from shared
+
+record Score
+	total: Integer
+end
+
+def normalize(value: Integer): Integer
+	return value
+end
+
+def build_score(iterations: Integer): Score
+	mut values: Array<Integer> := []
+	values.push(iterations)
+	mut index := 0
+	mut total := 0
+	while index < values[0]
+		total += (index % 97) * 3
+		total -= index % 31
+		if total > 1000000
+			total /= 2
+		end
+		index += 1
+	end
+	return Score.new(total: normalize(total) + adjust(0))
+end

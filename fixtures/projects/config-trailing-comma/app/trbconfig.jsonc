@@ -1,0 +1,6 @@
+{
+  "name": "trailing",
+  "mode": "go",
+  "sourceDir": "src",
+  "go": { "module": "example.com/trailing" },
+}

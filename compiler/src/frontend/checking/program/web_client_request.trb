@@ -1,0 +1,121 @@
+import { BrowserClientBuilder, browser_client_import } from frontend/checking/program/web_client_types
+import { array_element_type, find_record_type } from frontend/resolution/type_resolution
+import { find_enum_type } from frontend/types/enum_types
+import { find_newtype_type } from frontend/types/newtype_types
+import { nullable_element } from frontend/types/nullable_types
+import { raw_enum_type } from frontend/types/raw_enum_types
+import { package_json_quote } from project/package_json
+import { web_route_slice } from project/web_route_paths
+import { CompilerState } from state/state
+import { ProjectWebEndpoint } from state/web_routes
+import { integer_string } from support/literals
+import { string_starts_with } from support/path
+import { load_integer, load_string } from support/storage
+
+record BrowserClientInput
+	params: Integer
+	query: Integer
+	body: Integer
+end
+
+def browser_client_input(state: CompilerState, endpoint: ProjectWebEndpoint): BrowserClientInput
+	mut params := -1
+	mut query := -1
+	mut body := -1
+	record_index := find_record_type(state, endpoint.input_type)
+	if record_index >= 0
+		mut field := load_integer(state.declarations.record_field_starts, record_index)
+		finish := field + load_integer(state.declarations.record_field_counts, record_index)
+		while field < finish
+			name := load_string(state.declarations.field_names, field)
+			if name == "params"
+				params = find_record_type(state, load_string(state.declarations.field_types, field))
+			elsif name == "query"
+				query = find_record_type(state, load_string(state.declarations.field_types, field))
+			elsif name == "body"
+				body = field
+			end
+			field += 1
+		end
+	end
+	return BrowserClientInput.new(params: params, query: query, body: body)
+end
+
+def browser_client_parameter(state: CompilerState, target: String, expression: String, depth: Integer): String
+	if depth >= 128
+		return expression + ".to_s()"
+	end
+	optional := nullable_element(target)
+	if optional != ""
+		return browser_client_parameter(state, optional, expression, depth + 1)
+	end
+	nominal := find_newtype_type(state, target)
+	if nominal >= 0
+		return browser_client_parameter(state, state.nominal.newtypes[nominal].representation, expression + ".value()", depth + 1)
+	end
+	raw := raw_enum_type(state, find_enum_type(state, target))
+	if raw == "String"
+		return expression + ".raw_value()"
+	elsif raw != ""
+		return expression + ".raw_value().to_s()"
+	elsif target == "String"
+		return expression
+	end
+	return expression + ".to_s()"
+end
+
+def browser_client_query(state: CompilerState, mut builder: BrowserClientBuilder, target: String, expression: String, name: String, indent: String, depth: Integer): String
+	if depth >= 128
+		return ""
+	end
+	optional := nullable_element(target)
+	if optional != ""
+		local := "query_value_" + integer_string(builder.sequence[0])
+		builder.sequence[0] += 1
+		return indent + local + " := " + expression + "\n" + indent + "if " + local + " != nil\n" + browser_client_query(state, builder, optional, local, name, indent + "\t", depth + 1) + indent + "end\n"
+	end
+	nominal := find_newtype_type(state, target)
+	if nominal >= 0
+		return browser_client_query(state, builder, state.nominal.newtypes[nominal].representation, expression + ".value()", name, indent, depth + 1)
+	end
+	element := array_element_type(target)
+	if element != ""
+		item := "query_item_" + integer_string(builder.sequence[0])
+		builder.sequence[0] += 1
+		return indent + expression + ".each do |" + item + "|\n" + browser_client_query(state, builder, element, item, name, indent + "\t", depth + 1) + indent + "end\n"
+	end
+	return indent + "query.push(URL::QueryParameter.new(name: " + package_json_quote(name) + ", value: " + browser_client_parameter(state, target, expression, 0) + "))\n"
+end
+
+def browser_client_path(state: CompilerState, mut builder: BrowserClientBuilder, endpoint: ProjectWebEndpoint, input: BrowserClientInput): String
+	route := state.module_graph.web_routes[endpoint.route_index]
+	if input.params < 0
+		return package_json_quote(route.path)
+	end
+	mut parts := [package_json_quote("/")]
+	if route.segments.size() == 0
+		parts.push(package_json_quote(""))
+	end
+	mut segment_index := 0
+	route.segments.each do |segment|
+		if segment_index > 0
+			parts.push(package_json_quote("/"))
+		end
+		if string_starts_with(segment, ":")
+			browser_client_import(builder, "trb/std/url", "")
+			name := web_route_slice(segment, 1, segment.size())
+			mut field := load_integer(state.declarations.record_field_starts, input.params)
+			finish := field + load_integer(state.declarations.record_field_counts, input.params)
+			while field < finish
+				if load_string(state.declarations.field_names, field) == name
+					parts.push("URL.encode_component(" + browser_client_parameter(state, load_string(state.declarations.field_types, field), "input.params." + name, 0) + ")")
+				end
+				field += 1
+			end
+		else
+			parts.push(package_json_quote(segment))
+		end
+		segment_index += 1
+	end
+	return parts.join(" + ")
+end

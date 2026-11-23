@@ -1,0 +1,56 @@
+import { token_kind_attribute, token_kind_identifier } from state/token_kinds
+import { DeclarationAttribute, DeclarationAttributeArgument } from frontend/types/attribute_model
+import { parse_expression_syntax } from frontend/syntax/body_syntax
+import { CompilerState, diagnostic, has_diagnostic } from state/state
+import { load_integer, load_string } from support/storage
+import { advance, expect, expect_identifier, skip_newlines, token_is } from frontend/syntax/syntax_tokens
+
+# Declaration attributes retain their authored expressions for later output
+# modes. The ordinary expression parser checks their syntax before type checking.
+def parse_declaration_attributes(mut state: CompilerState, mut position: Array<Integer>, kind: Integer, owner: String, member: String): Boolean
+	while load_integer(state.source_tokens.token_kinds, position[0]) == token_kind_attribute() && !has_diagnostic(state)
+		origin := position[0]
+		name := load_string(state.source_tokens.token_texts, origin)
+		line := load_integer(state.source_tokens.token_lines, origin)
+		advance(position)
+		mut arguments: Array<DeclarationAttributeArgument> := []
+		if token_is(state, position[0], "(")
+			advance(position)
+			skip_newlines(state, position)
+			while !token_is(state, position[0], ")") && !has_diagnostic(state)
+				if token_is(state, position[0], ",")
+					advance(position)
+					skip_newlines(state, position)
+					next
+				end
+				mut argument_name := ""
+				if load_integer(state.source_tokens.token_kinds, position[0]) == token_kind_identifier() && token_is(state, position[0] + 1, ":")
+					argument_name = expect_identifier(state, position)
+					advance(position)
+				end
+				start := position[0]
+				if !parse_expression_syntax(state, position, 1)
+					return false
+				end
+				if position[0] == start
+					diagnostic(state, "TRBN4002", line, "attribute argument requires an expression")
+					return false
+				end
+				arguments.push(DeclarationAttributeArgument.new(name: argument_name, start: start, finish: position[0]))
+				skip_newlines(state, position)
+				if token_is(state, position[0], ",")
+					advance(position)
+					skip_newlines(state, position)
+				elsif !token_is(state, position[0], ")")
+					diagnostic(state, "TRBN4002", line, "expected comma or closing parenthesis in attribute")
+					return false
+				end
+			end
+			if !expect(state, position, ")")
+				return false
+			end
+		end
+		state.parsed.attributes.push(DeclarationAttribute.new(kind: kind, owner: owner, member: member, name: name, source_id: state.module_graph.active_module[0], line: line, origin: origin, arguments: arguments))
+	end
+	return !has_diagnostic(state)
+end

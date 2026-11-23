@@ -1,0 +1,52 @@
+def observe(value: Boolean): Boolean
+	puts("condition")
+	return value
+end
+
+def choose(mut active: Boolean, stop: Boolean): String
+	mut text := "start"
+	while observe(active)
+		active = false
+		local := "-loop"
+		text += local
+		if stop
+			break
+		else
+			next
+		end
+		text += "-unreachable"
+	end
+	return text
+end
+
+def early(active: Boolean): String
+	while active
+		return "returned"
+	end
+	return "skipped"
+end
+
+def nested(): String
+	mut active := true
+	mut text := "start"
+	while active
+		active = false
+		mut inner := true
+		while inner
+			inner = false
+			next
+		end
+		text += "-outer"
+		break
+	end
+	return text
+end
+
+def main()
+	puts(choose(true, true))
+	puts(choose(true, false))
+	puts(choose(false, false))
+	puts(early(true))
+	puts(early(false))
+	puts(nested())
+end

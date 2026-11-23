@@ -1,0 +1,72 @@
+record AliasChild
+	value: String
+end
+
+record AliasBox
+	values: Array<String>
+	child: AliasChild
+end
+
+def dynamic_value(prefix: String): String
+	return prefix + "-kept"
+end
+
+def churn(rounds: Integer)
+	mut index := 0
+	while index < rounds
+		discarded := "garbage-" + index.to_s()
+		if discarded == ""
+			puts("unexpected")
+		end
+		index += 1
+	end
+	return
+end
+
+def record_alias(): String
+	mut owner := AliasBox.new(
+		values: [dynamic_value("record-array")],
+		child: AliasChild.new(value: dynamic_value("record")),
+	)
+	kept := owner.child.value
+	owner = AliasBox.new(values: ["replacement"], child: AliasChild.new(value: "replacement"))
+	churn(30000)
+	return kept
+end
+
+def array_alias(): String
+	mut kept := "missing"
+	if true
+		values := [dynamic_value("array")]
+		kept = values[0]
+	end
+	mut pass := 0
+	while pass < 1
+		churn(30000)
+		pass += 1
+	end
+	return kept
+end
+
+def nested_alias(): String
+	mut kept := "missing"
+	if true
+		kept = AliasBox.new(
+			values: [dynamic_value("nested")],
+			child: AliasChild.new(value: "unused"),
+		).values[0]
+	end
+	mut pass := 0
+	while pass < 1
+		churn(30000)
+		pass += 1
+	end
+	return kept
+end
+
+def main()
+	puts(record_alias())
+	puts(array_alias())
+	puts(nested_alias())
+	return
+end

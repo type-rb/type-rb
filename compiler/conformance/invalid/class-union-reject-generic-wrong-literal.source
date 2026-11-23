@@ -1,0 +1,11 @@
+class Text<T>
+readonly @kind: 1 := 2
+@value: T
+def initialize(value: T)
+@value = value
+end
+end
+
+def main()
+puts(Text<String>.new("held").kind)
+end

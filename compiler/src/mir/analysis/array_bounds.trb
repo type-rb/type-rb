@@ -1,0 +1,328 @@
+import { mir_scalar_boolean_and } from mir/model/scalar_operators
+import { binary_add, binary_divide, binary_less, binary_less_equal, binary_subtract } from frontend/types/operators
+import { mir_type_integer } from mir/model/type_ids
+import { mir_scalar_inline_add } from mir/model/scalar_operators
+import { mir_function_control, mir_terminator_branch, mir_terminator_jump } from mir/model/control
+import { mir_op_array_size, mir_op_array_store, mir_op_scalar_binary } from mir/model/instructions
+import { mir_effect_failure, mir_effect_none } from mir/model/effects
+import { MirBlock, MirFunction, MirModule } from mir/model/module
+import { MirFlow, MirFlowAliases, mir_flow_alias, mir_flow_block_index, mir_flow_dominates, mir_flow_position, mir_flow_type, mir_value_available } from mir/analysis/flow
+import { mir_planned_instruction_effects } from mir/analysis/callables
+import { mir_exact_integer_literal } from mir/analysis/ranges
+import { mir_live_add } from mir/analysis/liveness
+
+# A true conjunction proves each leaf; disjunction and other operations do
+# not. Only same-block observations qualify, with bounded traversal even when
+# this helper is called before verification of malformed SSA.
+def mir_array_guard_conditions(native_module: MirModule, flow: MirFlow, guard: MirBlock): Array<Integer>
+	mut pending := [guard.condition]
+	mut conditions: Array<Integer> := []
+	mut index := 0
+	while index < pending.size() && index < 64
+		position := mir_flow_position(flow, pending[index])
+		if position >= guard.instruction_start && position < guard.instruction_start + guard.instruction_count
+			instruction := native_module.instructions[position]
+			if instruction.kind == mir_op_scalar_binary() && instruction.payload == mir_scalar_boolean_and()
+				pending.push(instruction.first)
+				pending.push(instruction.second)
+			else
+				conditions.push(position)
+			end
+		end
+		index += 1
+	end
+	return conditions
+end
+
+# Canonical length guards share an empty fallback preheader. This shape only
+# guides code-growth budgets; it never proves an access safe or removes a check.
+# Source-written guards can conservatively reserve the same fallback treatment.
+def mir_array_guard_fallbacks(native_module: MirModule, function: MirFunction, flow: MirFlow): Array<Integer>
+	mut fallbacks: Array<Integer> := []
+	if function.kind != mir_function_control()
+		return fallbacks
+	end
+	mut index := 0
+	while index < function.block_count
+		guard := native_module.blocks[function.block_start + index]
+		if guard.terminator == mir_terminator_branch() && guard.first_target != guard.second_target
+			mir_array_guard_conditions(native_module, flow, guard).each do |position|
+				condition := native_module.instructions[position]
+				if condition.kind == mir_op_scalar_binary() && (condition.payload == binary_less_equal() || condition.payload == binary_less())
+					length := mir_flow_position(flow, condition.second)
+					if length >= guard.instruction_start && length < position && native_module.instructions[length].kind == mir_op_array_size()
+						fallback_index := mir_flow_block_index(flow, guard.second_target)
+						fallback := native_module.blocks[function.block_start + fallback_index]
+						if fallback.terminator == mir_terminator_jump() && fallback.instruction_count == 0 && fallback.parameter_count == 0
+							mir_live_add(fallbacks, fallback_index)
+						end
+					end
+				end
+			end
+		end
+		index += 1
+	end
+	return fallbacks
+end
+
+# Exactly one field identifies the invariant bound: an SSA scalar, or the
+# current length of a stable Array. Both -1 mean no available invariant.
+record MirLoopBound
+	value: Integer
+	owner: Integer
+end
+
+# An unresolved global alias can still name the exact same SSA value. Keep its
+# identity without equating it to any other unresolved value.
+def mir_array_bound_identity(aliases: MirFlowAliases, value: Integer): Integer
+	identity := mir_flow_alias(aliases, value)
+	if identity >= 0
+		return identity
+	end
+	return value
+end
+
+# Entering a nonnegative loop with i < edge / 2 implies edge >= 2 and i < edge.
+# Observing this stronger bound can also prove a reflected index in that loop.
+def mir_loop_halved_edge(native_module: MirModule, flow: MirFlow, origins: MirFlowAliases, limit: Integer, preheader: MirBlock): Integer
+	value := mir_flow_alias(origins, limit)
+	position := mir_flow_position(flow, value)
+	if position < 0 || mir_flow_type(flow, value) != mir_type_integer()
+		return -1
+	end
+	division := native_module.instructions[position]
+	if division.kind != mir_op_scalar_binary() || division.payload != binary_divide()
+		return -1
+	end
+	divisor := mir_flow_position(flow, mir_flow_alias(origins, division.second))
+	if divisor < 0 || !mir_exact_integer_literal(native_module, native_module.instructions[divisor], "2")
+		return -1
+	end
+	edge := mir_flow_alias(origins, division.first)
+	if edge >= 0 && mir_value_available(flow, preheader, preheader.instruction_start + preheader.instruction_count, edge)
+		return edge
+	end
+	return -1
+end
+
+def mir_loop_bound(native_module: MirModule, flow: MirFlow, aliases: MirFlowAliases, origins: MirFlowAliases, header: MirBlock, preheader: MirBlock): MirLoopBound
+	condition := native_module.instructions[mir_flow_position(flow, header.condition)]
+	position := mir_flow_position(flow, condition.second)
+	if position >= header.instruction_start && position < header.instruction_start + header.instruction_count
+		length := native_module.instructions[position]
+		if length.kind == mir_op_array_size()
+			owner := mir_array_bound_identity(origins, mir_loop_entry_operand(native_module, flow, aliases, header, preheader, length.first))
+			if owner >= 0 && mir_value_available(flow, preheader, preheader.instruction_start + preheader.instruction_count, owner)
+				return MirLoopBound.new(value: -1, owner: owner)
+			end
+		end
+	end
+	value := mir_array_bound_identity(origins, mir_loop_entry_operand(native_module, flow, aliases, header, preheader, condition.second))
+	if value >= 0 && mir_value_available(flow, preheader, preheader.instruction_start + preheader.instruction_count, value)
+		edge := mir_loop_halved_edge(native_module, flow, origins, value, preheader)
+		if edge >= 0
+			return MirLoopBound.new(value: edge, owner: -1)
+		end
+		return MirLoopBound.new(value: value, owner: -1)
+	end
+	return MirLoopBound.new(value: -1, owner: -1)
+end
+
+# The loop analysis separately proves stable forwarding on every backedge.
+# Recover the entry operand for an invariant header parameter, including a
+# value produced by an enclosing loop whose global alias is intentionally unknown.
+def mir_loop_entry_operand(native_module: MirModule, flow: MirFlow, aliases: MirFlowAliases, header: MirBlock, preheader: MirBlock, value: Integer): Integer
+	identity := mir_flow_alias(aliases, value)
+	header_index := mir_flow_block_index(flow, header.id)
+	mut slot := 0
+	while slot < header.parameter_count
+		if native_module.arguments[header.parameter_start + slot] == identity
+			mut edge := 0
+			while edge < flow.predecessors[header_index].size()
+				previous := flow.predecessors[header_index][edge]
+				if mir_flow_dominates(flow, header_index, previous)
+					incoming := native_module.arguments[flow.incoming_starts[header_index][edge] + slot]
+					if mir_flow_alias(aliases, incoming) != identity
+						return -1
+					end
+				end
+				edge += 1
+			end
+			return native_module.arguments[preheader.first_argument_start + slot]
+		end
+		slot += 1
+	end
+	return identity
+end
+
+def mir_loop_bounded_index(native_module: MirModule, flow: MirFlow, aliases: MirFlowAliases, origins: MirFlowAliases, header: MirBlock, preheader: MirBlock, index: Integer): Boolean
+	condition := native_module.instructions[mir_flow_position(flow, header.condition)]
+	identity := mir_flow_alias(aliases, index)
+	if identity == condition.first
+		return true
+	end
+	position := mir_flow_position(flow, identity)
+	edge := mir_loop_halved_edge(native_module, flow, origins, condition.second, preheader)
+	edge_position := mir_flow_position(flow, edge)
+	if position < 0 || edge_position < 0
+		return false
+	end
+	reflected := native_module.instructions[position]
+	if reflected.kind != mir_op_scalar_binary() || reflected.payload != binary_subtract() || mir_flow_alias(aliases, reflected.second) != condition.first
+		return false
+	end
+	addition := native_module.instructions[edge_position]
+	if addition.kind != mir_op_scalar_binary() || (addition.payload != binary_add() && addition.payload != mir_scalar_inline_add()) || addition.failure < 0
+		return false
+	end
+	one := mir_flow_position(flow, addition.second)
+	if one < 0 || !mir_exact_integer_literal(native_module, native_module.instructions[one], "1")
+		return false
+	end
+	# i < (last + 1) / 2 and i >= 0 imply 0 <= last - i <= last.
+	# The dominating guard independently proves last + 1 <= Array length.
+	last := mir_loop_entry_operand(native_module, flow, aliases, header, preheader, reflected.first)
+	if last == addition.first
+		return true
+	end
+	origin := mir_flow_alias(origins, last)
+	if origin < 0
+		return false
+	end
+	return origin == mir_flow_alias(origins, addition.first)
+end
+
+# The checked addition retains its original overflow behavior. With a
+# nonnegative induction i < limit and a separate strict limit < length guard,
+# i + 1 <= limit < length. No limit + 1 calculation is needed in the guard.
+def mir_loop_successor_index(native_module: MirModule, flow: MirFlow, aliases: MirFlowAliases, header: MirBlock, index: Integer): Boolean
+	condition := native_module.instructions[mir_flow_position(flow, header.condition)]
+	position := mir_flow_position(flow, mir_flow_alias(aliases, index))
+	if position < 0
+		return false
+	end
+	addition := native_module.instructions[position]
+	if addition.kind != mir_op_scalar_binary() || (addition.payload != binary_add() && addition.payload != mir_scalar_inline_add()) || addition.failure < 0
+		return false
+	end
+	if mir_flow_alias(aliases, addition.first) != condition.first
+		return false
+	end
+	one := mir_flow_position(flow, mir_flow_alias(aliases, addition.second))
+	if one < 0
+		return false
+	end
+	return mir_exact_integer_literal(native_module, native_module.instructions[one], "1")
+end
+
+# Require the length observation in the guard itself. Older observations could
+# have been invalidated before the guard. Only its true edge proves the bound.
+def mir_array_bound_guard(native_module: MirModule, flow: MirFlow, aliases: MirFlowAliases, guard: MirBlock, bound: MirLoopBound, owner: Integer, strict: Boolean): Integer
+	if guard.terminator != mir_terminator_branch()
+		return -1
+	end
+	# Block dominance alone does not prove a branch predicate: the false
+	# path could enter the same block, directly or through another edge.
+	first := mir_flow_block_index(flow, guard.first_target)
+	if guard.first_target == guard.second_target || flow.predecessors[first].size() != 1
+		return -1
+	end
+	if flow.predecessors[first][0] != mir_flow_block_index(flow, guard.id)
+		return -1
+	end
+	conditions := mir_array_guard_conditions(native_module, flow, guard)
+	mut index := 0
+	while index < conditions.size()
+		observation := mir_array_bound_condition(native_module, flow, aliases, guard, bound, owner, conditions[index], strict)
+		if observation >= 0
+			return observation
+		end
+		index += 1
+	end
+	return -1
+end
+
+def mir_array_bound_condition(native_module: MirModule, flow: MirFlow, aliases: MirFlowAliases, guard: MirBlock, bound: MirLoopBound, owner: Integer, position: Integer, strict: Boolean): Integer
+	condition := native_module.instructions[position]
+	if condition.kind != mir_op_scalar_binary() || (condition.payload != binary_less_equal() && condition.payload != binary_less())
+		return -1
+	end
+	if strict && condition.payload != binary_less()
+		return -1
+	end
+	length_position := mir_flow_position(flow, condition.second)
+	if length_position < guard.instruction_start || length_position >= position
+		return -1
+	end
+	length := native_module.instructions[length_position]
+	if length.kind != mir_op_array_size() || mir_array_bound_identity(aliases, length.first) != owner
+		return -1
+	end
+	if bound.value >= 0
+		if mir_array_bound_identity(aliases, condition.first) == bound.value
+			return length_position
+		end
+	elsif bound.owner >= 0
+		bound_position := mir_flow_position(flow, condition.first)
+		if bound_position >= guard.instruction_start && bound_position < position
+			left := native_module.instructions[bound_position]
+			if left.kind == mir_op_array_size() && mir_array_bound_identity(aliases, left.first) == bound.owner
+				if bound_position < length_position
+					return bound_position
+				end
+				return length_position
+			end
+		end
+	end
+	return -1
+end
+
+# Check the entire dominated region, including intervening branches. Element
+# stores preserve every Array header; allocation, resizing, unknown calls and
+# other mutations retain the original access checks. A versioned fast loop's
+# exits merge with the fallback, so unrelated work after the loop is outside it.
+def mir_array_bound_region_stable(native_module: MirModule, function: MirFunction, flow: MirFlow, guard_index: Integer, observation: Integer): Boolean
+	guard := native_module.blocks[function.block_start + guard_index]
+	first := mir_flow_block_index(flow, guard.first_target)
+	mut block_index := 0
+	while block_index < function.block_count
+		if block_index == guard_index || mir_flow_dominates(flow, first, block_index)
+			block := native_module.blocks[function.block_start + block_index]
+			mut position := block.instruction_start
+			if block_index == guard_index
+				position = observation
+			end
+			while position < block.instruction_start + block.instruction_count
+				instruction := native_module.instructions[position]
+				effects := mir_planned_instruction_effects(native_module, instruction, position)
+				if instruction.kind != mir_op_array_store() && effects != mir_effect_none() && effects != mir_effect_failure()
+					return false
+				end
+				position += 1
+			end
+		end
+		block_index += 1
+	end
+	return true
+end
+
+def mir_array_bound_proven(native_module: MirModule, function: MirFunction, flow: MirFlow, aliases: MirFlowAliases, header: Integer, bound: MirLoopBound, owner: Integer, strict: Boolean): Boolean
+	if native_module.functions.size() > 96 || owner < 0 || (bound.value < 0 && bound.owner < 0)
+		return false
+	end
+	mut index := 0
+	while index < function.block_count
+		guard := native_module.blocks[function.block_start + index]
+		if !mir_flow_dominates(flow, header, index) && mir_flow_dominates(flow, index, header)
+			observation := mir_array_bound_guard(native_module, flow, aliases, guard, bound, owner, strict)
+			if observation >= 0
+				first := mir_flow_block_index(flow, guard.first_target)
+				if mir_flow_dominates(flow, first, header) && mir_array_bound_region_stable(native_module, function, flow, index, observation)
+					return true
+				end
+			end
+		end
+		index += 1
+	end
+	return false
+end

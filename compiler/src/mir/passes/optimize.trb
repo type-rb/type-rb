@@ -1,0 +1,156 @@
+import { mir_scalar_contract_multiply, mir_scalar_inline_add, mir_scalar_inline_multiply } from mir/model/scalar_operators
+import { binary_add, binary_multiply } from frontend/types/operators
+import { mir_op_scalar_binary } from mir/model/instructions
+import { mir_hash_concat_plans } from mir/analysis/hash_concats
+import { mir_call_return_plans } from mir/analysis/call_returns
+import { mir_hash_membership_plans } from mir/analysis/hash_membership
+import { mir_function_string_splits } from mir/analysis/string_splits
+import { mir_hash_lookup_plans } from mir/analysis/hash_lookup
+import { mir_callable_plans } from mir/analysis/callables
+import { mir_function_loop_calls } from mir/analysis/loop_calls
+import { mir_literal_data } from mir/analysis/literal_data
+import { mir_function_string_concats } from mir/analysis/string_concats
+import { mir_function_array_joins } from mir/analysis/array_joins
+import { mir_numeric_plans } from mir/analysis/numeric
+import { mir_function_array_loops } from mir/analysis/array_loops
+import { mir_function_array_checks } from mir/analysis/array_read_guards
+import { mir_function_root_plan } from mir/analysis/roots
+import { mir_enum_stack_plans } from mir/analysis/enum_stack
+import { mir_function_value_groups } from mir/analysis/flow
+import { MirFunction, MirModule, mir_instruction_with_payload } from mir/model/module
+import { mir_scalar_guard } from mir/analysis/ranges
+import { mir_inline_leaf_loops } from mir/passes/leaf_loops
+import { mir_resolve_local_callables } from mir/passes/local_callables
+import { mir_hoist_loop_records } from mir/passes/record_loops
+import { mir_expand_enum_calls } from mir/passes/enum_calls
+import { mir_fold_integer_literal_calls } from mir/passes/literal_calls
+import { mir_fold_loop_exit_constants } from mir/passes/loop_exit_constants
+import { mir_thread_boolean_edges } from mir/passes/boolean_edges
+import { mir_version_array_loops } from mir/passes/array_loop_versions
+
+def mir_function_with_guard(function: MirFunction, guard: Integer): MirFunction
+	return MirFunction.new(kind: function.kind, result_type: function.result_type, integer_guard: guard, id: function.id, entry_block: function.entry_block, source_id: function.source_id, line: function.line, parameter_start: function.parameter_start, parameter_count: function.parameter_count, block_start: function.block_start, block_count: function.block_count)
+end
+
+def optimize_verified_mir(mut native_module: MirModule)
+	mir_inline_leaf_loops(native_module)
+	mir_resolve_local_callables(native_module)
+	mir_hoist_loop_records(native_module)
+	mir_expand_enum_calls(native_module)
+	mir_fold_integer_literal_calls(native_module)
+	mir_fold_loop_exit_constants(native_module)
+	mut index := 0
+	while index < native_module.instructions.size()
+		instruction := native_module.instructions[index]
+		mut payload := instruction.payload
+		if instruction.kind == mir_op_scalar_binary()
+			if instruction.failure >= 0
+				if payload == binary_add()
+					payload = mir_scalar_inline_add()
+				elsif payload == binary_multiply()
+					payload = mir_scalar_inline_multiply()
+				end
+			elsif payload == binary_multiply()
+				# Verified unchecked numeric multiplication has a Float result.
+				payload = mir_scalar_contract_multiply()
+			end
+		end
+		if payload != instruction.payload
+			native_module.instructions[index] = mir_instruction_with_payload(instruction, payload)
+		end
+		index += 1
+	end
+	# Rebuild from current SSA and call edges, never from a previous plan.
+	native_module.callable_plans[0] = mir_callable_plans(native_module)
+	if mir_version_array_loops(native_module)
+		native_module.callable_plans[0] = mir_callable_plans(native_module)
+	end
+	# Edge threading only replaces argument spans. Reuse these verified value
+	# groups during its flow analysis and the final plan derivation. Loop plans
+	# must not rescan the module's entire value table for each function.
+	function_values := mir_function_value_groups(native_module)
+	if mir_thread_boolean_edges(native_module, function_values)
+		native_module.callable_plans[0] = mir_callable_plans(native_module)
+	end
+	literals := mir_literal_data(native_module)
+	index = 0
+	while index < literals.size()
+		if native_module.literal_data.size() == index
+			native_module.literal_data.push(literals[index])
+		else
+			native_module.literal_data[index] = literals[index]
+		end
+		index += 1
+	end
+	index = 0
+	while index < native_module.functions.size()
+		function := native_module.functions[index]
+		native_module.functions[index] = mir_function_with_guard(function, mir_scalar_guard(native_module, function))
+		# Build the plan from the final record retained by the module. Replacing
+		# that record above must not leave planning dependent on a displaced alias.
+		loops := mir_function_array_loops(native_module, native_module.functions[index], function_values[index])
+		if native_module.array_loops.size() == index
+			native_module.array_loops.push(loops)
+		else
+			native_module.array_loops[index] = loops
+		end
+		checks := mir_function_array_checks(native_module, native_module.functions[index], function_values[index])
+		if native_module.array_check_reuse.size() == index
+			native_module.array_check_reuse.push(checks.reuse)
+		else
+			native_module.array_check_reuse[index] = checks.reuse
+		end
+		if native_module.array_read_guards.size() == index
+			native_module.array_read_guards.push(checks.guards)
+		else
+			native_module.array_read_guards[index] = checks.guards
+		end
+		loop_calls := mir_function_loop_calls(native_module, native_module.functions[index], function_values[index])
+		if native_module.loop_calls.size() == index
+			native_module.loop_calls.push(loop_calls)
+		else
+			native_module.loop_calls[index] = loop_calls
+		end
+		concats := mir_function_string_concats(native_module, native_module.functions[index])
+		if native_module.string_concats.size() == index
+			native_module.string_concats.push(concats)
+		else
+			native_module.string_concats[index] = concats
+		end
+		splits := mir_function_string_splits(native_module, native_module.functions[index], function_values[index])
+		if native_module.string_splits.size() == index
+			native_module.string_splits.push(splits)
+		else
+			native_module.string_splits[index] = splits
+		end
+		joins := mir_function_array_joins(native_module, native_module.functions[index], function_values[index])
+		if native_module.array_joins.size() == index
+			native_module.array_joins.push(joins)
+		else
+			native_module.array_joins[index] = joins
+		end
+		roots := mir_function_root_plan(native_module, native_module.functions[index], function_values[index], joins)
+		if native_module.root_plans.size() == index
+			native_module.root_plans.push(roots)
+		else
+			native_module.root_plans[index] = roots
+		end
+		index += 1
+	end
+	native_module.numeric_plans[0] = mir_numeric_plans(native_module)
+	native_module.hash_lookup_reuse[0] = mir_hash_lookup_plans(native_module)
+	native_module.hash_membership_reuse[0] = mir_hash_membership_plans(native_module)
+	native_module.hash_concat_probes[0] = mir_hash_concat_plans(native_module)
+	native_module.call_return_guards[0] = mir_call_return_plans(native_module)
+	stack_plans := mir_enum_stack_plans(native_module)
+	index = 0
+	while index < stack_plans.size()
+		if native_module.enum_stack_functions.size() == index
+			native_module.enum_stack_functions.push(stack_plans[index])
+		else
+			native_module.enum_stack_functions[index] = stack_plans[index]
+		end
+		index += 1
+	end
+	return
+end

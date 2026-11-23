@@ -1,0 +1,96 @@
+import { emit_qbe } from compiler
+import { MirModule } from mir/model/module
+import { mir_op_record_field } from mir/model/instructions
+import { mir_build_flow, mir_flow_blocks } from mir/analysis/flow
+import { mir_loop_members } from mir/analysis/loops
+import { optimize_verified_mir } from mir/passes/optimize
+import { verify_mir } from mir/verify/module
+import { array_loop_mir_check } from testing/mir/array_loops
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { control_test_output } from testing/mir/control
+import { logical_run_qbe } from testing/qbe_runner
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+def record_loop_reads(native_module: MirModule, function_index: Integer): Integer
+	function := native_module.functions[function_index]
+	flow := mir_build_flow(native_module, function, mir_flow_blocks(native_module, function))
+	loops := mir_loop_members(native_module, function, flow)
+	mut count := 0
+	mut index := 0
+	while index < function.block_count
+		if loops[index] != 0
+			block := native_module.blocks[function.block_start + index]
+			mut position := block.instruction_start
+			while position < block.instruction_start + block.instruction_count
+				if native_module.instructions[position].kind == mir_op_record_field()
+					count += 1
+				end
+				position += 1
+			end
+		end
+		index += 1
+	end
+	return count
+end
+
+describe("MIR immutable record loop reads") do
+	test("moves stable fields while preserving element mutations zero iterations and GC exits") do
+		mut state := array_loop_mir_check("record Box\nvalues: Array<Integer>\nend\ndef update(box: Box, limit: Integer): String\nmut index := 0\nwhile index < limit\nmut values := box.values\nvalues[0] += index\nindex += 1\nend\nreturn box.values[0].to_s()\nend\ndef main()\nmut values := [3000]\nbox := Box.new(values: values)\nputs(update(box, 0))\nputs(update(box, 4))\nputs(values[0])\nend\n")
+		expect(record_loop_reads(state.scalar_mir, 0)).to_equal(0)
+		expect(state.scalar_mir.array_loops[0].size() > 0).to_be_true()
+		before := control_test_output(emit_qbe(state))
+		intrinsic_mir_erase(state)
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+		function := state.scalar_mir.functions[0]
+		mut left := function.block_start
+		mut right := left + function.block_count - 1
+		while left < right
+			block := state.scalar_mir.blocks[left]
+			state.scalar_mir.blocks[left] = state.scalar_mir.blocks[right]
+			state.scalar_mir.blocks[right] = block
+			left += 1
+			right -= 1
+		end
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(record_loop_reads(state.scalar_mir, 0)).to_equal(0)
+		output := control_test_output(emit_qbe(state))
+		allocation := "function l $trbn_string_alloc(l %size) {\n@start\n"
+		forced := output.split(allocation).join(allocation + "\tcall $trbn_gc_collect(w 0)\n")
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			[output, forced].each do |program|
+				case logical_run_qbe(qbe, program)
+				when Result::Ok(actual)
+					expect(actual).to_equal("3000\n3006\n3006\n")
+				when Result::Err(error)
+					puts(error)
+					expect(false).to_be_true()
+				end
+			end
+		end
+	end
+
+	test("keeps changing receivers and in-loop constructors inside the loop") do
+		bodies := ["total += active.value\nactive = second", "active = Box.new(value: index)\ntotal += active.value"]
+		bodies.each do |body|
+			state := array_loop_mir_check("record Box\nvalue: Integer\nend\ndef sum(mut first: Box, mut second: Box, limit: Integer): Integer\nmut active := first\nmut index := 0\nmut total := 0\nwhile index < limit\n" + body + "\nindex += 1\nend\nreturn total\nend\ndef main()\nend\n")
+			expect(record_loop_reads(state.scalar_mir, 0) > 0).to_be_true()
+		end
+	end
+
+	test("moves nested immutable fields to a fixed point without speculating a nullable extraction") do
+		mut state := array_loop_mir_check("record Inner\nvalue: Integer\nend\nrecord Outer\ninner: Inner\nend\ndef sum(outer: Outer, limit: Integer): Integer\nmut index := 0\nmut total := 0\nwhile index < limit\ntotal += outer.inner.value\nindex += 1\nend\nreturn total\nend\ndef main()\nputs(sum(Outer.new(inner: Inner.new(value: 7)), 3))\nend\n")
+		expect(record_loop_reads(state.scalar_mir, 0)).to_equal(0)
+		before := control_test_output(emit_qbe(state))
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+		nullable := array_loop_mir_check("record Box\nvalue: Integer\nend\ndef sum(box: Box?, limit: Integer): Integer\nmut index := 0\nmut total := 0\nwhile index < limit\nif box != nil\ntotal += box.value\nend\nindex += 1\nend\nreturn total\nend\ndef main()\nend\n")
+		expect(record_loop_reads(nullable.scalar_mir, 0) > 0).to_be_true()
+	end
+end

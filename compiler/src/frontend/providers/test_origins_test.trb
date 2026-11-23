@@ -1,0 +1,39 @@
+import { declare_test_signatures } from frontend/providers/test_declarations
+import { TestCallOrigin, test_expectation_body, test_origin_specialization_key } from frontend/providers/test_origins
+import { lex_module } from frontend/syntax/lexer
+import { compiler_new, has_diagnostic } from state/state
+import { standard_source_test, standard_source_test_host } from state/standard_source_kinds
+import { token_kind_string } from state/token_kinds
+import { load_integer, load_string, store_integer } from support/storage
+import { describe, expect, test } from trb/std/test
+
+describe("Test expectation source origins") do
+	test("separates same-type public calls while sharing explicit-origin helpers") do
+		mut state := compiler_new(256)
+		store_integer(state.standard_modules, 0, standard_source_test())
+		store_integer(state.standard_modules, 1, standard_source_test_host())
+		declare_test_signatures(state, 0)
+		declare_test_signatures(state, 1)
+		expect(test_origin_specialization_key(state, 0, 10)).to_not_equal(test_origin_specialization_key(state, 0, 20))
+		expect(test_origin_specialization_key(state, 1, 10)).to_not_equal(test_origin_specialization_key(state, 1, 20))
+		expect(test_origin_specialization_key(state, 2, 10)).to_not_equal(test_origin_specialization_key(state, 2, 20))
+		expect(test_origin_specialization_key(state, 3, 10)).to_equal("")
+	end
+
+	test("keeps special path bytes as one literal without interpolation") do
+		path := "cases/値😀/\"\\\n\u0023{injected}.trb"
+		body := test_expectation_body(1, TestCallOrigin.new(path: path, line: 37, column: 19))
+		mut state := compiler_new(1024)
+		lex_module(state, body, 0)
+		expect(has_diagnostic(state)).to_be_false()
+		mut literals: Array<String> := []
+		mut index := 0
+		while index < state.source_tokens.token_count[0]
+			if load_integer(state.source_tokens.token_kinds, index) == token_kind_string()
+				literals.push(load_string(state.source_tokens.token_texts, index))
+			end
+			index += 1
+		end
+		expect(literals).to_equal([path])
+	end
+end

@@ -1,0 +1,108 @@
+import { checked_category_value } from frontend/types/value_categories
+import { mir_op_enum_test, mir_op_string_literal } from mir/model/instructions
+import { RawEnumConversion } from frontend/types/enum_model
+import { find_enum_type, find_enum_variant } from frontend/types/enum_types
+import { raw_enum_error_message, raw_enum_type, raw_enum_value } from frontend/types/raw_enum_types
+import { CheckedValue, checked_mir_value, checked_value, scalar_mir_binary, scalar_mir_literal, scalar_mir_unary } from frontend/checking/body/values
+import { mir_enum_construct, mir_enum_operation } from mir/lowering/enums
+import { mir_checked_record_new } from mir/lowering/records
+import { mir_checked_string_binary, mir_checked_string_operation } from mir/lowering/strings
+import { mir_nullable_coerce } from mir/lowering/nullable
+import { mir_control_active, mir_control_branch, mir_control_enter, mir_control_prepare } from mir/build/control
+import { mir_value_complete, mir_value_exit, mir_value_join } from mir/build/value_control
+import { find_record_type } from frontend/resolution/type_resolution
+import { CompilerState } from state/state
+import { CheckedLocals } from state/local_state
+import { load_integer, load_string, sparse_string_at } from support/storage
+
+def raw_enum_literal(mut state: CompilerState, mut locals: CheckedLocals, type_name: String, text: String, origin: Integer): CheckedValue
+	if type_name == "String"
+		literal := locals.mir_literal_texts.size()
+		locals.mir_literal_texts.push(text)
+		return mir_checked_string_operation(state, locals, mir_op_string_literal(), -1, -1, literal, "String", origin)
+	end
+	if text.size() > 0 && text[0] == "-"
+		mut absolute := ""
+		mut index := 1
+		while index < text.size()
+			absolute += text[index]
+			index += 1
+		end
+		value := scalar_mir_literal(state, locals, "Integer", origin, absolute)
+		return scalar_mir_unary(state, locals, "-", value, "Integer", origin)
+	end
+	return scalar_mir_literal(state, locals, "Integer", origin, text)
+end
+
+# Both conversions use existing verified enum, scalar, record and union MIR.
+# The backend never reads raw declaration values or method spellings.
+def checked_raw_enum_value(mut state: CompilerState, mut locals: CheckedLocals, value: CheckedValue, origin: Integer): CheckedValue
+	owner := find_enum_type(state, value.type_name)
+	type_name := raw_enum_type(state, owner)
+	mir_control_prepare(state, locals)
+	if !mir_control_active(locals)
+		return checked_value(type_name, checked_category_value(), origin, 0)
+	end
+	line := load_integer(state.source_tokens.token_lines, origin)
+	mut join := mir_value_join(locals, line)
+	definition := state.nominal.enums[owner]
+	mut variant := definition.variant_start
+	finish := variant + definition.variant_count
+	while variant < finish
+		mut alternate := -1
+		if variant + 1 < finish
+			condition := mir_enum_operation(state, locals, mir_op_enum_test(), value, -1, variant, "Boolean", origin)
+			alternate = mir_control_branch(state, locals, condition, line)
+		end
+		raw := raw_enum_value(state, variant)
+		literal := raw_enum_literal(state, locals, type_name, raw.text, origin)
+		mir_value_exit(state, locals, join, literal)
+		if alternate >= 0
+			mir_control_enter(state, locals, alternate, line)
+		end
+		variant += 1
+	end
+	return mir_value_complete(state, locals, join, type_name, origin)
+end
+
+def checked_raw_enum_from(mut state: CompilerState, mut locals: CheckedLocals, owner: Integer, value: CheckedValue, origin: Integer): CheckedValue
+	result_type := sparse_string_at(state.nominal.raw_enum_results, owner)
+	state.callables.checked[0].raw_enum_conversions.push(RawEnumConversion.new(origin: origin, owner: owner, result_type: result_type))
+	mir_control_prepare(state, locals)
+	if !mir_control_active(locals)
+		return checked_value(result_type, checked_category_value(), origin, 0)
+	end
+	line := load_integer(state.source_tokens.token_lines, origin)
+	mut join := mir_value_join(locals, line)
+	result_owner := find_enum_type(state, result_type)
+	ok := find_enum_variant(state, result_owner, "Ok")
+	err := find_enum_variant(state, result_owner, "Err")
+	definition := state.nominal.enums[owner]
+	mut variant := definition.variant_start
+	finish := variant + definition.variant_count
+	while variant < finish
+		raw := raw_enum_value(state, variant)
+		literal := raw_enum_literal(state, locals, raw.type_name, raw.text, origin)
+		mut condition := checked_value("Boolean", checked_category_value(), origin, 0)
+		if raw.type_name == "String"
+			condition = mir_checked_string_binary(state, locals, value, literal, "==", origin)
+		else
+			condition = scalar_mir_binary(state, locals, "==", value, literal, "Boolean", origin)
+		end
+		alternate := mir_control_branch(state, locals, condition, line)
+		member := mir_enum_construct(state, locals, variant, [], origin)
+		result := mir_enum_construct(state, locals, ok, [checked_mir_value(member)], origin)
+		mir_value_exit(state, locals, join, result)
+		mir_control_enter(state, locals, alternate, line)
+		variant += 1
+	end
+	error_type := state.nominal.enum_fields[state.nominal.enum_variants[err].field_start].type_name
+	error_record := find_record_type(state, error_type)
+	error_start := load_integer(state.declarations.record_field_starts, error_record)
+	converted := mir_nullable_coerce(state, locals, value, load_string(state.declarations.field_types, error_start), origin)
+	message := raw_enum_literal(state, locals, "String", raw_enum_error_message(state, owner), origin)
+	error := mir_checked_record_new(state, locals, error_record, error_type, [checked_mir_value(converted), checked_mir_value(message)], origin)
+	result := mir_enum_construct(state, locals, err, [checked_mir_value(error)], origin)
+	mir_value_exit(state, locals, join, result)
+	return mir_value_complete(state, locals, join, result_type, origin)
+end

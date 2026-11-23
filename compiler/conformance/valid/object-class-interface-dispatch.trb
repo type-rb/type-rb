@@ -1,0 +1,15 @@
+interface Named
+	name(): String
+end
+class Label implements Named
+	def name(): String
+		return "label"
+	end
+end
+def read(value: Named): String
+	return value.name()
+end
+
+def main()
+	puts(read(Label.new()))
+end

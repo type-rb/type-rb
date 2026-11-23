@@ -1,0 +1,133 @@
+import { check, emit_qbe } from compiler
+import { lex } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { CompilerState, compiler_new } from state/state
+import { MirInstruction } from mir/model/module
+import { verify_mir } from mir/verify/module
+import { optimize_verified_mir } from mir/passes/optimize
+import { control_test_output } from testing/mir/control
+import { occurrence_count } from testing/compiler
+import { load_string } from support/storage
+import { logical_run_qbe } from testing/qbe_runner
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+def enum_calls_state(source: String): CompilerState
+	mut state := compiler_new(source.size() * 3 + 16)
+	expect(lex(state, source)).to_be_true()
+	expect(parse_module(state, 0, state.module_graph.entry_module[0])).to_be_true()
+	expect(resolve(state)).to_be_true()
+	checked := check(state)
+	if !checked
+		puts(load_string(state.diagnostics.messages, 0))
+	end
+	expect(checked).to_be_true()
+	expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	return state
+end
+
+def enum_calls_execute(state: CompilerState, expected: String)
+	qbe_binary := Process.environment("TYPE_RB_NATIVE_QBE")
+	if qbe_binary != nil
+		case logical_run_qbe(qbe_binary, control_test_output(emit_qbe(state)))
+		when Result::Ok(actual)
+			expect(actual).to_equal(expected)
+		when Result::Err(error)
+			puts(error)
+			expect(false).to_be_true()
+		end
+	end
+end
+
+describe("MIR Enum call scalarization") do
+	test("forwards literal Result errors through try and scalar Enum parameters") do
+		source := "import trb/std/result\nenum Action\nMove(value: Integer)\nStop\nend\ndef action(index: Integer): Action\nif index == 0\nreturn Action::Stop\nend\nreturn Action::Move(index)\nend\ndef checked(value: Integer): Result<Integer, String>\nif value > 3\nreturn Result<Integer, String>::Err(\"large\")\nend\nreturn Result<Integer, String>::Ok(value)\nend\ndef apply(next: Action): Result<Integer, String>\ncase next\nwhen Action::Move(value)\nnumber := try checked(value + 1)\nreturn Result<Integer, String>::Ok(number * 2)\nwhen Action::Stop\nreturn Result<Integer, String>::Err(\"stopped\")\nend\nend\ndef main()\nmut index := 0\nwhile index < 4\ncase apply(action(index))\nwhen Result::Ok(number)\nputs(number)\nwhen Result::Err(message)\nputs(message)\nend\nindex += 1\nend\nend\n"
+		state := enum_calls_state(source)
+		qbe := control_test_output(emit_qbe(state))
+		expect(qbe.include?("call $trbnf0")).to_be_false()
+		expect(qbe.include?("call $trbnf2")).to_be_false()
+		enum_calls_execute(state, "stopped\n4\n6\nlarge\n")
+	end
+
+	test("expands nested acyclic calls and carries scalar components through joins") do
+		source := "enum Reply\nValue(value: Integer)\nError(message: String)\nend\ndef choose(value: Integer): Reply\nif value > 3\nreturn Reply::Error(\"large\")\nend\nreturn Reply::Value(value + 2)\nend\ndef forward(value: Integer): Reply\nreturn choose(value)\nend\ndef main()\nmut index := 0\nwhile index < 6\ncase forward(index)\nwhen Reply::Value(value)\nputs(value)\nwhen Reply::Error(message)\nputs(message)\nend\nindex += 1\nend\nend\n"
+		mut state := enum_calls_state(source)
+		qbe := control_test_output(emit_qbe(state))
+		# The externally callable producer remains, while the consuming function
+		# contains no aggregate call, constructor or checked field load.
+		expect(qbe.include?("call $trbnf1")).to_be_false()
+		mut consumer_enums := 0
+		state.scalar_mir.values.each do |value|
+			if value.function_id == 2 && value.type_id >= 9
+				consumer_enums += 1
+			end
+		end
+		expect(consumer_enums).to_equal(0)
+		enum_calls_execute(state, "2\n3\n4\n5\nlarge\nlarge\n")
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(control_test_output(emit_qbe(state))).to_equal(qbe)
+	end
+
+	test("preserves Float Boolean and multiple payload fields") do
+		source := "enum Packet\nData(value: Float, ready: Boolean)\nEmpty\nend\ndef make(flag: Boolean): Packet\nif flag\nreturn Packet::Data(2.5, true)\nend\nreturn Packet::Empty\nend\ndef main()\ncase make(true)\nwhen Packet::Data(value, ready)\nputs(value)\nputs(ready)\nwhen Packet::Empty\nputs(0)\nend\ncase make(false)\nwhen Packet::Data(value, ready)\nputs(value)\nputs(ready)\nwhen Packet::Empty\nputs(7)\nend\nend\n"
+		state := enum_calls_state(source)
+		expect(control_test_output(emit_qbe(state)).include?("call $trbnf0")).to_be_false()
+		enum_calls_execute(state, "2.5\ntrue\n7\n")
+	end
+
+	test("retains dynamic managed payloads and escaping values") do
+		sources := ["enum Reply\nText(value: String)\nend\ndef make(value: String): Reply\nreturn Reply::Text(value + \"!\")\nend\ndef main()\ncase make(\"held\")\nwhen Reply::Text(value)\nputs(value)\nend\nend\n", "enum Reply\nValue(value: Integer)\nend\ndef make(value: Integer): Reply\nreturn Reply::Value(value)\nend\ndef consume(value: Reply): Integer\ncase value\nwhen Reply::Value(number)\nreturn number\nend\nend\ndef main()\nputs(consume(make(7)))\nend\n"]
+		sources.each.with_index do |source, index|
+			state := enum_calls_state(source)
+			expect(control_test_output(emit_qbe(state)).include?("call $trbnf0")).to_be_true()
+			if index == 0
+				enum_calls_execute(state, "held!\n")
+			else
+				enum_calls_execute(state, "7\n")
+			end
+		end
+	end
+
+	test("retains recursive and cyclic producers") do
+		bodies := ["if value > 0\nreturn make(value - 1)\nend\nreturn Reply::Value(value)", "mut index := value\nwhile index > 0\nindex -= 1\nend\nreturn Reply::Value(index)"]
+		bodies.each do |body|
+			state := enum_calls_state("enum Reply\nValue(value: Integer)\nend\ndef make(value: Integer): Reply\n" + body + "\nend\ndef main()\ncase make(3)\nwhen Reply::Value(value)\nputs(value)\nend\nend\n")
+			expect(control_test_output(emit_qbe(state)).include?("call $trbnf0")).to_be_true()
+			enum_calls_execute(state, "0\n")
+		end
+	end
+
+	test("retains unknown parameter returns and rejects code growth transactionally") do
+		state := enum_calls_state("enum Reply\nValue(value: Integer)\nend\ndef make(): Reply\nreturn Reply::Value(7)\nend\ndef forward(value: Reply): Reply\nreturn value\nend\ndef main()\ncase forward(make())\nwhen Reply::Value(value)\nputs(value)\nend\nend\n")
+		expect(control_test_output(emit_qbe(state)).include?("call $trbnf1")).to_be_true()
+		mut source := "enum Reply\nValue(value: Integer)\nend\ndef make(value: Integer): Reply\nreturn Reply::Value(value)\nend\ndef main()\n"
+		mut index := 0
+		while index < 9
+			source += "case make(" + index.to_s() + ")\nwhen Reply::Value(value)\nputs(value)\nend\n"
+			index += 1
+		end
+		source += "end\n"
+		bounded := enum_calls_state(source)
+		expect(occurrence_count(control_test_output(emit_qbe(bounded)), "call $trbnf0")).to_equal(9)
+		enum_calls_execute(bounded, "0\n1\n2\n3\n4\n5\n6\n7\n8\n")
+	end
+
+	test("revalidates rewritten value identities and extraction failure targets") do
+		mut state := enum_calls_state("enum Reply\nValue(value: Integer)\nend\ndef make(): Reply\nreturn Reply::Value(7)\nend\ndef main()\ncase make()\nwhen Reply::Value(value)\nputs(value)\nend\nend\n")
+		mut selected := -1
+		state.scalar_mir.instructions.each.with_index do |instruction, index|
+			if instruction.kind == 43 && instruction.payload == 4
+				selected = index
+			end
+		end
+		expect(selected >= 0).to_be_true()
+		if selected >= 0
+			instruction := state.scalar_mir.instructions[selected]
+			state.scalar_mir.instructions[selected] = MirInstruction.new(kind: instruction.kind, result: -1, first: instruction.first, second: -1, payload: 4, failure: 999999, source_id: instruction.source_id, line: instruction.line)
+			expect(verify_mir(state.scalar_mir, true)).to_equal("MIR failure target does not exist")
+		end
+	end
+end

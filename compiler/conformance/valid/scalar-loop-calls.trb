@@ -1,0 +1,140 @@
+def trace(value: Integer): Integer
+	puts(value)
+	return value
+end
+
+def pair(left: Integer, right: Integer): Integer
+	return left * 10 + right
+end
+
+def ordered_calls(): Integer
+	return pair(trace(1), pair(trace(2), trace(3)))
+end
+
+def sum_to(value: Integer): Integer
+	if value < 1
+		return 0
+	end
+	return value + sum_to(value - 1)
+end
+
+def positive(value: Integer): Boolean
+	return value > 0
+end
+
+def step(value: Integer): Integer
+	return value - 1
+end
+
+def loop_calls(value: Integer): Integer
+	mut remaining := value
+	mut total := 0
+	while positive(remaining)
+		remaining = step(remaining)
+		if remaining == 2
+			next
+		end
+		local := remaining * 2
+		if remaining == 0
+			break
+		end
+		total += local
+	end
+	return total
+end
+
+def nested_loops(value: Integer): Integer
+	mut total := 0
+	mut outer := 0
+	while outer < value
+		outer += 1
+		mut inner := 0
+		while inner < outer
+			inner += 1
+			if inner == 2
+				next
+			elsif inner == 4
+				break
+			end
+			total += inner
+		end
+		if outer == 3
+			next
+		end
+		total += 10
+	end
+	return total
+end
+
+def rotate(count: Integer): Integer
+	mut left := 1
+	mut right := 2
+	mut index := 0
+	while index < count
+		previous := left
+		left = right
+		right = previous
+		index += 1
+	end
+	return pair(left, right)
+end
+
+def floating(value: Float): Float
+	mut total := value
+	mut index := 0
+	while index < 4
+		if index == 2
+			total *= 2.0
+		else
+			total += 0.5
+		end
+		index += 1
+	end
+	return total
+end
+
+def early(value: Integer): Integer
+	mut index := 0
+	while index < value
+		if index == 2
+			return sum_to(index)
+		end
+		index += 1
+	end
+	return index
+end
+
+def rebind(mut value: Integer): Integer
+	while value > 0
+		value -= 1
+	end
+	return value
+end
+
+def announce(value: Integer)
+	puts(value)
+end
+
+def notify(value: Integer)
+	mut remaining := value
+	while remaining > 0
+		announce(remaining)
+		remaining -= 1
+	end
+end
+
+def main()
+	puts(ordered_calls())
+	puts(sum_to(5))
+	puts(loop_calls(5))
+	puts(loop_calls(0))
+	puts(nested_loops(5))
+	puts(rotate(0))
+	puts(rotate(3))
+	puts(rotate(4))
+	puts(floating(1.0) == 4.5)
+	puts(early(5))
+	puts(early(0))
+	puts(rebind(3))
+	notify(2)
+end

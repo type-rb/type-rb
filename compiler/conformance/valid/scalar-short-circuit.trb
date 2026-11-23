@@ -1,0 +1,63 @@
+def trace(mark: Integer, value: Boolean): Boolean
+	puts(mark)
+	return value
+end
+
+def number(mark: Integer): Integer
+	puts(mark)
+	return mark
+end
+
+def combine(value: Integer, first: Boolean, second: Boolean): Integer
+	mut result := value
+	if first
+		result += 10
+	end
+	if second
+		result += 100
+	end
+	return result
+end
+
+def ordered(first: Boolean, second: Boolean): Integer
+	return combine(number(1), trace(2, first) && trace(3, second), trace(4, first) || trace(5, second))
+end
+
+def nested(first: Boolean, second: Boolean): Boolean
+	return trace(6, first) == ((trace(7, second) && trace(8, first)) || trace(9, second))
+end
+
+def divide(value: Integer): Boolean
+	return 1 / value > 0
+end
+
+def skipped(value: Boolean): Boolean
+	return (value || divide(0)) && (!value && divide(0) || value)
+end
+
+def loop_condition(limit: Integer): Integer
+	mut index := 0
+	mut total := 0
+	while index < limit && trace(index + 20, index < 4)
+		index += 1
+		if index == 2 || index == 3 && total < 100
+			next
+		end
+		total += index
+	end
+	return total
+end
+
+def main()
+	puts(ordered(false, false))
+	puts(ordered(false, true))
+	puts(ordered(true, false))
+	puts(ordered(true, true))
+	puts(nested(false, false))
+	puts(nested(false, true))
+	puts(nested(true, false))
+	puts(nested(true, true))
+	puts(skipped(true))
+	puts(loop_condition(0))
+	puts(loop_condition(6))
+end

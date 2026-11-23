@@ -1,0 +1,34 @@
+import { character_in, lex } from frontend/syntax/lexer
+import { CompilerState, compiler_new, has_diagnostic } from state/state
+import { load_integer, load_string } from support/storage
+import { describe, expect, test } from trb/std/test
+
+describe("Native TypeRB frontend") do
+	test("preserves ASCII identifier and digit classification after hot-path ordering") do
+		identifier_start := "fretnmoidupglsavchbyxkwqzjABCDEFGHIJKLMNOPQRSTUVWXYZ_"
+		identifier_continue := "0123456789" + identifier_start
+		expect(character_in("a", identifier_start)).to_be_true()
+		expect(character_in("Z", identifier_start)).to_be_true()
+		expect(character_in("_", identifier_start)).to_be_true()
+		expect(character_in("0", identifier_start)).to_be_false()
+		expect(character_in("-", identifier_start)).to_be_false()
+		expect(character_in("a", identifier_continue)).to_be_true()
+		expect(character_in("Z", identifier_continue)).to_be_true()
+		expect(character_in("_", identifier_continue)).to_be_true()
+		expect(character_in("0", identifier_continue)).to_be_true()
+		expect(character_in("-", identifier_continue)).to_be_false()
+		expect(character_in("0", "0123456789")).to_be_true()
+		expect(character_in("9", "0123456789")).to_be_true()
+		expect(character_in("a", "0123456789")).to_be_false()
+	end
+
+	test("rejects an unsupported source character deterministically") do
+		source := "def main()\n\t`\nend\n"
+		mut state := compiler_new(source.size() + 1)
+		expect(lex(state, source)).to_be_false()
+		expect(has_diagnostic(state)).to_be_true()
+		expect(load_string(state.diagnostics.codes, 0)).to_equal("TRBN4001")
+		expect(load_integer(state.diagnostics.lines, 0)).to_equal(2)
+		expect(load_string(state.diagnostics.messages, 0)).to_equal("unsupported source character `")
+	end
+end

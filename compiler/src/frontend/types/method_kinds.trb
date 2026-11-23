@@ -1,0 +1,287 @@
+# Receiver-specific method identities. Equal integers in different receiver
+# families are unrelated; arity, checked lowering and REPL share these names.
+# The none tag is a lookup miss, not an executable method. Ordered groups retain
+# their established boundaries for range tests and MIR payload offsets.
+
+def array_method_none(): Integer
+	return 0
+end
+
+def array_method_empty(): Integer
+	return 1
+end
+
+def array_method_first(): Integer
+	return 2
+end
+
+def array_method_last(): Integer
+	return 3
+end
+
+def array_method_dup(): Integer
+	return 4
+end
+
+def array_method_reverse(): Integer
+	return 5
+end
+
+def array_method_slice(): Integer
+	return 6
+end
+
+def array_method_unshift(): Integer
+	return 7
+end
+
+def array_method_pop(): Integer
+	return 8
+end
+
+def array_method_shift(): Integer
+	return 9
+end
+
+def array_method_include(): Integer
+	return 10
+end
+
+def array_method_count(): Integer
+	return 11
+end
+
+def array_method_index(): Integer
+	return 12
+end
+
+def array_method_uniq(): Integer
+	return 13
+end
+
+def array_method_concat(): Integer
+	return 14
+end
+
+def array_method_join(): Integer
+	return 15
+end
+
+def array_method_sort(): Integer
+	return 16
+end
+
+def array_method_sort_descending(): Integer
+	return 17
+end
+
+def string_method_none(): Integer
+	return 0
+end
+
+def string_method_empty(): Integer
+	return 1
+end
+
+def string_method_include(): Integer
+	return 2
+end
+
+def string_method_start_with(): Integer
+	return 3
+end
+
+def string_method_end_with(): Integer
+	return 4
+end
+
+def string_method_index(): Integer
+	return 5
+end
+
+def string_method_rindex(): Integer
+	return 6
+end
+
+def string_method_codepoints(): Integer
+	return 7
+end
+
+def string_method_chars(): Integer
+	return 8
+end
+
+def string_method_reverse(): Integer
+	return 9
+end
+
+def string_method_slice(): Integer
+	return 10
+end
+
+def string_method_strip(): Integer
+	return 11
+end
+
+def string_method_lstrip(): Integer
+	return 12
+end
+
+def string_method_rstrip(): Integer
+	return 13
+end
+
+def string_method_split(): Integer
+	return 14
+end
+
+def string_method_replace_all(): Integer
+	return 15
+end
+
+def string_method_upcase(): Integer
+	return 16
+end
+
+def string_method_downcase(): Integer
+	return 17
+end
+
+def integer_method_none(): Integer
+	return 0
+end
+
+def integer_method_abs(): Integer
+	return 1
+end
+
+def integer_method_zero(): Integer
+	return 2
+end
+
+def integer_method_positive(): Integer
+	return 3
+end
+
+def integer_method_negative(): Integer
+	return 4
+end
+
+def integer_method_even(): Integer
+	return 5
+end
+
+def integer_method_odd(): Integer
+	return 6
+end
+
+def integer_method_min(): Integer
+	return 7
+end
+
+def integer_method_max(): Integer
+	return 8
+end
+
+def integer_method_clamp(): Integer
+	return 9
+end
+
+def integer_method_to_f(): Integer
+	return 10
+end
+
+def float_method_none(): Integer
+	return 0
+end
+
+def float_method_abs(): Integer
+	return 1
+end
+
+def float_method_floor(): Integer
+	return 2
+end
+
+def float_method_ceil(): Integer
+	return 3
+end
+
+def float_method_round(): Integer
+	return 4
+end
+
+def float_method_finite(): Integer
+	return 5
+end
+
+def float_method_infinite(): Integer
+	return 6
+end
+
+def float_method_nan(): Integer
+	return 7
+end
+
+def float_method_to_i(): Integer
+	return 8
+end
+
+def bytes_method_none(): Integer
+	return 0
+end
+
+def bytes_method_from_string(): Integer
+	return 1
+end
+
+def bytes_method_size(): Integer
+	return 2
+end
+
+def bytes_method_at(): Integer
+	return 3
+end
+
+def bytes_method_concat(): Integer
+	return 4
+end
+
+def bytes_method_to_string(): Integer
+	return 5
+end
+
+def bytes_method_valid_utf8(): Integer
+	return 6
+end
+
+# Range has one supported receiver conversion in this method dispatcher.
+def range_method_to_array(): Integer
+	return 1
+end
+
+# Fallible methods share result dispatch, with independent receiver-specific checks.
+
+def result_method_none(): Integer
+	return 0
+end
+
+def result_method_index(): Integer
+	return 1
+end
+
+def result_method_slice(): Integer
+	return 2
+end
+
+def result_method_key(): Integer
+	return 3
+end
+
+def result_method_integer(): Integer
+	return 4
+end
+
+def result_method_float(): Integer
+	return 5
+end

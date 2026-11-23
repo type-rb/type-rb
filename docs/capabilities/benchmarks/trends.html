@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Current TypeRB Native performance against Pure Go, the TypeRB Go backend and earlier Native revisions.">
+  <title>Performance trends · TypeRB Native</title>
+  <link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="./daily.css?v=2026-09-24-areas">
+</head>
+<body data-view="history">
+<header class="site-header"><div class="shell header-inner">
+  <a class="brand" href="../"><span class="brand-mark" aria-hidden="true">TR</span><span>TypeRB Native</span><span class="development">Development</span></a>
+  <nav class="site-nav" aria-label="Site navigation"><a href="../">Capabilities</a><a href="./" aria-current="page">Benchmarks</a></nav>
+</div></header>
+<main class="shell">
+  <div class="daily-header"><h1>Performance trends</h1><a href="https://github.com/type-rb/type-rb-native/actions/workflows/daily-performance.yml">Daily measurement runs ↗</a></div>
+  <nav class="daily-nav" aria-label="Benchmark views"><a href="./">Current performance</a><a href="representative.html">Application workloads</a><a href="trends.html" aria-current="page">Trends</a><a href="weekly.html">Other languages</a><a href="comparison.html">Detailed comparison</a></nav>
+  <div id="status" class="daily-status" role="status">Loading the last daily measurement…</div>
+  <p id="context" class="daily-meta"></p>
+  <section id="results" aria-label="Daily measurement results">
+    <div class="daily-controls">
+      <div><span class="control-label">Metric</span><div id="metric" class="choice-group" role="group" aria-label="Metric"></div></div>
+      <div><span class="control-label">Compare Native with</span><div id="comparison" class="choice-group" role="group" aria-label="Comparison"></div></div>
+    </div>
+    <p id="metric-description" class="daily-meta"></p>
+    <div class="workload-controls"><span class="control-label">Workload</span><div id="case" class="choice-group" role="group" aria-label="Workload"></div></div>
+    <p id="trend-context" class="daily-meta"></p><svg id="trend-chart" class="trend-chart" viewBox="0 0 700 260" role="img" aria-label="Native change against the selected same-host comparison; exact values in the table below"></svg>
+    <div class="table-scroll"><table class="daily-table"><thead><tr><th scope="col">Measured</th><th scope="col">Revision</th><th scope="col">Native</th><th scope="col">Assessment</th><th scope="col">Evidence</th></tr></thead><tbody id="history-body"></tbody></table></div>
+    <p id="evidence" class="daily-meta"></p>
+  </section>
+  <details class="method-details"><summary>Measurement details and how to read the results</summary>
+  <p id="identity" class="daily-meta"></p>
+  <div class="daily-notes">
+    <section><h2>Changes you can act on</h2><p>Current, previous and frozen Native compilers run the same workload on the same host. TypeRB Go compiles the identical source. Pure Go uses the three hand-written programs from the detailed comparison, with the daily inputs. Implementation differences contribute to the result. Lower time, memory and size are better. Differences below 5% are labelled “About the same”; this is a screening aid, not proof of equivalence or a statistical acceptance threshold.</p><p>Runtime ranges show the retained minimum and maximum. Trends retain up to 60 snapshots and show only the current measurement series. Input or measurement-policy changes start a new series.</p></section>
+    <section><h2>Freshness without blocking development</h2><p>Performance changes are measured once a day, around 06:23 JST, or on demand. GitHub scheduling may be delayed. An unchanged day needs no benchmark run. The daily update is independent of PR acceptance.</p><p>Numerical regressions are published. A failed measurement is shown explicitly; infrastructure failures preserve the last measured snapshot.</p></section>
+    <section><h2>Read the measurements in scope</h2><p>These are small workloads, not a general language score. Builds use clean output directories with a warm Go cache. Runtime includes fresh-process startup, with warm filesystem caches. Startup measurements include the launch harness; very short CPU and RSS observations may be below measurement resolution.</p><p>Peak RSS uses GNU time, not a summed process-tree sample. The allocation probes are separate from timing. Long-lived memory stability and full distribution size remain separate checks. <a href="https://github.com/type-rb/type-rb-native/blob/main/docs/daily-performance.md">Method and coverage ↗</a></p></section>
+  </div>
+  </details>
+  <footer><p>TypeRB Native · experimental measurements · <a href="comparison.html">Detailed cross-language snapshot</a></p></footer>
+</main>
+<script type="module" src="./daily.js?v=2026-09-24-areas"></script>
+</body></html>

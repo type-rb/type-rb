@@ -1,0 +1,263 @@
+import { compiler_recovery_mutations } from compiler/mutations
+import { compiler_recovery_layout } from compiler/layout
+import { RecoveryCompilerSources, compiler_source_directory, compiler_source_has_import, compiler_source_path, flatten_compiler_recovery_source, read_compiler_recovery_sources, read_required_compiler_source, valid_recovery_module_name, write_recovery_source_files } from compiler/source
+import { matched_go_empty_main_source } from driver/matched_go
+import { native_write_text } from support/file_system
+import trb/std/result
+import trb/std/process
+import { describe, expect, test } from trb/std/test
+
+def synthetic_recovery_sources(): RecoveryCompilerSources
+	mut names: Array<String> := []
+	mut contents: Array<String> := []
+	compiler_recovery_layout().each do |module|
+		names.push(module.name)
+		contents.push(module.imports + "def " + module.name + "()\n\treturn\nend\n")
+	end
+	return RecoveryCompilerSources.new(names: names, contents: contents, flattened: "")
+end
+
+describe("Compiler recovery source closure") do
+	test("keeps declarations outside every import removal boundary") do
+		compiler_recovery_layout().each do |entry|
+			entry.imports.split("\n").each do |line|
+				expect(line.empty?() || line.start_with?("import ")).to_be_true()
+			end
+		end
+	end
+
+	test("matches every canonical compiler module before recovery") do
+		root := Process.environment("TYPE_RB_NATIVE_ROOT")
+		if root != nil
+			case read_compiler_recovery_sources(root + "/compiler/src/compiler.trb")
+			when Result::Ok(sources)
+				expect(sources.names.size()).to_equal(compiler_recovery_layout().size())
+				expect(compiler_source_has_import(sources.flattened)).to_be_false()
+				expect(sources.flattened.end_with?(matched_go_empty_main_source())).to_be_true()
+				# The canonical entry must keep its explicit dependencies. Recovery
+				# probes use their own missing import, independent of header order.
+				sources.names.each.with_index do |name, index|
+					if name == "compiler"
+						expect(compiler_source_has_import(sources.contents[index])).to_be_true()
+					end
+				end
+				# Catch stale mutation inventories before the expensive generation chain.
+				mutations := compiler_recovery_mutations()
+				expect(mutations.size()).to_equal(sources.names.size() - 1)
+				sources.names.each.with_index do |name, index|
+					if name != "compiler"
+						mut matches := 0
+						mutations.each do |mutation|
+							if mutation[0] == name
+								expect(mutation.size()).to_equal(3)
+								expect(mutation[1].empty?()).to_be_false()
+								expect(mutation[1] == mutation[2]).to_be_false()
+								expect(sources.contents[index].split(mutation[1]).size()).to_equal(2)
+								matches += 1
+							end
+						end
+						expect(matches).to_equal(1)
+					end
+				end
+			when Result::Err(message)
+				puts(message)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("keeps source paths rooted at the explicit compiler entry") do
+		expect(compiler_source_directory("compiler.trb")).to_equal(".")
+		expect(compiler_source_directory("/compiler.trb")).to_equal("/")
+		expect(compiler_source_directory("a source/compiler.trb")).to_equal("a source")
+		expect(compiler_source_path("/", "storage.trb")).to_equal("/storage.trb")
+		expect(compiler_source_path("a source", "storage.trb")).to_equal("a source/storage.trb")
+	end
+
+	test("validates complete nested module identities before writing") do
+		expect(valid_recovery_module_name("compiler")).to_be_true()
+		expect(valid_recovery_module_name("checking/expressions/value_2")).to_be_true()
+		["", "/compiler", "../compiler", "checking/../compiler", "checking//value", "checking/", "checking/value.trb", "checking\\value"].each do |name|
+			expect(valid_recovery_module_name(name)).to_be_false()
+		end
+	end
+
+	test("writes distinct nested sources and rejects invalid inventories before writes") do
+		case Process.run("/usr/bin/mktemp", ["-d", "/tmp/trbn-source-paths.XXXXXX"])
+		when Result::Ok(created)
+			expect(created.success).to_be_true()
+			temporary := created.stdout.split("\n")[0]
+			expect(temporary.start_with?("/tmp/trbn-source-paths.")).to_be_true()
+			directory := temporary + "/source tree"
+			case write_recovery_source_files(["checking/value", "mir/value"], ["first", "second"], directory)
+			when Result::Ok(written)
+				expect(written).to_be_true()
+			when Result::Err(message)
+				puts(message)
+				expect(false).to_be_true()
+			end
+			case read_required_compiler_source(directory + "/checking/value.trb")
+			when Result::Ok(source)
+				expect(source).to_equal("first")
+			when Result::Err(_message)
+				expect(false).to_be_true()
+			end
+			case read_required_compiler_source(directory + "/mir/value.trb")
+			when Result::Ok(source)
+				expect(source).to_equal("second")
+			when Result::Err(_message)
+				expect(false).to_be_true()
+			end
+			[["first", "../escape"], ["first", "first"]].each do |names|
+				case write_recovery_source_files(names, ["first", "second"], directory + "/invalid")
+				when Result::Ok(_written)
+					expect(false).to_be_true()
+				when Result::Err(message)
+					expect(message.start_with?("invalid compiler module path:")).to_be_true()
+				end
+			end
+			case read_required_compiler_source(directory + "/invalid/first.trb")
+			when Result::Ok(_source)
+				expect(false).to_be_true()
+			when Result::Err(_message)
+			end
+			case write_recovery_source_files([], [], directory + "/empty")
+			when Result::Ok(written)
+				expect(written).to_be_true()
+			when Result::Err(_message)
+				expect(false).to_be_true()
+			end
+			case native_write_text(directory + "/blocked", "keep")
+			when Result::Ok(_written)
+			when Result::Err(_error)
+				expect(false).to_be_true()
+			end
+			case write_recovery_source_files(["fresh/value", "blocked/value"], ["first", "second"], directory)
+			when Result::Ok(_written)
+				expect(false).to_be_true()
+			when Result::Err(message)
+				expect(message.start_with?("mkdir:")).to_be_true()
+			end
+			case read_required_compiler_source(directory + "/fresh/value.trb")
+			when Result::Ok(_source)
+				expect(false).to_be_true()
+			when Result::Err(_message)
+			end
+			case read_required_compiler_source(directory + "/blocked")
+			when Result::Ok(source)
+				expect(source).to_equal("keep")
+			when Result::Err(_message)
+				expect(false).to_be_true()
+			end
+			case Process.run("/bin/rm", ["-r", temporary])
+			when Result::Ok(removed)
+				expect(removed.success).to_be_true()
+			when Result::Err(_error)
+				expect(false).to_be_true()
+			end
+		when Result::Err(_error)
+			expect(false).to_be_true()
+		end
+	end
+
+	test("reports an unreadable required source without substituting content") do
+		case read_required_compiler_source("__missing_recovery_source__/compiler.trb")
+		when Result::Ok(_source)
+			expect(false).to_be_true()
+		when Result::Err(message)
+			expect(message.empty?()).to_be_false()
+		end
+	end
+
+	test("recognizes import tokens without rejecting identifiers or comments") do
+		expect(compiler_source_has_import("import")).to_be_true()
+		expect(compiler_source_has_import("\t import { item } from source\n")).to_be_true()
+		expect(compiler_source_has_import("import_index := 0\nimportant := 1\nimport2 := 2\n")).to_be_false()
+		expect(compiler_source_has_import("# import source\n\t# import other\n")).to_be_false()
+	end
+
+	test("derives one deterministic source in exact dependency order") do
+		sources := synthetic_recovery_sources()
+		mut expected := ""
+		sources.names.each do |name|
+			if !expected.empty?()
+				expected += "\n"
+			end
+			expected += "def " + name + "()\n\treturn\nend\n"
+		end
+		case flatten_compiler_recovery_source(sources.names, sources.contents)
+		when Result::Ok(flattened)
+			expect(flattened).to_equal(expected)
+		when Result::Err(message)
+			puts(message)
+			expect(false).to_be_true()
+		end
+	end
+
+	test("rejects missing, reordered, duplicated and extra module identities") do
+		mut sources := synthetic_recovery_sources()
+		case flatten_compiler_recovery_source([], sources.contents)
+		when Result::Ok(_value)
+			expect(false).to_be_true()
+		when Result::Err(message)
+			expect(message).to_equal("compiler source inventory differs")
+		end
+		first := sources.names[0]
+		sources.names[0] = sources.names[1]
+		case flatten_compiler_recovery_source(sources.names, sources.contents)
+		when Result::Ok(_value)
+			expect(false).to_be_true()
+		when Result::Err(message)
+			expect(message).to_equal("compiler source identity differs at " + first)
+		end
+		sources.names[1] = first
+		case flatten_compiler_recovery_source(sources.names, sources.contents)
+		when Result::Ok(_value)
+			expect(false).to_be_true()
+		when Result::Err(message)
+			expect(message).to_equal("compiler source identity differs at " + first)
+		end
+		sources.names.push("extra")
+		case flatten_compiler_recovery_source(sources.names, sources.contents)
+		when Result::Ok(_value)
+			expect(false).to_be_true()
+		when Result::Err(message)
+			expect(message).to_equal("compiler source inventory differs")
+		end
+	end
+
+	test("rejects changed import boundaries in every imported module") do
+		compiler_recovery_layout().each.with_index do |module, index|
+			if !module.imports.empty?()
+				mut sources := synthetic_recovery_sources()
+				sources.contents[index] = "import unknown\n"
+				case flatten_compiler_recovery_source(sources.names, sources.contents)
+				when Result::Ok(_value)
+					expect(false).to_be_true()
+				when Result::Err(message)
+					expect(message).to_equal(module.name + " source import boundary differs")
+				end
+			end
+		end
+	end
+
+	test("rejects empty bodies and extra imports in every declaration source") do
+		invalid := ["", "import other\n", "\timport{value}from other\n", "\rimport\tother\n", "import# comment\nother\n"]
+		invalid.each.with_index do |body, invalid_index|
+			compiler_recovery_layout().each.with_index do |module, slot|
+				mut sources := synthetic_recovery_sources()
+				sources.contents[slot] = module.imports + body
+				case flatten_compiler_recovery_source(sources.names, sources.contents)
+				when Result::Ok(_value)
+					expect(false).to_be_true()
+				when Result::Err(message)
+					mut expected := module.name + " declaration source has an unexpected import"
+					if invalid_index == 0
+						expected = module.name + " declaration source is empty"
+					end
+					expect(message).to_equal(expected)
+				end
+			end
+		end
+	end
+end

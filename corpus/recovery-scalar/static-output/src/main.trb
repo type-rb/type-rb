@@ -1,0 +1,4 @@
+def main()
+	puts("recovery-scalar-static-output")
+	return
+end

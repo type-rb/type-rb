@@ -1,0 +1,69 @@
+import { mir_function_control } from mir/model/control
+import { mir_effect_conservative } from mir/model/effects
+import { mir_op_callable_new, mir_op_direct_call, mir_op_indirect_call } from mir/model/instructions
+import { MirCall, MirInstruction, MirModule } from mir/model/module
+import { mir_build_flow, mir_flow_alias, mir_flow_aliases, mir_flow_blocks, mir_flow_position, mir_value_available } from mir/analysis/flow
+import { mir_refine_call_effects } from mir/analysis/call_effects
+
+# A local constructor fixes both code and capture values. Forward the original
+# SSA operands through the ordinary call ABI when they are still available.
+# Keep constructors and mutable capture cells here. Separate verified liveness
+# may omit a constructor only after its environment has no remaining use.
+def mir_resolve_local_callables(mut native_module: MirModule)
+	if native_module.functions.size() > 96
+		return
+	end
+	mut changed := false
+	native_module.functions.each do |function|
+		if function.kind != mir_function_control() || function.block_count > 64
+			next
+		end
+		flow := mir_build_flow(native_module, function, mir_flow_blocks(native_module, function))
+		aliases := mir_flow_aliases(native_module, function, flow, native_module.blocks[function.block_start + flow.entry])
+		mut block_index := function.block_start
+		while block_index < function.block_start + function.block_count
+			block := native_module.blocks[block_index]
+			mut position := block.instruction_start
+			while position < block.instruction_start + block.instruction_count
+				instruction := native_module.instructions[position]
+				if instruction.kind == mir_op_indirect_call()
+					owner := mir_flow_alias(aliases, instruction.first)
+					definition := mir_flow_position(flow, owner)
+					if definition >= 0 && native_module.instructions[definition].kind == mir_op_callable_new()
+						constructor := native_module.instructions[definition]
+						mut available := true
+						mut index := 0
+						while index < constructor.second
+							if !mir_value_available(flow, block, position, native_module.arguments[constructor.first + index])
+								available = false
+							end
+							index += 1
+						end
+						if available
+							start := native_module.arguments.size()
+							index = 0
+							while index < constructor.second
+								native_module.arguments.push(native_module.arguments[constructor.first + index])
+								index += 1
+							end
+							index = 0
+							while index < instruction.second
+								native_module.arguments.push(native_module.arguments[instruction.payload + index])
+								index += 1
+							end
+							call := native_module.calls.size()
+							native_module.calls.push(MirCall.new(callee: constructor.payload, argument_start: start, argument_count: constructor.second + instruction.second, effects: mir_effect_conservative()))
+							native_module.instructions[position] = MirInstruction.new(kind: mir_op_direct_call(), result: instruction.result, first: -1, second: -1, payload: call, failure: instruction.failure, source_id: instruction.source_id, line: instruction.line)
+							changed = true
+						end
+					end
+				end
+				position += 1
+			end
+			block_index += 1
+		end
+	end
+	if changed
+		mir_refine_call_effects(native_module)
+	end
+end

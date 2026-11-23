@@ -1,0 +1,8 @@
+import { add } from calculator
+import { describe, expect, test } from trb/std/test
+
+describe("Calculator") do
+	test("adds wrongly") do
+		expect(add(1, 2)).to_equal(4)
+	end
+end

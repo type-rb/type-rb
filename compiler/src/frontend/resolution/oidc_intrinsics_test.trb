@@ -1,0 +1,169 @@
+import { load_standard_source } from project/standard_library
+import { standard_source_oidc, standard_source_oidc_host } from state/standard_source_kinds
+import { standard_oidc_host } from frontend/resolution/oidc_intrinsics
+import { add_module, compiler_new, has_diagnostic } from state/state
+import { load_integer, store_integer, store_string } from support/storage
+import { describe, expect, test } from trb/std/test
+import { expect_compiler_phase, logical_checked_source } from testing/pipeline
+import { check, emit_qbe } from compiler
+import { CompilerState } from state/state
+import { lex } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { oidc_adapter, oidc_names, oidc_parameters, oidc_result } from mir/model/oidc_contract
+import { MirCall, MirSignature } from mir/model/module
+import { mir_signature_standard } from mir/model/call_kinds
+import { verify_mir } from mir/verify/module
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { control_test_output } from testing/mir/control
+
+def oidc_test_state(): CompilerState
+	# A synthetic trusted caller tests only the narrow host ABI; public Web
+	# integration, including Unicode hosts, is covered by ordinary Native/reference
+	# application execution. This reference-evaluated emitter uses ASCII literals.
+	source := "import trb/internal/auth/oidc_host as Host\ndef main()\nvalue := (7).to_s().to_bytes()\nmut body := [value, value, value]\nputs(Host.fetch(\"http://example.invalid\", \"\", 5, body))\nputs(Host.verify_rs256(value, value, value, value))\nputs(Host.timestamp(1.5))\nmut parts := [\"\", \"\", \"\"]\nputs(Host.describe_uri(\"http://example.invalid\", parts))\nputs(Host.monotonic_millis())\nmut bytes := [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]\nputs(Host.ip_address(\"127.0.0.1\", bytes))\nputs(Host.environment(\"OIDC_TEST_UNUSED\"))\nputs(Host.ascii_hostname(\"BUCHER.example.invalid\"))\nend\n"
+	mut state := compiler_new(1048576)
+	expect_compiler_phase(state, "lex", lex(state, source))
+	expect_compiler_phase(state, "parse", parse_module(state, 0, 0))
+	store_integer(state.standard_modules, 0, standard_source_oidc())
+	expect_compiler_phase(state, "resolve", resolve(state))
+	expect_compiler_phase(state, "check", check(state))
+	return state
+end
+
+describe("owned OIDC host declarations") do
+
+	test("retains typed boundaries and conservative effects after source erasure") do
+		mut state := oidc_test_state()
+		mut found := 0
+		state.scalar_mir.calls.each do |call|
+			row := state.scalar_mir.signatures[call.callee]
+			kind := standard_oidc_host(state, row.id)
+			if kind >= 0
+				found += 1
+				expect(row.kind).to_equal(mir_signature_standard())
+				expect(row.adapter).to_equal(oidc_adapter(kind))
+				expect(row.parameter_types).to_equal(oidc_parameters(kind))
+				expect(row.result_type).to_equal(oidc_result(kind))
+				expect(call.effects).to_equal(15)
+			end
+		end
+		expect(found).to_equal(oidc_names().size())
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		intrinsic_mir_erase(state)
+		output := control_test_output(emit_qbe(state))
+		expect_compiler_phase(state, "emit", !has_diagnostic(state))
+		expect(output.include?("call $EVP_DigestVerify(")).to_be_true()
+		expect(output.include?("call $curl_easy_perform(")).to_be_true()
+		expect(output.include?("call $inflate(")).to_be_true()
+		expect(output.include?("call $uidna_nameToASCII_UTF8_78(")).to_be_true()
+	end
+
+	test("retains exact signatures and the sole mutable output") do
+		mut state := compiler_new(1048576)
+		owner := add_module(state, "trb/internal/auth/oidc/index", "<oidc>")
+		store_integer(state.standard_modules, owner, standard_source_oidc())
+		state.module_graph.active_module[0] = owner
+		load_standard_source(state, standard_source_oidc_host(), 1)
+		expect(has_diagnostic(state)).to_be_false()
+		expect(standard_oidc_host(state, 0)).to_equal(0)
+		expect(standard_oidc_host(state, 1)).to_equal(1)
+		expect(standard_oidc_host(state, 6)).to_equal(6)
+		expect(standard_oidc_host(state, 7)).to_equal(7)
+		start := load_integer(state.declarations.function_parameter_starts, 0)
+		store_integer(state.declarations.parameter_mutable, start + 3, 0)
+		expect(standard_oidc_host(state, 0)).to_equal(-1)
+		store_string(state.declarations.parameter_types, load_integer(state.declarations.function_parameter_starts, 1), "String")
+		expect(standard_oidc_host(state, 1)).to_equal(-1)
+	end
+
+	test("rejects authored imports before checking an existing cached owner") do
+		mut state := compiler_new(1048576)
+		cached := add_module(state, "trb/internal/auth/oidc_host/index", "<host>")
+		store_integer(state.standard_modules, cached, standard_source_oidc_host())
+		state.module_graph.active_module[0] = add_module(state, "main", "main.trb")
+		expect(load_standard_source(state, standard_source_oidc_host(), 1)).to_equal(-1)
+		expect(has_diagnostic(state)).to_be_true()
+	end
+
+	test("rejects forged host declarations and public lookalikes") do
+		[0, 7].each do |target|
+			["owner", "name", "count", "parameter", "parameter_name", "mutable", "named", "default", "body", "expression", "result"].each do |damage|
+				mut state := oidc_test_state()
+				state.scalar_mir.signatures.each do |row|
+					if standard_oidc_host(state, row.id) == target
+						parameter := load_integer(state.declarations.function_parameter_starts, row.id)
+						if damage == "owner"
+							store_integer(state.standard_modules, row.source_id, 0)
+						elsif damage == "name"
+							store_string(state.declarations.function_names, row.id, "authored_fetch")
+						elsif damage == "count"
+							store_integer(state.declarations.function_parameter_counts, row.id, 0)
+						elsif damage == "parameter"
+							store_string(state.declarations.parameter_types, parameter, "Bytes")
+						elsif damage == "parameter_name"
+							store_string(state.declarations.parameter_names, parameter, "other")
+						elsif damage == "mutable"
+							store_integer(state.declarations.parameter_mutable, parameter, 1)
+						elsif damage == "named"
+							store_integer(state.declarations.parameter_named_only, parameter, 1)
+						elsif damage == "default"
+							store_integer(state.parsed.parameter_defaults, parameter, 1)
+						elsif damage == "body"
+							store_integer(state.declarations.function_body_ends, row.id, 99999)
+						elsif damage == "expression"
+							store_integer(state.parsed.function_expression_bodies, row.id, 1)
+						else
+							mut result := "String"
+							if target == 7
+								result = "Integer"
+							end
+							store_string(state.declarations.function_result_types, row.id, result)
+						end
+						expect(standard_oidc_host(state, row.id)).to_equal(-1)
+					end
+				end
+			end
+		end
+		mut ordinary := logical_checked_source("def fetch(uri: String): String\nreturn uri\nend\ndef main()\nputs(fetch(\"ordinary\"))\nend\n")
+		expect(check(ordinary)).to_be_true()
+		expect(control_test_output(emit_qbe(ordinary)).include?("call $curl_easy_perform(")).to_be_false()
+	end
+
+	test("independently rejects changed MIR signatures and removed effects") do
+		[0, 7].each do |target|
+			["name", "parameter", "mutable", "result", "effects"].each do |damage|
+				mut state := oidc_test_state()
+				state.scalar_mir.signatures.each.with_index do |row, index|
+					if row.kind == mir_signature_standard() && row.adapter == oidc_adapter(target) && damage != "effects"
+						mut name := row.name
+						mut parameters := row.parameter_types
+						mut mutable := row.parameter_mutable
+						mut result := row.result_type
+						if damage == "name"
+							name = "authored.fetch"
+						elsif damage == "parameter"
+							parameters[0] = "Bytes"
+						elsif damage == "mutable"
+							mutable[0] = 1
+						else
+							result = "String"
+							if target == 7
+								result = "Integer"
+							end
+						end
+						state.scalar_mir.signatures[index] = MirSignature.new(id: row.id, kind: row.kind, name: name, adapter: row.adapter, source_id: row.source_id, line: row.line, parameter_types: parameters, parameter_mutable: mutable, result_type: result)
+					end
+				end
+				if damage == "effects"
+					state.scalar_mir.calls.each.with_index do |row, index|
+						if state.scalar_mir.signatures[row.callee].adapter == oidc_adapter(target)
+							state.scalar_mir.calls[index] = MirCall.new(callee: row.callee, argument_start: row.argument_start, argument_count: row.argument_count, effects: 0)
+						end
+					end
+				end
+				expect(verify_mir(state.scalar_mir, true) != "").to_be_true()
+			end
+		end
+	end
+end

@@ -1,0 +1,21 @@
+def sum_bounds(bounds: Range<Integer>): Integer
+	mut total := 0
+	bounds.each do |value|
+		total += value
+	end
+	return total
+end
+
+def main()
+	puts(sum_bounds(1 + 1..2 * 2))
+	puts(sum_bounds(-2...-1))
+	puts(sum_bounds(1_000_000..1_000_000))
+	puts(1.5 + 0.5 == 2.0)
+	mut terms := 0
+	(-2..0).each.with_index do |value, index|
+		terms += value * 10 + index
+		value = 99
+		index = 99
+	end
+	puts(terms)
+end

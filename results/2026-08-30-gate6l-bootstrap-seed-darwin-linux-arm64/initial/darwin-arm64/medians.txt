@@ -1,0 +1,3 @@
+b1-b2 elapsed_seconds=0.94 peak_rss_bytes=36077568
+b2-b3 elapsed_seconds=0.91 peak_rss_bytes=36126720
+b3-b4 elapsed_seconds=0.91 peak_rss_bytes=35995648

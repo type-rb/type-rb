@@ -1,0 +1,27 @@
+import trb/std/process
+import trb/std/math as Numeric
+
+def main()
+	mut first := Process.argv()
+	first.push("local-only")
+	second := Process.argv()
+	puts(first.size().to_s())
+	puts(second.size().to_s())
+	value := second[0].to_i()
+	puts(value.to_s())
+	puts(Numeric.sqrt(value).to_i().to_s())
+	puts("0".to_i().to_s())
+	puts("+0".to_i().to_s())
+	puts("-0".to_i().to_s())
+	puts("+9007199254740991".to_i().to_s())
+	puts("-9007199254740991".to_i().to_s())
+	value_to_truncate := -2.75
+	puts(value_to_truncate.to_i().to_s())
+	nan := Numeric.sqrt(-1)
+	if nan != nan
+		puts("nan")
+	else
+		puts("number")
+	end
+	return
+end

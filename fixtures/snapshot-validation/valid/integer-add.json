@@ -1,0 +1,29 @@
+{
+  "format": "type-rb-bootstrap-snapshot",
+  "version": 1,
+  "module": "example/main",
+  "sources": [
+    { "id": "main", "path": "src/main.trb" }
+  ],
+  "functions": [
+    {
+      "id": "example/main#main",
+      "name": "main",
+      "result": "Integer",
+      "entry": "entry",
+      "origin": { "source": "main", "startLine": 1, "startColumn": 1, "endLine": 5, "endColumn": 4 },
+      "blocks": [
+        {
+          "id": "entry",
+          "origin": { "source": "main", "startLine": 2, "startColumn": 2, "endLine": 4, "endColumn": 15 },
+          "instructions": [
+            { "op": "integer_literal", "result": "v0", "value": 40, "origin": { "source": "main", "startLine": 2, "startColumn": 8, "endLine": 2, "endColumn": 9 } },
+            { "op": "integer_literal", "result": "v1", "value": 2, "origin": { "source": "main", "startLine": 3, "startColumn": 8, "endLine": 3, "endColumn": 8 } },
+            { "op": "integer_add_checked", "result": "v2", "left": "v0", "right": "v1", "origin": { "source": "main", "startLine": 4, "startColumn": 9, "endLine": 4, "endColumn": 13 } },
+            { "op": "return", "value": "v2", "origin": { "source": "main", "startLine": 4, "startColumn": 2, "endLine": 4, "endColumn": 13 } }
+          ]
+        }
+      ]
+    }
+  ]
+}

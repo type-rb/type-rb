@@ -1,0 +1,67 @@
+import trb/std/result
+import trb/std/unit
+
+module ContextStorage
+end
+
+record Entry
+	key: Any
+	value: Any
+end
+
+# These private declarations are checked by loader identity and full signature.
+# Their bodies lower to independently verified typed MIR operations.
+def pack<T>(value: T): Any
+end
+
+def accepts<T>(value: Any): Boolean
+end
+
+def unpack<T>(value: Any): T
+end
+
+def same<K>(left: K, right: K): Boolean
+end
+
+def copy_state<C, V>(source: C, replacement: V): C
+end
+
+def copy_request<C, V>(source: C, replacement: V): C
+end
+
+def matches<K>(entry: Entry, key: K): Boolean
+	if !accepts<K>(entry.key)
+		return false
+	end
+	return same<K>(unpack<K>(entry.key), key)
+end
+
+# Copy the entry list, retaining the original identities of keys and values.
+def put<K, V>(state: Any?, key: K, value: V): Any
+	mut entries: Array<Entry> := []
+	if state != nil
+		previous := unpack<Array<Entry>>(state)
+		previous.each do |entry|
+			if !matches<K>(entry, key)
+				entries.push(entry)
+			end
+		end
+	end
+	entries.push(Entry.new(key: pack<K>(key), value: pack<V>(value)))
+	return pack<Array<Entry>>(entries)
+end
+
+def find<K, V>(state: Any?, key: K): Result<V, Unit>
+	if state != nil
+		entries := unpack<Array<Entry>>(state)
+		mut index := 0
+		while index < entries.size()
+			entry := entries[index]
+			if matches<K>(entry, key)
+				return Result<V, Unit>::Ok(unpack<V>(entry.value))
+			end
+			index += 1
+		end
+	end
+	return Result<V, Unit>::Err(Unit.new())
+end

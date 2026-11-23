@@ -1,0 +1,129 @@
+import { find_function_in_module, find_visible_function } from frontend/resolution/declaration_lookup
+import { CompilerState } from state/state
+import { load_integer, load_string } from support/storage
+
+def compiler_main_signature(state: CompilerState, index: Integer): Integer
+	if index < 0
+		return -1
+	end
+	if load_integer(state.declarations.function_parameter_counts, index) != 3
+		return -1
+	end
+	start := load_integer(state.declarations.function_parameter_starts, index)
+	if load_string(state.declarations.parameter_types, start) != "String"
+		return -1
+	end
+	if load_string(state.declarations.parameter_types, start + 1) != "String"
+		return -1
+	end
+	if load_string(state.declarations.parameter_types, start + 2) != "Boolean"
+		return -1
+	end
+	if load_string(state.declarations.function_result_types, index) != "Integer"
+		return -1
+	end
+	return index
+end
+
+def compiler_entry_function(state: CompilerState): Integer
+	return compiler_main_signature(state, find_function_in_module(state, state.module_graph.entry_module[0], "compiler_main"))
+end
+
+# CLI entry adapters import the ordinary compiler under core_main. Follow that
+# declaration to its own visible bindings, including extracted intrinsic owners.
+def compiler_runtime_owner(state: CompilerState): Integer
+	if compiler_entry_function(state) < 0
+		return -1
+	end
+	if find_function_in_module(state, state.module_graph.entry_module[0], "native_cli_main") >= 0
+		core := find_visible_function(state, state.module_graph.entry_module[0], "core_main")
+		if compiler_main_signature(state, core) < 0
+			return -1
+		end
+		if load_string(state.declarations.function_names, core) != "compiler_main"
+			return -1
+		end
+		return load_integer(state.declarations.function_modules, core)
+	end
+	return state.module_graph.entry_module[0]
+end
+
+def compiler_runtime_intrinsic(state: CompilerState, function_index: Integer): Boolean
+	if function_index < 0 || function_index >= state.declarations.function_count[0]
+		return false
+	end
+	name := load_string(state.declarations.function_names, function_index)
+	if name == "compiler_string_bytes" || name == "compiler_source_is_utf8" || name == "compiler_literal_byte"
+		owner := compiler_runtime_owner(state)
+		if owner >= 0
+			mut anchor := "emit_static_strings"
+			if name == "compiler_source_is_utf8" || name == "compiler_literal_byte"
+				anchor = "compiler_source_slice"
+			end
+			emitter := find_visible_function(state, owner, anchor)
+			if emitter >= 0
+				if name == "compiler_string_bytes"
+					# Portable literal data now owns the byte accessor. Follow its
+					# bound declaration, preserving sibling functions as ordinary.
+					data := find_visible_function(state, load_integer(state.declarations.function_modules, emitter), "mir_string_literal_data")
+					if data >= 0
+						return find_visible_function(state, load_integer(state.declarations.function_modules, data), name) == function_index
+					end
+				end
+				if name == "compiler_literal_byte"
+					decoder := find_visible_function(state, load_integer(state.declarations.function_modules, emitter), "decode_escape")
+					if decoder < 0
+						return false
+					end
+					return find_visible_function(state, load_integer(state.declarations.function_modules, decoder), name) == function_index
+				end
+				return find_visible_function(state, load_integer(state.declarations.function_modules, emitter), name) == function_index
+			end
+		end
+		return false
+	end
+	if name == "compiler_set_sqlite_link" || name == "compiler_set_oidc_link" || name == "compiler_set_crypto_link" || name == "compiler_set_compression_link" || name == "compiler_set_network_link" || name == "compiler_reset_temporary_storage" || name == "compiler_file_exists" || name == "compiler_read_source" || name == "compiler_source_slice" || name == "compiler_collect_project_sources" || name == "compiler_collect_package_files" || name == "compiler_collect_test_paths" || name == "compiler_eputs"
+		owner := compiler_runtime_owner(state)
+		if owner >= 0
+			return find_visible_function(state, owner, name) == function_index
+		end
+	end
+	return false
+end
+
+def compiler_host_intrinsic(state: CompilerState, function_index: Integer): Boolean
+	if function_index < 0 || function_index >= state.declarations.function_count[0]
+		return false
+	end
+	if compiler_entry_function(state) < 0 || find_function_in_module(state, state.module_graph.entry_module[0], "native_cli_main") < 0
+		return false
+	end
+	return load_string(state.module_graph.module_names, load_integer(state.declarations.function_modules, function_index)) == "host"
+end
+
+def compiler_file_entry_function(state: CompilerState): Integer
+	index := find_function_in_module(state, state.module_graph.entry_module[0], "compiler_file_main")
+	if index < 0
+		return -1
+	end
+	if load_integer(state.declarations.function_parameter_counts, index) != 4
+		return -1
+	end
+	start := load_integer(state.declarations.function_parameter_starts, index)
+	if load_string(state.declarations.parameter_types, start) != "String"
+		return -1
+	end
+	if load_string(state.declarations.parameter_types, start + 1) != "String"
+		return -1
+	end
+	if load_string(state.declarations.parameter_types, start + 2) != "String"
+		return -1
+	end
+	if load_string(state.declarations.parameter_types, start + 3) != "Boolean"
+		return -1
+	end
+	if load_string(state.declarations.function_result_types, index) != "Integer"
+		return -1
+	end
+	return index
+end

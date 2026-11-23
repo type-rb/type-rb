@@ -1,0 +1,220 @@
+import { mir_nil_test_equal, mir_nil_test_not_equal } from mir/model/operation_modes
+import { nullable_state_head_slot, nullable_state_version_slot } from state/local_slots
+import { binary_add_assign } from frontend/types/operators
+import { mir_op_nil_test, mir_op_nullable_extract, mir_op_nullable_none } from mir/model/instructions
+import { token_is } from frontend/syntax/syntax_tokens
+import { binary_operator_id } from frontend/syntax/syntax_forms
+import { CheckedValue, checked_condition_value, checked_nullable_target, checked_view } from frontend/checking/body/values
+import { union_parts } from frontend/types/union_types
+import { mir_checked_nullable, mir_union_narrow } from mir/lowering/nullable
+import { nullable_element } from frontend/types/nullable_types
+import { CompilerState } from state/state
+import { CheckedLocals, NullableFact, local_find, local_identity, local_slot } from state/local_state
+import { load_integer, load_string, sparse_integer_at, store_string } from support/storage
+
+# Lexical targets use active binding slots; globals use -id-2. Both have
+# replacement versions. Global identities survive lexical scope entry and exit.
+def nullable_identity(locals: CheckedLocals, binding: Integer): Integer
+	if binding < -1
+		return binding
+	end
+	return local_identity(locals, binding)
+end
+
+def nullable_version(locals: CheckedLocals, binding: Integer): Integer
+	identity := nullable_identity(locals, binding)
+	mut cursor := locals.nullable_state[nullable_state_head_slot()]
+	while cursor >= 0
+		fact := locals.nullable_facts[cursor]
+		if fact.identity == identity && fact.field == -2
+			return fact.version
+		end
+		cursor = fact.previous
+	end
+	return 0
+end
+
+def nullable_fact(mut locals: CheckedLocals, binding: Integer, field: Integer, type_name: String, previous: Integer): Integer
+	id := locals.nullable_facts.size()
+	locals.nullable_facts.push(NullableFact.new(identity: nullable_identity(locals, binding), field: field, type_name: type_name, version: nullable_version(locals, binding), previous: previous))
+	return id
+end
+
+def nullable_apply(mut locals: CheckedLocals, facts: Integer)
+	mut cursor := facts
+	while cursor >= 0
+		fact := locals.nullable_facts[cursor]
+		mut binding := local_slot(locals, fact.identity)
+		if fact.identity < -1
+			binding = fact.identity
+		end
+		if binding != -1 && fact.version == nullable_version(locals, binding)
+			locals.nullable_state[nullable_state_head_slot()] = nullable_fact(locals, binding, fact.field, fact.type_name, locals.nullable_state[nullable_state_head_slot()])
+		end
+		cursor = fact.previous
+	end
+end
+
+def nullable_replace(mut locals: CheckedLocals, binding: Integer, flow_type: String)
+	nullable_replace_type(locals, binding, load_string(locals.types, binding), flow_type)
+end
+
+def nullable_replace_type(mut locals: CheckedLocals, binding: Integer, declared: String, flow_type: String)
+	locals.nullable_state[nullable_state_version_slot()] += 1
+	id := locals.nullable_facts.size()
+	locals.nullable_facts.push(NullableFact.new(identity: nullable_identity(locals, binding), field: -2, type_name: declared, version: locals.nullable_state[nullable_state_version_slot()], previous: locals.nullable_state[nullable_state_head_slot()]))
+	locals.nullable_state[nullable_state_head_slot()] = id
+	if nullable_element(declared) != ""
+		locals.nullable_state[nullable_state_head_slot()] = nullable_fact(locals, binding, -1, flow_type, locals.nullable_state[nullable_state_head_slot()])
+	end
+end
+
+def nullable_lookup(locals: CheckedLocals, binding: Integer, field: Integer, declared: String): String
+	identity := nullable_identity(locals, binding)
+	mut cursor := locals.nullable_state[nullable_state_head_slot()]
+	while cursor >= 0
+		fact := locals.nullable_facts[cursor]
+		if fact.identity == identity
+			if fact.field == -2
+				return declared
+			end
+			if fact.field == field
+				return fact.type_name
+			end
+		end
+		cursor = fact.previous
+	end
+	return declared
+end
+
+def nullable_read(mut state: CompilerState, mut locals: CheckedLocals, value: CheckedValue, binding: Integer, field: Integer, origin: Integer): CheckedValue
+	target := checked_nullable_target(value, binding, field)
+	if binding == -1 || (nullable_element(value.type_name) == "" && union_parts(value.type_name).size() == 0)
+		return target
+	end
+	flow := nullable_lookup(locals, binding, field, value.type_name)
+	if flow == value.type_name
+		return target
+	end
+	store_string(state.callables.checked[0].nullable_reads, origin, flow)
+	if union_parts(value.type_name).size() > 0
+		narrowed := mir_union_narrow(state, locals, value, flow, origin)
+		return checked_view(target, flow, narrowed.category)
+	end
+	mut kind := mir_op_nullable_extract()
+	if flow == "Nil"
+		kind = mir_op_nullable_none()
+	end
+	narrowed := mir_checked_nullable(state, locals, kind, value, flow, 0, origin)
+	return checked_view(target, flow, narrowed.category)
+end
+
+def nullable_nil_condition(mut state: CompilerState, mut locals: CheckedLocals, subject: CheckedValue, different: Boolean, origin: Integer): CheckedValue
+	mut mode := mir_nil_test_equal()
+	if different
+		mode = mir_nil_test_not_equal()
+	end
+	result := mir_checked_nullable(state, locals, mir_op_nil_test(), subject, "Boolean", mode, origin)
+	mut truth := -1
+	mut falsity := -1
+	element := nullable_element(subject.type_name)
+	if subject.nullable_binding != -1 && element != ""
+		truth = nullable_fact(locals, subject.nullable_binding, subject.nullable_field, "Nil", -1)
+		falsity = nullable_fact(locals, subject.nullable_binding, subject.nullable_field, element, -1)
+		if different
+			saved := truth
+			truth = falsity
+			falsity = saved
+		end
+	end
+	return checked_condition_value(result, truth, falsity)
+end
+
+# Both operands hold on an AND's true edge or an OR's false edge. Keep the
+# original replacement versions so conditional calls cannot revive stale facts.
+# The other edge has alternative paths and grants no additional narrowing.
+def nullable_logical_condition(mut locals: CheckedLocals, left: CheckedValue, right: CheckedValue, disjunction: Boolean, result: CheckedValue): CheckedValue
+	mut first := left.truth
+	mut combined := right.truth
+	if disjunction
+		first = left.falsity
+		combined = right.falsity
+	end
+	while first >= 0
+		fact := locals.nullable_facts[first]
+		index := locals.nullable_facts.size()
+		locals.nullable_facts.push(NullableFact.new(identity: fact.identity, field: fact.field, type_name: fact.type_name, version: fact.version, previous: combined))
+		combined = index
+		first = fact.previous
+	end
+	if disjunction
+		return checked_condition_value(result, -1, combined)
+	end
+	return checked_condition_value(result, combined, -1)
+end
+
+# Conditional assignments invalidate the parent's earlier facts; their precise
+# path-local value types do not escape a branch which may not execute.
+def nullable_finish(mut locals: CheckedLocals, parent: Integer, first: Integer, count: Integer)
+	finish := locals.nullable_facts.size()
+	locals.nullable_state[nullable_state_head_slot()] = parent
+	mut cursor := first
+	while cursor < finish
+		fact := locals.nullable_facts[cursor]
+		binding := local_slot(locals, fact.identity)
+		if fact.field == -2 && binding >= 0 && binding < count
+			nullable_replace(locals, binding, load_string(locals.types, binding))
+		elsif fact.field == -2 && fact.identity < -1
+			nullable_replace_type(locals, fact.identity, fact.type_name, fact.type_name)
+		end
+		cursor += 1
+	end
+end
+
+# Repeated bodies cannot retain a pre-loop fact for a binding they replace.
+def nullable_loop_writes(state: CompilerState, mut locals: CheckedLocals, start: Integer, finish: Integer)
+	nullable_capture_call(state, locals)
+	mut cursor := start
+	while cursor + 1 < finish
+		if token_is(state, cursor + 1, "=") || binary_operator_id(load_string(state.source_tokens.token_texts, cursor + 1)) >= binary_add_assign()
+			name := load_string(state.source_tokens.token_texts, cursor)
+			mut binding := local_find(locals, name)
+			if cursor > 0 && (token_is(state, cursor - 1, ".") || token_is(state, cursor - 1, "&."))
+				binding = -1
+			end
+			state.parsed.iterations.each do |iteration|
+				if cursor >= iteration.body_start && cursor < iteration.body_finish
+					if name == load_string(state.source_tokens.token_texts, iteration.element_origin)
+						binding = -1
+					elsif iteration.second_origin >= 0 && name == load_string(state.source_tokens.token_texts, iteration.second_origin)
+						binding = -1
+					end
+				end
+			end
+			if binding >= 0
+				nullable_replace(locals, binding, load_string(locals.types, binding))
+			end
+		end
+		cursor += 1
+	end
+end
+
+# An unknown call may invoke an escaped closure which replaces a shared cell.
+# Version changes also invalidate field proofs and propagate through branch joins.
+def nullable_capture_call(state: CompilerState, mut locals: CheckedLocals)
+	mut slot := 0
+	while slot < locals.count[0]
+		if load_integer(locals.mutable, slot) > 0 && sparse_integer_at(locals.mir_cell_plans, local_identity(locals, slot)) > 0
+			nullable_replace(locals, slot, load_string(locals.types, slot))
+		end
+		slot += 1
+	end
+	mut global := 0
+	while global < state.global_bindings.globals.size()
+		if state.global_bindings.globals[global].mutable && state.global_bindings.global_types[global] != ""
+			type_name := state.global_bindings.global_types[global]
+			nullable_replace_type(locals, -global - 2, type_name, type_name)
+		end
+		global += 1
+	end
+end

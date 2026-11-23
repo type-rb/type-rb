@@ -1,0 +1,34 @@
+import { RawEnumValue } from frontend/types/enum_model
+import { CompilerState } from state/state
+
+def raw_enum_value(state: CompilerState, variant: Integer): RawEnumValue
+	state.nominal.raw_enum_values.each do |value|
+		if value.variant == variant
+			return value
+		end
+	end
+	return RawEnumValue.new(variant: -1, type_name: "", text: "", origin: -1)
+end
+
+def raw_enum_type(state: CompilerState, owner: Integer): String
+	if owner < 0 || owner >= state.nominal.enums.size()
+		return ""
+	end
+	return raw_enum_value(state, state.nominal.enums[owner].variant_start).type_name
+end
+
+# Public failure text uses the declaration's leaf name, independent of aliases.
+def raw_enum_error_message(state: CompilerState, owner: Integer): String
+	name := state.nominal.enums[owner].name
+	mut leaf := ""
+	mut index := 0
+	while index < name.size()
+		if name[index] == ":"
+			leaf = ""
+		else
+			leaf += name[index]
+		end
+		index += 1
+	end
+	return "unknown raw value for " + leaf
+end

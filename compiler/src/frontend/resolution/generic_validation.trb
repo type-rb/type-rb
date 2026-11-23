@@ -1,0 +1,150 @@
+import { declaration_object } from frontend/types/declaration_kinds
+import { union_parts } from frontend/types/union_types
+import { literal_type_base } from frontend/types/literal_types
+import { namespace_parent } from frontend/types/namespace_model
+import { callable_parts } from frontend/types/callable_types
+import { find_alias_in_module, find_function_in_module, find_generic_function_in_module, find_generic_in_module, find_record_in_module, find_visible_alias, find_visible_declaration, find_visible_enum, find_visible_generic, find_visible_newtype, find_visible_record } from frontend/resolution/declaration_lookup
+import { find_newtype_type } from frontend/types/newtype_types
+import { find_enum_in_module } from frontend/types/enum_types
+import { generic_arguments, generic_base } from frontend/types/generic_arguments
+import { nullable_element } from frontend/types/nullable_types
+import { CompilerState, diagnostic, has_diagnostic } from state/state
+
+# Validate authored types without manufacturing an arbitrary concrete instance.
+# Type parameters remain symbolic here and never enter the MIR type catalog.
+def generic_field_type_valid(mut state: CompilerState, source: Integer, name: String, parameters: Array<String>): Boolean
+	alternatives := union_parts(name)
+	if alternatives.size() > 0
+		mut valid := true
+		alternatives.each do |alternative|
+			if !generic_field_type_valid(state, source, alternative, parameters)
+				valid = false
+			end
+		end
+		return valid
+	end
+	mut parameter := false
+	parameters.each do |candidate|
+		if candidate == name
+			parameter = true
+		end
+	end
+	if parameter
+		return true
+	end
+	optional := nullable_element(name)
+	if optional != ""
+		return generic_field_type_valid(state, source, optional, parameters)
+	end
+	callable := callable_parts(name)
+	if callable.size() > 0
+		mut index := 0
+		while index < callable.size()
+			if !(index == 0 && callable[index] == "Void")
+				if !generic_field_type_valid(state, source, callable[index], parameters)
+					return false
+				end
+			end
+			index += 1
+		end
+		return true
+	end
+	arguments := generic_arguments(name)
+	if arguments.size() > 0
+		base := generic_base(name)
+		mut arity := 0
+		if base == "Array" || base == "Range"
+			arity = 1
+		elsif base == "Hash"
+			arity = 2
+		else
+			object_index := find_visible_declaration(state, source, base, declaration_object())
+			if object_index >= 0
+				arity = state.nominal.objects[object_index].parameters.size()
+			end
+			alias_index := find_visible_alias(state, source, base)
+			if alias_index >= 0
+				arity = state.type_resolution.type_aliases[alias_index].parameters.size()
+			end
+			definition := find_visible_generic(state, source, base)
+			if definition >= 0
+				arity = state.type_resolution.generic_definitions[definition].parameters.size()
+			end
+		end
+		if arity != arguments.size()
+			return false
+		end
+		mut valid := true
+		arguments.each do |argument|
+			if !generic_field_type_valid(state, source, argument, parameters)
+				valid = false
+			end
+		end
+		return valid
+	end
+	if name == "Bytes" || name == "Any" || name == "Integer" || name == "Float" || name == "Boolean" || name == "String" || literal_type_base(name) != ""
+		return true
+	end
+	object_index := find_visible_declaration(state, source, name, declaration_object())
+	if object_index >= 0
+		return state.nominal.objects[object_index].parameters.size() == 0
+	end
+	alias_index := find_visible_alias(state, source, name)
+	if alias_index >= 0
+		return state.type_resolution.type_aliases[alias_index].parameters.size() == 0
+	end
+	if find_visible_enum(state, source, name) >= 0
+		return true
+	end
+	if find_newtype_type(state, name) >= 0 || find_visible_newtype(state, source, name) >= 0
+		return true
+	end
+	return find_visible_record(state, source, name) >= 0
+end
+
+def validate_generic_declarations(mut state: CompilerState): Boolean
+	mut index := 0
+	while index < state.type_resolution.generic_definitions.size() && !has_diagnostic(state)
+		definition := state.type_resolution.generic_definitions[index]
+		source := definition.source_id
+		state.module_graph.active_module[0] = source
+		state.global_bindings.declaration_owner[0] = namespace_parent(definition.name)
+		if find_generic_in_module(state, source, definition.name) != index || find_record_in_module(state, source, definition.name) >= 0 || find_enum_in_module(state, source, definition.name) >= 0 || find_function_in_module(state, source, definition.name) >= 0
+			diagnostic(state, "TRBN4003", definition.line, "duplicate nominal declaration " + definition.name)
+			return false
+		end
+		mut variants: Hash<String, Integer> := {}
+		definition.variants.each do |variant|
+			if variants.key?(variant.name)
+				diagnostic(state, "TRBN4003", variant.line, "duplicate enum variant " + variant.name)
+			end
+			variants[variant.name] = 1
+			mut fields: Hash<String, Integer> := {}
+			variant.fields.each do |field|
+				if fields.key?(field.name)
+					diagnostic(state, "TRBN4003", field.line, "duplicate field declaration " + field.name)
+				end
+				fields[field.name] = 1
+				if !generic_field_type_valid(state, source, field.type_name, definition.parameters)
+					diagnostic(state, "TRBN4003", field.line, "invalid generic field type " + field.type_name)
+				end
+			end
+		end
+		index += 1
+	end
+	return !has_diagnostic(state)
+end
+
+def validate_alias_declarations(mut state: CompilerState): Boolean
+	mut index := 0
+	while index < state.type_resolution.type_aliases.size() && !has_diagnostic(state)
+		row := state.type_resolution.type_aliases[index]
+		state.module_graph.active_module[0] = row.source_id
+		state.global_bindings.declaration_owner[0] = namespace_parent(row.name)
+		if find_alias_in_module(state, row.source_id, row.name) != index || find_generic_in_module(state, row.source_id, row.name) >= 0 || find_record_in_module(state, row.source_id, row.name) >= 0 || find_enum_in_module(state, row.source_id, row.name) >= 0 || find_function_in_module(state, row.source_id, row.name) >= 0 || find_generic_function_in_module(state, row.source_id, row.name) >= 0
+			diagnostic(state, "TRBN4003", row.line, "duplicate type alias declaration " + row.name)
+		end
+		index += 1
+	end
+	return !has_diagnostic(state)
+end

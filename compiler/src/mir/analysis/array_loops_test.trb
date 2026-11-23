@@ -1,0 +1,433 @@
+import { emit_qbe } from compiler
+import { compiler_test_instruction_with_cell } from testing/compiler
+import { control_test_output } from testing/mir/control
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { logical_run_qbe } from testing/qbe_runner
+import { MirArrayHeader, MirArrayLoop, mir_function_index } from mir/model/module
+import { optimize_verified_mir } from mir/passes/optimize
+import { verify_mir } from mir/verify/module
+import { describe, expect, test } from trb/std/test
+import { array_loop_mir_check, array_loop_mir_source } from testing/mir/array_loops
+import trb/std/process
+import trb/std/result
+
+describe("Array loop CFG MIR") do
+	test("rebuilds loop proofs from function-owned values after value storage reordering") do
+		mut state := array_loop_mir_check(array_loop_mir_source("while index < values.size()\ntotal += values[index]\nindex += 1\nend"))
+		before := control_test_output(emit_qbe(state))
+		mut left := 0
+		mut right := state.scalar_mir.values.size() - 1
+		while left < right
+			saved := state.scalar_mir.values[left]
+			state.scalar_mir.values[left] = state.scalar_mir.values[right]
+			state.scalar_mir.values[right] = saved
+			left += 1
+			right -= 1
+		end
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+	end
+
+	test("caches stable Arrays and retains bounds in the scalar-counted fallback") do
+		source := "def scan(values: Array<Integer>, other: Array<Integer>, limit: Integer): Integer\nmut index := 0\nmut total := 0\nwhile index < limit\ntotal += values[index] + other[index]\nindex += 1\nend\nreturn total\nend\ndef main()\nputs(scan([1, 2, 3], [4, 5, 6], 2))\nend\n"
+		mut state := array_loop_mir_check(source)
+		function_index := mir_function_index(state.scalar_mir, 0)
+		expect(state.scalar_mir.array_loops[function_index].size()).to_equal(2)
+		plan := state.scalar_mir.array_loops[function_index][1]
+		expect(plan.owner).to_equal(-1)
+		expect(plan.length).to_equal(-1)
+		expect(plan.accesses.size()).to_equal(0)
+		expect(plan.headers.size()).to_equal(2)
+		expect(plan.headers[0].bounded_accesses.size() + plan.headers[1].bounded_accesses.size()).to_equal(0)
+		fast := state.scalar_mir.array_loops[function_index][0]
+		expect(fast.headers[0].bounded_accesses.size() + fast.headers[1].bounded_accesses.size()).to_equal(2)
+		qbe_source := control_test_output(emit_qbe(state))
+		expect(qbe_source.include?("call $trbn_fail(l $trbn_bounds_error, l 30)")).to_be_true()
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, qbe_source)
+			when Result::Ok(actual)
+				expect(actual).to_equal("12\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+		old := plan.headers[0]
+		state.scalar_mir.array_loops[function_index][1].headers[0] = MirArrayHeader.new(identity: old.identity, owner: old.owner, accesses: old.accesses, nonnegative_accesses: [], bounded_accesses: old.bounded_accesses)
+		expect(verify_mir(state.scalar_mir, true).empty?()).to_be_false()
+	end
+
+	test("does not retain a scalar-counted loop header across Array growth") do
+		source := "def grow(mut values: Array<Integer>, limit: Integer): Integer\nmut index := 0\nmut total := 0\nwhile index < limit\ntotal += values[index]\nvalues.push(index)\nindex += 1\nend\nreturn total\nend\ndef main()\nend\n"
+		state := array_loop_mir_check(source)
+		function_index := mir_function_index(state.scalar_mir, 0)
+		expect(state.scalar_mir.array_loops[function_index].size()).to_equal(0)
+	end
+
+	test("retains a bounds check for a proven nonnegative next index") do
+		source := "def scan(values: Array<Integer>, limit: Integer): Integer\nmut index := 0\nmut total := 0\nwhile index < limit\nnext_index := index + 1\ntotal += values[next_index]\nindex = next_index\nend\nreturn total\nend\ndef main()\nputs(scan([0, 1, 2, 3], 2))\nend\n"
+		mut state := array_loop_mir_check(source)
+		function_index := mir_function_index(state.scalar_mir, 0)
+		plan := state.scalar_mir.array_loops[function_index][0]
+		expect(plan.headers.size()).to_equal(1)
+		expect(plan.headers[0].nonnegative_accesses.size()).to_equal(1)
+		qbe_source := control_test_output(emit_qbe(state))
+		expect(qbe_source.include?("call $trbn_fail(l $trbn_bounds_error, l 30)")).to_be_true()
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, qbe_source)
+			when Result::Ok(actual)
+				expect(actual).to_equal("3\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("keeps negative Array positions in scalar-counted loops") do
+		source := "def last_twice(values: Array<Integer>): Integer\nmut index := 0\nmut total := 0\nwhile index < 2\ntotal += values[-1]\nindex += 1\nend\nreturn total\nend\ndef main()\nputs(last_twice([1, 2, 3]))\nend\n"
+		state := array_loop_mir_check(source)
+		function_index := mir_function_index(state.scalar_mir, 0)
+		plan := state.scalar_mir.array_loops[function_index][0]
+		expect(plan.headers.size()).to_equal(1)
+		expect(plan.headers[0].nonnegative_accesses.size()).to_equal(0)
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+			when Result::Ok(actual)
+				expect(actual).to_equal("6\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("uses the verified loop guard for captured Array assignment positions") do
+		source := "def increment(mut values: Array<Integer>): Integer\nmut index := 0\nwhile index < values.size()\nvalues[index] += 1\nindex += 1\nend\nreturn values.size()\nend\ndef main()\nmut values := [1, 2, 3]\nputs(increment(values))\nputs(values[0])\nputs(values[1])\nputs(values[2])\nend\n"
+		state := array_loop_mir_check(source)
+		function_index := mir_function_index(state.scalar_mir, 0)
+		expect(state.scalar_mir.array_loops[function_index].size()).to_equal(1)
+		mut captured := false
+		mut stored := false
+		state.scalar_mir.array_loops[function_index][0].accesses.each do |instruction_index|
+			if state.scalar_mir.instructions[instruction_index].kind == 21
+				captured = true
+			elsif state.scalar_mir.instructions[instruction_index].kind == 23
+				stored = true
+			end
+		end
+		expect(captured).to_be_true()
+		expect(stored).to_be_true()
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+			when Result::Ok(actual)
+				expect(actual).to_equal("3\n2\n3\n4\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("keeps another Array's assignment bounds in the guarded fallback") do
+		source := array_loop_mir_source("mut separate := [1]\nwhile index < values.size()\nseparate[index] += 1\nindex += 1\nend")
+		state := array_loop_mir_check(source)
+		function_index := mir_function_index(state.scalar_mir, 1)
+		expect(state.scalar_mir.array_loops[function_index].size()).to_equal(2)
+		plan := state.scalar_mir.array_loops[function_index][1]
+		expect(plan.accesses.size()).to_equal(0)
+		expect(plan.headers.size()).to_equal(1)
+		expect(plan.headers[0].bounded_accesses.size()).to_equal(0)
+		expect(state.scalar_mir.array_loops[function_index][0].headers[0].bounded_accesses.size() > 0).to_be_true()
+		expect(control_test_output(emit_qbe(state)).include?("call $trbn_fail(l $trbn_bounds_error, l 30)")).to_be_true()
+	end
+
+	test("executes guarded Array writes after source erasure and block reordering") do
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			source := "def update(mut values: Array<Float>)\nmut index := 0\nwhile index < values.size()\nvalues[index] += 0.5\nindex += 1\nend\nend\ndef main()\nmut values := [1.0, 2.0]\nupdate(values)\nputs(values[0] == 1.5)\nputs(values[1] == 2.5)\nend\n"
+			mut state := array_loop_mir_check(source)
+			before := control_test_output(emit_qbe(state))
+			intrinsic_mir_erase(state)
+			expect(control_test_output(emit_qbe(state))).to_equal(before)
+			state.scalar_mir.functions.each do |function|
+				mut left := function.block_start
+				mut right := left + function.block_count - 1
+				while left < right
+					saved := state.scalar_mir.blocks[left]
+					state.scalar_mir.blocks[left] = state.scalar_mir.blocks[right]
+					state.scalar_mir.blocks[right] = saved
+					left += 1
+					right -= 1
+				end
+			end
+			expect(verify_mir(state.scalar_mir, true)).to_equal("")
+			optimize_verified_mir(state.scalar_mir)
+			expect(verify_mir(state.scalar_mir, true)).to_equal("")
+			case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+			when Result::Ok(actual)
+				expect(actual).to_equal("true\ntrue\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("retains separately checked headers for stable peer Arrays") do
+		source := "def scan(values: Array<Integer>, other: Array<Integer>): Integer\nmut index := 0\nmut total := 0\nwhile index < values.size()\ntotal += values[index] + other[index] + other[index]\nindex += 1\nend\nreturn total\nend\ndef main()\nputs(scan([1, 2, 3], [2, 3, 4]))\nend\n"
+		mut state := array_loop_mir_check(source)
+		function_index := mir_function_index(state.scalar_mir, 0)
+		plan := state.scalar_mir.array_loops[function_index][0]
+		expect(plan.headers.size()).to_equal(1)
+		expect(plan.headers[0].accesses.size() > 1).to_be_true()
+		expect(plan.headers[0].nonnegative_accesses.size()).to_equal(2)
+		qbe_source := control_test_output(emit_qbe(state))
+		# The peer uses its own cached length but retains its own bounds branch.
+		expect(qbe_source.include?("call $trbn_fail(l $trbn_bounds_error, l 30)")).to_be_true()
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, qbe_source)
+			when Result::Ok(actual)
+				expect(actual).to_equal("24\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+		old := plan.headers[0]
+		state.scalar_mir.array_loops[function_index][0].headers[0] = MirArrayHeader.new(identity: old.identity, owner: 99999, accesses: old.accesses, nonnegative_accesses: old.nonnegative_accesses, bounded_accesses: old.bounded_accesses)
+		expect(verify_mir(state.scalar_mir, true).empty?()).to_be_false()
+		state.scalar_mir.array_loops[function_index][0].headers[0] = MirArrayHeader.new(identity: old.identity, owner: old.owner, accesses: old.accesses, nonnegative_accesses: [], bounded_accesses: old.bounded_accesses)
+		expect(verify_mir(state.scalar_mir, true).empty?()).to_be_false()
+	end
+
+	test("proves nested checked induction nonnegative without assuming an unknown seed") do
+		positive := "def scan(values: Array<Integer>, peer: Array<Integer>): Integer\nmut index := 0\nmut total := 0\nwhile index < values.size()\nmut other := index + 1\nwhile other < values.size()\ntotal += peer[other]\nother += 1\nend\nindex += 1\nend\nreturn total\nend\ndef main()\nputs(scan([1, 2, 3], [4, 5, 6]))\nend\n"
+		mut state := array_loop_mir_check(positive)
+		mut function_index := mir_function_index(state.scalar_mir, 0)
+		mut plan := state.scalar_mir.array_loops[function_index][0]
+		expect(plan.headers.size()).to_equal(2)
+		# The outer header can cover both the original and versioned inner
+		# access. Every covered index still requires the nonnegative proof.
+		expect(plan.headers[0].nonnegative_accesses.size() + plan.headers[1].nonnegative_accesses.size() > 0).to_be_true()
+		expect(control_test_output(emit_qbe(state)).include?("call $trbn_fail(l $trbn_bounds_error, l 30)")).to_be_true()
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+			when Result::Ok(actual)
+				expect(actual).to_equal("17\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+		unknown := "def scan(values: Array<Integer>, peer: Array<Integer>, start: Integer): Integer\nmut index := 0\nmut total := 0\nwhile index < values.size()\nmut other := start\nwhile other < values.size()\ntotal += peer[other]\nother += 1\nend\nindex += 1\nend\nreturn total\nend\ndef main()\nputs(scan([1, 2, 3], [4, 5, 6], -1))\nend\n"
+		state = array_loop_mir_check(unknown)
+		function_index = mir_function_index(state.scalar_mir, 0)
+		plan = state.scalar_mir.array_loops[function_index][0]
+		expect(plan.headers.size()).to_equal(2)
+		expect(plan.headers[0].nonnegative_accesses.size() + plan.headers[1].nonnegative_accesses.size()).to_equal(0)
+		if qbe != nil
+			case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+			when Result::Ok(actual)
+				expect(actual).to_equal("63\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("does not cache a peer Array rebound on the loop backedge") do
+		source := array_loop_mir_source("mut secondary := [1, 2, 3]\nwhile index < values.size()\ntotal += values[index] + secondary[index] + secondary[index]\nsecondary = values\nindex += 1\nend")
+		state := array_loop_mir_check(source)
+		function_index := mir_function_index(state.scalar_mir, 1)
+		expect(state.scalar_mir.array_loops[function_index].size()).to_equal(1)
+		expect(state.scalar_mir.array_loops[function_index][0].headers.size()).to_equal(0)
+	end
+
+	test("keeps checked assignment when its right-hand side shortens the Array") do
+		source := array_loop_mir_source("while index < values.size()\nvalues[index] = values.pop()\nindex += 1\nend")
+		state := array_loop_mir_check(source)
+		function_index := mir_function_index(state.scalar_mir, 1)
+		expect(state.scalar_mir.array_loops[function_index].size()).to_equal(0)
+		expect(control_test_output(emit_qbe(state)).include?("call $trbn_fail(l $trbn_bounds_error, l 30)")).to_be_true()
+	end
+
+	test("derives loop bounds from identities across nested branches and transfers") do
+		bodies := [
+			"while index < values.size()\ntotal += values[index]\nindex += 1\nend",
+			"while index < values.size()\nif index == 1\nindex += 1\nnext\nend\ntotal += values[index]\nif total > 10\nbreak\nend\nindex += 1\nend",
+			"while index < values.size()\nif index == 1\ntotal += values[index]\nelse\ntotal -= values[index]\nend\nindex += 1\nend",
+		]
+		bodies.each do |body|
+			state := array_loop_mir_check(array_loop_mir_source(body))
+			index := mir_function_index(state.scalar_mir, 1)
+			expect(state.scalar_mir.functions[index].kind).to_equal(3)
+			expect(state.scalar_mir.array_loops[index].size()).to_equal(1)
+			expect(state.scalar_mir.array_loops[index][0].accesses.size() > 0).to_be_true()
+		end
+	end
+
+	test("retains Array traversal proofs across verified pure math calls") do
+		source := "import trb/std/math\ndef sum(values: Array<Float>): Float\nmut index := 0\nmut total := 0.0\nwhile index < values.size()\ntotal += values[index] + Math.sqrt(4.0)\nindex += 1\nend\nreturn total\nend\ndef main()\nputs(sum([1.0, 2.0]) == 7.0)\nend\n"
+		state := array_loop_mir_check(source)
+		index := mir_function_index(state.scalar_mir, 0)
+		expect(state.scalar_mir.array_loops[index].size()).to_equal(1)
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+			when Result::Ok(actual)
+				expect(actual).to_equal("true\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("retains Array traversal proofs across verified failure-only scalar calls") do
+		source := "def denominator(index: Integer): Float\nreturn 1.0 / (index + 1)\nend\ndef sum(values: Array<Float>): Float\nmut index := 0\nmut total := 0.0\nwhile index < values.size()\ntotal += denominator(index) * values[index]\nindex += 1\nend\nreturn total\nend\ndef main()\nputs(sum([1.0, 2.0]))\nend\n"
+		state := array_loop_mir_check(source)
+		index := mir_function_index(state.scalar_mir, 1)
+		expect(state.scalar_mir.array_loops[index].size()).to_equal(1)
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+			when Result::Ok(actual)
+				expect(actual).to_equal("2.0\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("retains checks for different arrays changed indexes and header effects") do
+		bodies := [
+			"while index < values.size()\ntotal += other[index]\nindex += 1\nend",
+			"while index < values.size()\nindex += 1\ntotal += values[index]\nend",
+			"while index < values.size()\ntotal += values[index]\nindex -= 1\nend",
+			"while index < values.size()\ntotal += values[index]\nindex += 2\nend",
+			"while index < values.size()\ntouch(values)\ntotal += values[index]\nindex += 1\nend",
+			"while index < values.size()\nvalues.push(1)\ntotal += values[index]\nindex += 1\nend",
+			"while index < values.size()\nvalues = [1]\ntotal += values[index]\nindex += 1\nend",
+			"index = -1\nwhile index < values.size()\ntotal += values[index]\nindex += 1\nend",
+		]
+		bodies.each do |body|
+			state := array_loop_mir_check(array_loop_mir_source(body))
+			index := mir_function_index(state.scalar_mir, 1)
+			expect(state.scalar_mir.functions[index].kind).to_equal(3)
+			if body == bodies[0]
+				expect(state.scalar_mir.array_loops[index].size()).to_equal(2)
+				expect(state.scalar_mir.array_loops[index][0].accesses.size()).to_equal(0)
+				expect(state.scalar_mir.array_loops[index][1].headers[0].bounded_accesses.size()).to_equal(0)
+			elsif body == bodies[1] || body == bodies[2] || body == bodies[3] || body == bodies[7]
+				expect(state.scalar_mir.array_loops[index].size()).to_equal(1)
+				expect(state.scalar_mir.array_loops[index][0].accesses.size()).to_equal(0)
+				expect(state.scalar_mir.array_loops[index][0].headers[0].bounded_accesses.size()).to_equal(0)
+			else
+				expect(state.scalar_mir.array_loops[index].size()).to_equal(0)
+			end
+			expect(control_test_output(emit_qbe(state)).include?("call $trbn_fail(l $trbn_bounds_error, l 30)")).to_be_true()
+		end
+	end
+
+	test("rejects forged and stale plans without depending on source text") do
+		mut mode := 0
+		while mode < 9
+			mut state := array_loop_mir_check(array_loop_mir_source("while index < values.size()\ntotal += values[index]\nindex += 1\nend"))
+			index := mir_function_index(state.scalar_mir, 1)
+			old := state.scalar_mir.array_loops[index][0]
+			mut header := old.header
+			mut preheader := old.preheader
+			mut owner := old.owner
+			mut length := old.length
+			mut accesses := old.accesses
+			if mode == 0
+				header += 1
+			elsif mode == 1
+				preheader = old.header
+			elsif mode == 2
+				owner = 99999
+			elsif mode == 3
+				length = old.accesses[0]
+			elsif mode == 4
+				accesses = []
+			elsif mode == 5
+				load := state.scalar_mir.instructions[old.accesses[0]]
+				state.scalar_mir.instructions[old.accesses[0]] = compiler_test_instruction_with_cell(load, 3, load.result)
+			elsif mode == 6
+				# A stale induction fact must not survive a changed update.
+				state.scalar_mir.instructions.each do |instruction|
+					if instruction.kind == 6 && state.scalar_mir.literal_texts[instruction.payload] == "1"
+						state.scalar_mir.literal_texts[instruction.payload] = "-1"
+					end
+				end
+			elsif mode == 7
+				function := state.scalar_mir.functions[index]
+				mut block_index := function.block_start
+				while block_index < function.block_start + function.block_count
+					block := state.scalar_mir.blocks[block_index]
+					if block.id == old.header
+						mut position := block.instruction_start
+						while position < block.instruction_start + block.instruction_count
+							instruction := state.scalar_mir.instructions[position]
+							if instruction.result == block.condition
+								state.scalar_mir.instructions[position] = compiler_test_instruction_with_cell(instruction, 4, 9)
+							end
+							position += 1
+						end
+					end
+					block_index += 1
+				end
+			else
+				state.scalar_mir.array_loops.push([])
+			end
+			state.scalar_mir.array_loops[index][0] = MirArrayLoop.new(header: header, preheader: preheader, owner: owner, length: length, accesses: accesses, headers: old.headers, reserved_pushes: old.reserved_pushes, cached_values: old.cached_values, peel_body: old.peel_body, peel_nonempty: old.peel_nonempty)
+			expect(verify_mir(state.scalar_mir, true).empty?()).to_be_false()
+			mode += 1
+		end
+	end
+
+	test("executes Integer and Float reductions after source erasure and block reordering") do
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			source := "def sum(values: Array<Integer>): Integer\nmut index := 0\nmut total := 0\nwhile index < values.size()\ntotal += values[index]\nindex += 1\nend\nreturn total\nend\ndef float_sum(values: Array<Float>): Float\nmut index := 0\nmut total := 0.5\nwhile index < values.size()\ntotal += values[index]\nindex += 1\nend\nreturn total\nend\ndef main()\nempty: Array<Integer> := []\nputs(sum(empty))\nputs(sum([9]))\nputs(sum([1, 2, 3]))\nempty_f: Array<Float> := []\nputs(float_sum(empty_f) == 0.5)\nputs(float_sum([1.0, 2.0]) == 3.5)\nend\n"
+			mut state := array_loop_mir_check(source)
+			expect(state.scalar_mir.array_loops[0].size()).to_equal(1)
+			expect(state.scalar_mir.array_loops[1].size()).to_equal(1)
+			before := control_test_output(emit_qbe(state))
+			intrinsic_mir_erase(state)
+			expect(control_test_output(emit_qbe(state))).to_equal(before)
+			state.scalar_mir.functions.each do |function|
+				mut left := function.block_start
+				mut right := left + function.block_count - 1
+				while left < right
+					saved := state.scalar_mir.blocks[left]
+					state.scalar_mir.blocks[left] = state.scalar_mir.blocks[right]
+					state.scalar_mir.blocks[right] = saved
+					left += 1
+					right -= 1
+				end
+			end
+			expect(verify_mir(state.scalar_mir, true)).to_equal("")
+			optimize_verified_mir(state.scalar_mir)
+			expect(verify_mir(state.scalar_mir, true)).to_equal("")
+			case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+			when Result::Ok(actual)
+				expect(actual).to_equal("0\n9\n6\ntrue\ntrue\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+end

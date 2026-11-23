@@ -1,0 +1,22 @@
+{
+  "format": "type-rb-bootstrap-snapshot",
+  "version": 1,
+  "module": "example/main",
+  "sources": [{ "id": "main", "path": "src/main.trb" }],
+  "functions": [{
+    "id": "example/main#main",
+    "name": "main",
+    "result": "Integer",
+    "entry": "entry",
+    "origin": { "source": "main", "startLine": 1, "startColumn": 1, "endLine": 1, "endColumn": 4 },
+    "blocks": [{
+      "id": "entry",
+      "origin": { "source": "main", "startLine": 1, "startColumn": 1, "endLine": 1, "endColumn": 4 },
+      "instructions": [{
+        "op": "return",
+        "value": "missing",
+        "origin": { "source": "main", "startLine": 1, "startColumn": 1, "endLine": 1, "endColumn": 4 }
+      }]
+    }]
+  }]
+}

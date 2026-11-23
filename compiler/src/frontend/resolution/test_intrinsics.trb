@@ -1,0 +1,85 @@
+import { test_outcome_names, test_outcome_types } from mir/model/test_contract
+import { test_provider_function, test_provider_kind } from frontend/providers/test_declarations
+import { callable_type } from frontend/types/callable_types
+import { find_record_type } from frontend/resolution/type_resolution
+import { standard_source_test_host } from state/standard_source_kinds
+import { CompilerState } from state/state
+import { load_integer, load_string, sparse_integer_at } from support/storage
+
+def standard_test_fail(state: CompilerState, function: Integer): Boolean
+	if function < 0 || function >= state.declarations.function_count[0]
+		return false
+	end
+	owner := load_integer(state.declarations.function_modules, function)
+	if sparse_integer_at(state.standard_modules, owner) != standard_source_test_host()
+		return false
+	end
+	state.type_resolution.generic_function_instances.each do |instance|
+		if instance.function == function
+			return test_provider_kind(state, instance.definition) == 17
+		end
+	end
+	return false
+end
+
+def standard_test_capture(state: CompilerState, function: Integer): Boolean
+	if function < 0 || function >= state.declarations.function_count[0]
+		return false
+	end
+	owner := load_integer(state.declarations.function_modules, function)
+	if sparse_integer_at(state.standard_modules, owner) != standard_source_test_host() || load_string(state.declarations.function_names, function) != "capture" || load_integer(state.declarations.function_parameter_counts, function) != 4 || load_integer(state.declarations.function_body_starts, function) != load_integer(state.declarations.function_body_ends, function) || sparse_integer_at(state.parsed.function_expression_bodies, function) != 0
+		return false
+	end
+	result := find_record_type(state, load_string(state.declarations.function_result_types, function))
+	if result < 0 || load_integer(state.declarations.record_modules, result) != owner || load_string(state.declarations.record_names, result) != "TestOutcome" || load_integer(state.declarations.record_field_counts, result) != 5
+		return false
+	end
+	fields := load_integer(state.declarations.record_field_starts, result)
+	names := test_outcome_names()
+	types := test_outcome_types()
+	mut index := 0
+	while index < 5
+		if load_string(state.declarations.field_names, fields + index) != names[index] || load_string(state.declarations.field_types, fields + index) != types[index]
+			return false
+		end
+		index += 1
+	end
+	parameter_names := ["action", "path", "line", "column"]
+	parameter_types := [callable_type([], "Void"), "String", "Integer", "Integer"]
+	start := load_integer(state.declarations.function_parameter_starts, function)
+	index = 0
+	while index < 4
+		parameter := start + index
+		if load_string(state.declarations.parameter_names, parameter) != parameter_names[index] || load_string(state.declarations.parameter_types, parameter) != parameter_types[index] || load_integer(state.declarations.parameter_mutable, parameter) != 0 || load_integer(state.declarations.parameter_named_only, parameter) != 0 || sparse_integer_at(state.parsed.parameter_defaults, parameter) > 0
+			return false
+		end
+		index += 1
+	end
+	return true
+end
+
+def standard_test_equal(state: CompilerState, function: Integer): Boolean
+	return test_provider_function(state, function) == 18
+end
+def standard_test_finish(state: CompilerState, function: Integer): Boolean
+	if function < 0 || function >= state.declarations.function_count[0]
+		return false
+	end
+	owner := load_integer(state.declarations.function_modules, function)
+	if sparse_integer_at(state.standard_modules, owner) != standard_source_test_host() || load_string(state.declarations.function_names, function) != "finish" || load_integer(state.declarations.function_parameter_counts, function) != 1 || load_string(state.declarations.function_result_types, function) != "Void" || load_integer(state.declarations.function_body_starts, function) != load_integer(state.declarations.function_body_ends, function) || sparse_integer_at(state.parsed.function_expression_bodies, function) != 0
+		return false
+	end
+	parameter := load_integer(state.declarations.function_parameter_starts, function)
+	if load_string(state.declarations.parameter_names, parameter) != "status" || load_string(state.declarations.parameter_types, parameter) != "Integer" || load_integer(state.declarations.parameter_mutable, parameter) != 0 || load_integer(state.declarations.parameter_named_only, parameter) != 0 || sparse_integer_at(state.parsed.parameter_defaults, parameter) > 0
+		return false
+	end
+	return true
+end
+
+def standard_test_inspect(state: CompilerState, function: Integer): Boolean
+	return test_provider_function(state, function) == 19
+end
+
+def standard_test_scalar_kind(state: CompilerState, function: Integer): Boolean
+	return test_provider_function(state, function) == 20
+end

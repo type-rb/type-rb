@@ -1,0 +1,73 @@
+import { compiler_literal_byte } from frontend/syntax/string_escapes
+import { builder_append, builder_append_bytes, builder_append_codepoint, builder_clear, builder_empty, builder_from_string, builder_length, builder_new } from mir/model/string_builder_contract
+import { ReplStore, repl_boolean, repl_integer, repl_string, repl_value } from repl/model
+import { native_cli_byte_length, native_cli_byte, native_cli_character } from host
+
+# Aliases retain one pool node. Immutable text fragments avoid repeated prefix
+# copies during append; snapshots join them before counting Unicode characters.
+def repl_builder_snapshot(store: ReplStore, parts: Array<Integer>): String
+	mut fragments: Array<String> := []
+	parts.each { |part| fragments.push(store.texts[part]) }
+	return fragments.join("")
+end
+
+def repl_builder_append(mut store: ReplStore, receiver: Integer, text: Integer)
+	length := native_cli_byte_length(store.texts[text])
+	if length > 0
+		store.children[receiver].push(text)
+		store.integers[receiver] += length
+	end
+end
+
+def repl_builder_call(mut store: ReplStore, kind: Integer, arguments: Array<Integer>): Integer
+	if kind == builder_new()
+		return repl_value(store, "StringBuilder", 0, 0.0, "", [])
+	elsif kind == builder_from_string()
+		created := repl_value(store, "StringBuilder", 0, 0.0, "", [])
+		repl_builder_append(store, created, arguments[0])
+		return created
+	end
+	receiver := arguments[0]
+	if kind == builder_append_bytes()
+		bytes := store.texts[arguments[1]]
+		start := store.integers[arguments[2]]
+		finish := store.integers[arguments[3]]
+		if start < 0 || finish < start || finish > native_cli_byte_length(bytes)
+			store.error[0] = "StringBuilder byte range is out of bounds"
+			return 0
+		end
+		# Preserve raw octets until joining, including split UTF-8 fragments.
+		mut index := start
+		mut fragments: Array<String> := []
+		while index < finish
+			fragments.push(compiler_literal_byte(native_cli_byte(bytes, index)))
+			index += 1
+		end
+		text := repl_string(store, fragments.join(""))
+		repl_builder_append(store, receiver, text)
+		return 0
+	elsif kind == builder_append()
+		repl_builder_append(store, receiver, arguments[1])
+		return 0
+	elsif kind == builder_append_codepoint()
+		point := store.integers[arguments[1]]
+		if point < 0 || point > 1114111 || (point >= 55296 && point <= 57343)
+			store.error[0] = "invalid Unicode code point"
+			return 0
+		end
+		text := repl_string(store, native_cli_character(point))
+		repl_builder_append(store, receiver, text)
+		return 0
+	elsif kind == builder_clear()
+		store.children[receiver] = []
+		store.integers[receiver] = 0
+		return 0
+	elsif kind == builder_empty()
+		return repl_boolean(store, store.integers[receiver] == 0)
+	end
+	snapshot := repl_builder_snapshot(store, store.children[receiver])
+	if kind == builder_length()
+		return repl_integer(store, snapshot.size())
+	end
+	return repl_string(store, snapshot)
+end

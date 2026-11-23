@@ -1,0 +1,13 @@
+def product(left: Integer, right: Integer): Integer
+	return left * right
+end
+
+def main()
+	values := [94906266]
+	mut index := 0
+	while index < values.size()
+		puts(product(values[index], values[index]).to_s())
+		index += 1
+	end
+	return
+end

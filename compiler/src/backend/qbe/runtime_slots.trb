@@ -1,0 +1,35 @@
+# Shared output requirements retain their existing array layout and aliasing.
+# Slot 3 is reserved. The process runtime also supplies scalar conversions.
+# Hash mode has its own encoding behind qbe_require_hash; other cells are flags.
+
+def qbe_runtime_float_array_slot(): Integer
+	return 0
+end
+
+def qbe_runtime_process_slot(): Integer
+	return 1
+end
+
+def qbe_runtime_static_strings_slot(): Integer
+	return 2
+end
+
+def qbe_runtime_boolean_output_slot(): Integer
+	return 4
+end
+
+def qbe_runtime_hash_mode_slot(): Integer
+	return 5
+end
+
+def qbe_runtime_float_string_slot(): Integer
+	return 6
+end
+
+def qbe_runtime_integer_power_slot(): Integer
+	return 7
+end
+
+def qbe_runtime_hash_concat_slot(): Integer
+	return 8
+end

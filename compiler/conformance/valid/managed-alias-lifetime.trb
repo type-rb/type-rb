@@ -1,0 +1,53 @@
+record Entry
+	text: String
+end
+
+def make_entries(): Array<Entry>
+	return [Entry.new(text: (123456).to_s() + ":kept")]
+end
+
+def churn(): String
+	mut text := ""
+	mut index := 0
+	while index < 40000
+		text = (index).to_s()
+		index += 1
+	end
+	return text
+end
+
+def keep_record(mut entries: Array<Entry>): String
+	kept := entries[0]
+	entries[0] = Entry.new(text: "replacement")
+	churn()
+	return kept.text
+end
+
+def keep_field(mut entries: Array<Entry>): String
+	kept := entries[0].text
+	entries[0] = Entry.new(text: "replacement")
+	churn()
+	return kept
+end
+
+def replace(mut entries: Array<Entry>): String
+	entries[0] = Entry.new(text: "replacement")
+	return churn()
+end
+
+def first(kept: String, ignored: String): String
+	return kept
+end
+
+def keep_argument(mut entries: Array<Entry>): String
+	return first(entries[0].text, replace(entries))
+end
+
+def main()
+	mut entries := make_entries()
+	puts(keep_record(entries))
+	entries = make_entries()
+	puts(keep_field(entries))
+	entries = make_entries()
+	puts(keep_argument(entries))
+end

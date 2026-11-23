@@ -1,0 +1,8 @@
+interface Named
+name(): String
+end
+class Label implements Named
+end
+def main()
+Label.new()
+end

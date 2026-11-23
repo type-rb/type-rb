@@ -1,0 +1,70 @@
+record Samples
+	values: Array<Integer>
+end
+
+def accumulate(samples: Samples, mut output: Array<Integer>)
+	values := samples.values
+	mut index := 0
+	while index < values.size()
+		mut inner := 0
+		mut total := 0
+		while inner < values.size()
+			total += values[inner]
+			inner += 1
+		end
+		output[index] = total
+		index += 1
+	end
+	return
+end
+
+def local_last(samples: Samples): Integer
+	values := samples.values
+	return values[-1]
+end
+
+def grow(mut values: Array<Integer>)
+	values.push(9)
+	return
+end
+
+def observe_growth(mut input: Array<Integer>): Integer
+	values := input
+	before := values[-1]
+	grow(input)
+	return before + values[-1]
+end
+
+def recycled(mut input: Array<Integer>, other: Array<Integer>): Integer
+	mut index := 0
+	mut total := 0
+	while index < 1
+		values := input
+		total += values[-1]
+		index += 1
+	end
+	values := other
+	return total + values[-1]
+end
+
+def main()
+	mut input := [1, 2, 3]
+	samples := Samples.new(values: input)
+	mut output := [0, 0, 0]
+	accumulate(samples, output)
+	puts(output[0].to_s())
+	puts(output[2].to_s())
+	puts(local_last(samples).to_s())
+	accumulate(samples, input)
+	puts(input[0].to_s())
+	puts(input[1].to_s())
+	puts(input[2].to_s())
+	puts(observe_growth(input).to_s())
+	other := [4, 5]
+	puts(recycled(input, other).to_s())
+	empty: Array<Integer> := []
+	mut empty_output: Array<Integer> := []
+	accumulate(Samples.new(values: empty), empty_output)
+	puts(empty_output.size().to_s())
+	return
+end

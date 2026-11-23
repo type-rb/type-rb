@@ -1,0 +1,109 @@
+import { check, emit_qbe } from compiler
+import { emit_filesystem_io_runtime } from backend/qbe/runtime/filesystem_io
+import { emit_filesystem_values_runtime } from backend/qbe/runtime/filesystem_values
+import { qbe_output_new } from backend/qbe/output
+import { output_source } from testing/compiler
+import { logical_checked_source } from testing/pipeline
+import { logical_run_qbe_arguments } from testing/qbe_runner
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+def filesystem_values_test_runtime(): String
+	mut state := logical_checked_source("def main()\nputs(\"\".to_bytes().valid_utf8?())\nend\n")
+	expect(check(state)).to_be_true()
+	mut output := qbe_output_new(16, [])
+	emit_filesystem_io_runtime(output)
+	emit_filesystem_values_runtime(output)
+	mut runtime := output_source(emit_qbe(state)).split("export function w $main(").join("function w $unused_main(") + output_source(output)
+	allocation := "function l $trbn_gc_alloc(l %descriptor, l %payload_size, l %reserved_size) {\n@start"
+	expect(runtime.split(allocation).size()).to_equal(2)
+	runtime = runtime.split(allocation).join(allocation + "\n call $trbn_gc_collect(w 0)")
+	return runtime
+end
+
+def filesystem_values_run(runtime: String, fixture: String, arguments: Array<String>, expected: String)
+	qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+	if qbe == nil
+		return
+	end
+	case logical_run_qbe_arguments(qbe, runtime + fixture, arguments)
+	when Result::Ok(actual)
+		expect(actual).to_equal(expected)
+	when Result::Err(error)
+		puts(error)
+		expect(false).to_be_true()
+	end
+end
+
+def filesystem_scope_values_test()
+	qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+	if qbe == nil
+		return
+	end
+	allocated := case Process.run("/usr/bin/mktemp", ["-d", "/tmp/type-rb-native-file-scope.XXXXXX"])
+	when Result::Ok(value)
+		value
+	when Result::Err(error)
+		puts(error.message)
+		expect(false).to_be_true()
+		return
+	end
+	expect(allocated.success).to_be_true()
+	workspace := allocated.stdout.strip()
+	runtime := filesystem_values_test_runtime().split("call $close(").join("call $test_close(")
+	filesystem_values_run(runtime, "\ndata $test_closes = align 8 { l 0 }\ndata $test_close_failure = align 8 { l 0 }\ndata $test_body_failure = align 8 { l 0 }\ndata $test_errors = align 8 { l 0 }\ndata $test_bodies = align 8 { l 0 }\ndata $test_last_operation = align 8 { l -1 }\ndata $test_closed_fd = align 8 { l -1 }\ndata $test_result_error = align 8 { l 1, l 0, l 16 }\ndata $test_result_success = align 8 { l 1, l 1, l 16, l 16 }\ndata $test_format = { b \"%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld\\n\", b 0 }\ndata $test_nul = align 8 { l 0, l 3, l 3, b 97, b 0, b 98, b 0 }\ndata $test_recovery_closure = align 8 { l 0, l $test_recover }\ndata $test_recovery_path = align 8 { l 0 }\ndata $test_restore = align 8 { l 0, l 37, l 73 }\n\nfunction w $test_close(w %fd) {\n@start\n %count =l loadl $test_closes\n %next =l add %count, 1\n storel %next, $test_closes\n %wide =l extsw %fd\n storel %wide, $test_closed_fd\n %result =w call $close(w %fd)\n %failed =l loadl $test_close_failure\n jnz %failed, @fail, @done\n@fail\n %function =l loadl $trbn_fs_errno_function\n %address =l call %function()\n storew 5, %address\n ret -1\n@done\n ret %result\n}\n\nfunction l $test_error(l %path, l %operation, l %status) {\n@start\n %count =l loadl $test_errors\n %next =l add %count, 1\n storel %next, $test_errors\n storel %operation, $test_last_operation\n %result =l call $trbn_gc_alloc(l $test_result_error, l 16, l 0)\n %tag =l add %result, 8\n storel 37, %tag\n %payload =l add %result, 16\n storel %status, %payload\n ret %result\n}\n\nfunction l $test_body(l %file, l %captures) {\n@start\n %count =l loadl $test_bodies\n %next =l add %count, 1\n storel %next, $test_bodies\n %failure =l loadl $test_body_failure\n jnz %failure, @failed, @success\n@failed\n %error =l call $test_error(l 0, l 2, l 99)\n ret %error\n@success\n call $trbn_gc_collect(w 0)\n %path_slot =l add %file, 8\n %path =l loadl %path_slot\n %result =l call $trbn_gc_alloc(l $test_result_success, l 16, l 0)\n %tag =l add %result, 8\n storel 23, %tag\n %payload =l add %result, 16\n storel %path, %payload\n ret %result\n}\n\nfunction l $test_nested(l %file, l %captures) {\n@start\n %path_slot =l add %file, 8\n %path =l loadl %path_slot\n %result =l call $trbn_file_scope(l %path, l 0, l $test_body, l 0, l $test_error, l 37)\n %fd_slot =l add %file, 16\n %fd =w loadw %fd_slot\n %flags =w call $fcntl(w %fd, w 1, ..., w 0)\n %open =w csgew %flags, 0\n jnz %open, @done, @bad\n@done\n ret %result\n@bad\n call $abort()\n hlt\n}\n\nfunction l $test_panic(l %file, l %captures) {\n@start\n call $trbn_unwind()\n hlt\n}\nfunction l $test_recover(l %closure) {\n@start\n %path =l loadl $test_recovery_path\n %result =l call $trbn_file_scope(l %path, l 0, l $test_panic, l 0, l $test_error, l 37)\n ret %result\n}\n\nfunction $test_report(l %result, l %path) {\n@start\n call $trbn_gc_collect(w 0)\n %tag_slot =l add %result, 8\n %tag =l loadl %tag_slot\n %payload_slot =l add %result, 16\n %payload =l loadl %payload_slot\n %success =w ceql %tag, 23\n jnz %success, @path, @error\n@path\n %same =l call $trbn_string_equal(l %payload, l %path)\n jmp @counts\n@error\n jmp @counts\n@counts\n %value =l phi @path %same, @error %payload\n %closes =l loadl $test_closes\n %bodies =l loadl $test_bodies\n %errors =l loadl $test_errors\n %operation =l loadl $test_last_operation\n %roots =l loadl $trbn_gc_temp_count\n %head =l loadl $trbn_resource_scope\n %fd =w loadw $test_closed_fd\n %flags =w call $fcntl(w %fd, w 1, ..., w 0)\n %closed =w ceqw %flags, -1\n jnz %closed, @report, @bad\n@bad\n call $abort()\n hlt\n@report\n call $trbn_gc_temp_reset(l 0)\n call $trbn_gc_collect(w 0)\n %live =l loadl $trbn_gc_heap_bytes\n call $printf(l $test_format, ..., l %tag, l %value, l %closes, l %bodies, l %errors, l %operation, l %roots, l %head, l %live)\n ret\n}\n\nexport function w $main(w %argc, l %argv) {\n@start\n %deadline =w call $alarm(w 10)\n call $trbn_gc_trace_initialize()\n %argument_slot =l add %argv, 8\n %argument =l loadl %argument_slot\n\n %path0 =l call $trbn_string_from_c(l %argument)\n storel 0, $test_body_failure\n storel 0, $test_close_failure\n %result0 =l call $trbn_file_scope(l %path0, l 2, l $test_body, l 0, l $test_error, l 37)\n call $test_report(l %result0, l %path0)\n\n %path1 =l call $trbn_string_from_c(l %argument)\n storel 1, $test_body_failure\n storel 0, $test_close_failure\n %result1 =l call $trbn_file_scope(l %path1, l 0, l $test_body, l 0, l $test_error, l 37)\n call $test_report(l %result1, l %path1)\n\n %path2 =l call $trbn_string_from_c(l %argument)\n storel 0, $test_body_failure\n storel 1, $test_close_failure\n %result2 =l call $trbn_file_scope(l %path2, l 0, l $test_body, l 0, l $test_error, l 37)\n call $test_report(l %result2, l %path2)\n\n %path3 =l call $trbn_string_from_c(l %argument)\n storel 1, $test_body_failure\n storel 1, $test_close_failure\n %result3 =l call $trbn_file_scope(l %path3, l 0, l $test_body, l 0, l $test_error, l 37)\n call $test_report(l %result3, l %path3)\n\n %path4 =l call $trbn_string_from_c(l %argument)\n storel 0, $test_body_failure\n storel 0, $test_close_failure\n %result4 =l call $trbn_file_scope(l %path4, l 2, l $test_body, l 0, l $test_error, l 37)\n call $test_report(l %result4, l %path4)\n\n %path5 =l call $trbn_string_from_c(l %argument)\n storel 0, $test_body_failure\n storel 0, $test_close_failure\n %result5 =l call $trbn_file_scope(l %path5, l 0, l $test_nested, l 0, l $test_error, l 37)\n call $test_report(l %result5, l %path5)\n\n %invalid =l call $trbn_file_scope(l $test_nul, l 0, l $test_body, l 0, l $test_error, l 37)\n call $test_report(l %invalid, l $test_nul)\n %recovery_path =l call $trbn_string_from_c(l %argument)\n storel %recovery_path, $test_recovery_path\n %recovered =l call $trbn_runtime_recover_l(l $test_recovery_closure, l $test_restore)\n call $test_report(l %recovered, l %recovery_path)\n %removed =w call $unlink(l %argument)\n call $trbn_gc_finish()\n ret 0\n}\n", [workspace + "/file"], "23,1,1,1,0,-1,2,0,0\n37,99,2,2,1,2,2,0,0\n37,5,3,3,2,1,2,0,0\n37,99,4,4,3,2,2,0,0\n37,17,4,4,4,0,2,0,0\n23,1,6,5,4,0,2,0,0\n37,-1,6,5,5,0,1,0,0\n37,73,7,5,5,0,1,0,0\n")
+	case Process.run("/bin/rm", ["-r", workspace])
+	when Result::Ok(value)
+		expect(value.success).to_be_true()
+	when Result::Err(error)
+		puts(error.message)
+		expect(false).to_be_true()
+	end
+end
+
+def filesystem_value_methods_test()
+	qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+	if qbe == nil
+		return
+	end
+	allocated := case Process.run("/usr/bin/mktemp", ["-d", "/tmp/type-rb-native-file-scope.XXXXXX"])
+	when Result::Ok(value)
+		value
+	when Result::Err(error)
+		puts(error.message)
+		expect(false).to_be_true()
+		return
+	end
+	expect(allocated.success).to_be_true()
+	workspace := allocated.stdout.strip()
+	runtime := filesystem_values_test_runtime()
+	filesystem_values_run(runtime, "\ndata $test_payload = align 8 { l 0, l 8, l 8, b \"abcdefgh\", b 0 }\ndata $test_format = { b \"%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld,%ld\\n\", b 0 }\nexport function w $main(w %argc, l %argv) {\n@start\n call $trbn_gc_trace_initialize()\n %path_slot =l add %argv, 8\n %raw =l loadl %path_slot\n %path =l call $trbn_string_from_c(l %raw)\n %scope =l alloc8 16\n %out =l alloc8 8\n %created =l call $trbn_file_begin(l %scope, l %path, l 2, l %out)\n jnz %created, @bad, @write\n@write\n %writer =l loadl %out\n %written =l call $trbn_file_write_value(l %writer, l $test_payload)\n %closed_writer =l call $trbn_file_end(l %scope, l %writer)\n %opened =l call $trbn_file_begin(l %scope, l %path, l 0, l %out)\n jnz %opened, @bad, @read\n@read\n %file =l loadl %out\n %negative =l call $trbn_file_read_value(l %file, l -1, l 0, l %out)\n %over =l call $trbn_file_read_value(l %file, l 2, l 0, l %out)\n %readonly =l call $trbn_file_write_value(l %file, l $test_payload)\n %read =l call $trbn_file_read_value(l %file, l 10, l 1, l %out)\n %text =l loadl %out\n jnz %text, @inspect, @bad\n@inspect\n call $trbn_gc_collect(w 0)\n %length_slot =l add %text, 8\n %length =l loadl %length_slot\n %data =l add %text, 24\n %first =w loadub %data\n %wide =l extuw %first\n %empty =l call $trbn_file_read_value(l %file, l 0, l 0, l %out)\n %empty_value =l loadl %out\n jnz %empty_value, @eof, @bad\n@eof\n %empty_slot =l add %empty_value, 8\n %empty_size =l loadl %empty_slot\n %closed_reader =l call $trbn_file_end(l %scope, l %file)\n %removed =w call $unlink(l %raw)\n call $trbn_gc_temp_reset(l 0)\n call $trbn_gc_collect(w 0)\n %live =l loadl $trbn_gc_heap_bytes\n call $printf(l $test_format, ..., l %written, l %closed_writer, l %opened, l %negative, l %over, l %readonly, l %read, l %length, l %wide, l %empty, l %empty_size, l %live)\n call $trbn_gc_finish()\n ret 0\n@bad\n call $abort()\n hlt\n}\n", [workspace + "/file"], "0,0,0,-5,-6,9,0,5,100,0,0,0\n")
+	case Process.run("/bin/rm", ["-r", workspace])
+	when Result::Ok(value)
+		expect(value.success).to_be_true()
+	when Result::Err(error)
+		puts(error.message)
+		expect(false).to_be_true()
+	end
+end
+
+describe("Scoped filesystem managed values") do
+	test("bounds partial reads and preserves exact allocation sizes under collection") do
+		runtime := filesystem_values_test_runtime().split("call $trbn_file_read_into(").join("call $test_read(")
+		filesystem_values_run(runtime, "\ndata $test_source = align 8 { l 0 }\ndata $test_length = align 8 { l 0 }\ndata $test_cursor = align 8 { l 0 }\ndata $test_failure = align 8 { l 0 }\ndata $test_format = { b \"%ld,%ld,%ld,%ld,%ld,%ld\\n\", b 0 }\ndata $test_mock_file = align 8 { l 0, l 0, l 41 }\nfunction l $test_read(w %fd, l %out, l %requested) {\n@start\n %cursor =l loadl $test_cursor\n %failure =l loadl $test_failure\n %after =w csgel %cursor, 50\n %broken =w and %failure, %after\n jnz %broken, @fail, @bound\n@fail\n ret -5\n@bound\n %length =l loadl $test_length\n %remaining =l sub %length, %cursor\n %smaller =w culel %remaining, %requested\n jnz %smaller, @tail, @requested\n@tail\n jmp @quantum\n@requested\n jmp @quantum\n@quantum\n %count =l phi @tail %remaining, @requested %requested\n %short =w culel %count, 23\n jnz %short, @short, @part\n@short\n jmp @copy\n@part\n jmp @copy\n@copy\n %take =l phi @short %count, @part 23\n %source =l loadl $test_source\n %data =l add %source, %cursor\n call $memcpy(l %out, l %data, l %take)\n %next =l add %cursor, %take\n storel %next, $test_cursor\n ret %take\n}\nfunction $test_case(l %length, l %limit, l %text) {\n@start\n storel %length, $test_length\n storel 0, $test_cursor\n %out =l alloc8 8\n %status =l call $trbn_file_read_value(l $test_mock_file, l %limit, l %text, l %out)\n %value =l loadl %out\n %roots =l loadl $trbn_gc_temp_count\n %cursor =l loadl $test_cursor\n jnz %value, @value, @empty\n@value\n call $trbn_gc_collect(w 0)\n %length_slot =l add %value, 8\n %actual_length =l loadl %length_slot\n %data =l add %value, 24\n %source =l loadl $test_source\n %compare =w call $memcmp(l %data, l %source, l %actual_length)\n %end =l add %data, %actual_length\n %nul =w loadub %end\n %difference =w or %compare, %nul\n %difference_wide =l extuw %difference\n jmp @report\n@empty\n jmp @report\n@report\n %size =l phi @value %actual_length, @empty -1\n %bytes =l phi @value %difference_wide, @empty 0\n call $trbn_gc_temp_reset(l 0)\n call $trbn_gc_collect(w 0)\n %live =l loadl $trbn_gc_heap_bytes\n call $printf(l $test_format, ..., l %status, l %cursor, l %size, l %bytes, l %roots, l %live)\n ret\n}\n\nexport function w $main() {\n@start\n call $trbn_gc_trace_initialize()\n %storage =l alloc8 12000\n storel %storage, $test_source\n call $memset(l %storage, w 65, l 12000)\n call $test_case(l 0, l 0, l 0)\n call $test_case(l 0, l 1, l 0)\n call $test_case(l 0, l 9007199254740991, l 0)\n call $test_case(l 1, l 0, l 0)\n call $test_case(l 1, l 1, l 0)\n call $test_case(l 1, l 2, l 0)\n call $test_case(l 1, l 9007199254740991, l 0)\n call $test_case(l 63, l 0, l 0)\n call $test_case(l 63, l 62, l 0)\n call $test_case(l 63, l 63, l 0)\n call $test_case(l 63, l 64, l 0)\n call $test_case(l 63, l 9007199254740991, l 0)\n call $test_case(l 223, l 0, l 0)\n call $test_case(l 223, l 222, l 0)\n call $test_case(l 223, l 223, l 0)\n call $test_case(l 223, l 224, l 0)\n call $test_case(l 223, l 9007199254740991, l 0)\n call $test_case(l 224, l 0, l 0)\n call $test_case(l 224, l 223, l 0)\n call $test_case(l 224, l 224, l 0)\n call $test_case(l 224, l 225, l 0)\n call $test_case(l 224, l 9007199254740991, l 0)\n call $test_case(l 255, l 0, l 0)\n call $test_case(l 255, l 254, l 0)\n call $test_case(l 255, l 255, l 0)\n call $test_case(l 255, l 256, l 0)\n call $test_case(l 255, l 9007199254740991, l 0)\n call $test_case(l 256, l 0, l 0)\n call $test_case(l 256, l 255, l 0)\n call $test_case(l 256, l 256, l 0)\n call $test_case(l 256, l 257, l 0)\n call $test_case(l 256, l 9007199254740991, l 0)\n call $test_case(l 4095, l 0, l 0)\n call $test_case(l 4095, l 4094, l 0)\n call $test_case(l 4095, l 4095, l 0)\n call $test_case(l 4095, l 4096, l 0)\n call $test_case(l 4095, l 9007199254740991, l 0)\n call $test_case(l 4096, l 0, l 0)\n call $test_case(l 4096, l 4095, l 0)\n call $test_case(l 4096, l 4096, l 0)\n call $test_case(l 4096, l 4097, l 0)\n call $test_case(l 4096, l 9007199254740991, l 0)\n call $test_case(l 4097, l 0, l 0)\n call $test_case(l 4097, l 4096, l 0)\n call $test_case(l 4097, l 4097, l 0)\n call $test_case(l 4097, l 4098, l 0)\n call $test_case(l 4097, l 9007199254740991, l 0)\n call $test_case(l 8192, l 0, l 0)\n call $test_case(l 8192, l 8191, l 0)\n call $test_case(l 8192, l 8192, l 0)\n call $test_case(l 8192, l 8193, l 0)\n call $test_case(l 8192, l 9007199254740991, l 0)\n call $test_case(l 10000, l 0, l 0)\n call $test_case(l 10000, l 9999, l 0)\n call $test_case(l 10000, l 10000, l 0)\n call $test_case(l 10000, l 10001, l 0)\n call $test_case(l 10000, l 9007199254740991, l 0)\n call $test_case(l 100, l -1, l 0)\n storel 1, $test_failure\n call $test_case(l 100, l 200, l 0)\n call $trbn_gc_finish()\n ret 0\n}\n", [], "0,0,0,0,1,0\n0,0,0,0,1,0\n0,0,0,0,1,0\n-6,1,-1,0,0,0\n0,1,1,0,1,0\n0,1,1,0,1,0\n0,1,1,0,1,0\n-6,1,-1,0,0,0\n-6,63,-1,0,0,0\n0,63,63,0,1,0\n0,63,63,0,1,0\n0,63,63,0,1,0\n-6,1,-1,0,0,0\n-6,223,-1,0,0,0\n0,223,223,0,1,0\n0,223,223,0,1,0\n0,223,223,0,1,0\n-6,1,-1,0,0,0\n-6,224,-1,0,0,0\n0,224,224,0,1,0\n0,224,224,0,1,0\n0,224,224,0,1,0\n-6,1,-1,0,0,0\n-6,255,-1,0,0,0\n0,255,255,0,1,0\n0,255,255,0,1,0\n0,255,255,0,1,0\n-6,1,-1,0,0,0\n-6,256,-1,0,0,0\n0,256,256,0,1,0\n0,256,256,0,1,0\n0,256,256,0,1,0\n-6,1,-1,0,0,0\n-6,4095,-1,0,0,0\n0,4095,4095,0,1,0\n0,4095,4095,0,1,0\n0,4095,4095,0,1,0\n-6,1,-1,0,0,0\n-6,4096,-1,0,0,0\n0,4096,4096,0,1,0\n0,4096,4096,0,1,0\n0,4096,4096,0,1,0\n-6,1,-1,0,0,0\n-6,4097,-1,0,0,0\n0,4097,4097,0,1,0\n0,4097,4097,0,1,0\n0,4097,4097,0,1,0\n-6,1,-1,0,0,0\n-6,8192,-1,0,0,0\n0,8192,8192,0,1,0\n0,8192,8192,0,1,0\n0,8192,8192,0,1,0\n-6,1,-1,0,0,0\n-6,10000,-1,0,0,0\n0,10000,10000,0,1,0\n0,10000,10000,0,1,0\n0,10000,10000,0,1,0\n-5,0,-1,0,0,0\n5,69,-1,0,0,0\n")
+	end
+
+	test("preserves BOM and binary bytes but rejects malformed text without publishing a partial value") do
+		runtime := filesystem_values_test_runtime().split("call $trbn_file_read_into(").join("call $test_read(")
+		filesystem_values_run(runtime, "\ndata $test_source = align 8 { l 0 }\ndata $test_length = align 8 { l 0 }\ndata $test_cursor = align 8 { l 0 }\ndata $test_failure = align 8 { l 0 }\ndata $test_format = { b \"%ld,%ld,%ld,%ld,%ld,%ld\\n\", b 0 }\ndata $test_mock_file = align 8 { l 0, l 0, l 41 }\nfunction l $test_read(w %fd, l %out, l %requested) {\n@start\n %cursor =l loadl $test_cursor\n %failure =l loadl $test_failure\n %after =w csgel %cursor, 50\n %broken =w and %failure, %after\n jnz %broken, @fail, @bound\n@fail\n ret -5\n@bound\n %length =l loadl $test_length\n %remaining =l sub %length, %cursor\n %smaller =w culel %remaining, %requested\n jnz %smaller, @tail, @requested\n@tail\n jmp @quantum\n@requested\n jmp @quantum\n@quantum\n %count =l phi @tail %remaining, @requested %requested\n %short =w culel %count, 23\n jnz %short, @short, @part\n@short\n jmp @copy\n@part\n jmp @copy\n@copy\n %take =l phi @short %count, @part 23\n %source =l loadl $test_source\n %data =l add %source, %cursor\n call $memcpy(l %out, l %data, l %take)\n %next =l add %cursor, %take\n storel %next, $test_cursor\n ret %take\n}\nfunction $test_case(l %length, l %limit, l %text) {\n@start\n storel %length, $test_length\n storel 0, $test_cursor\n %out =l alloc8 8\n %status =l call $trbn_file_read_value(l $test_mock_file, l %limit, l %text, l %out)\n %value =l loadl %out\n %roots =l loadl $trbn_gc_temp_count\n %cursor =l loadl $test_cursor\n jnz %value, @value, @empty\n@value\n call $trbn_gc_collect(w 0)\n %length_slot =l add %value, 8\n %actual_length =l loadl %length_slot\n %data =l add %value, 24\n %source =l loadl $test_source\n %compare =w call $memcmp(l %data, l %source, l %actual_length)\n %end =l add %data, %actual_length\n %nul =w loadub %end\n %difference =w or %compare, %nul\n %difference_wide =l extuw %difference\n jmp @report\n@empty\n jmp @report\n@report\n %size =l phi @value %actual_length, @empty -1\n %bytes =l phi @value %difference_wide, @empty 0\n call $trbn_gc_temp_reset(l 0)\n call $trbn_gc_collect(w 0)\n %live =l loadl $trbn_gc_heap_bytes\n call $printf(l $test_format, ..., l %status, l %cursor, l %size, l %bytes, l %roots, l %live)\n ret\n}\n\ndata $sample0 = { b 0 }\ndata $sample1 = { b 239, b 187, b 191, b 65, b 0, b 194, b 162, b 226, b 130, b 172, b 240, b 159, b 152, b 128, b 0 }\ndata $sample2 = { b 192, b 128, b 0 }\ndata $sample3 = { b 237, b 160, b 128, b 0 }\ndata $sample4 = { b 244, b 144, b 128, b 128, b 0 }\ndata $sample5 = { b 226, b 130, b 0 }\ndata $sample6 = { b 128, b 0 }\ndata $sample7 = { b 65, b 255, b 66, b 0 }\nexport function w $main() {\n@start\n call $trbn_gc_trace_initialize()\n storel $sample0, $test_source\n call $test_case(l 0, l 100, l 1)\n call $test_case(l 0, l 100, l 0)\n storel $sample1, $test_source\n call $test_case(l 14, l 100, l 1)\n call $test_case(l 14, l 100, l 0)\n storel $sample2, $test_source\n call $test_case(l 2, l 100, l 1)\n call $test_case(l 2, l 100, l 0)\n storel $sample3, $test_source\n call $test_case(l 3, l 100, l 1)\n call $test_case(l 3, l 100, l 0)\n storel $sample4, $test_source\n call $test_case(l 4, l 100, l 1)\n call $test_case(l 4, l 100, l 0)\n storel $sample5, $test_source\n call $test_case(l 2, l 100, l 1)\n call $test_case(l 2, l 100, l 0)\n storel $sample6, $test_source\n call $test_case(l 1, l 100, l 1)\n call $test_case(l 1, l 100, l 0)\n storel $sample7, $test_source\n call $test_case(l 3, l 100, l 1)\n call $test_case(l 3, l 100, l 0)\n call $trbn_gc_finish()\n ret 0\n}\n", [], "0,0,0,0,1,0\n0,0,0,0,1,0\n0,14,14,0,1,0\n0,14,14,0,1,0\n-7,2,-1,0,0,0\n0,2,2,0,1,0\n-7,3,-1,0,0,0\n0,3,3,0,1,0\n-7,4,-1,0,0,0\n0,4,4,0,1,0\n-7,2,-1,0,0,0\n0,2,2,0,1,0\n-7,1,-1,0,0,0\n0,1,1,0,1,0\n-7,3,-1,0,0,0\n0,3,3,0,1,0\n")
+	end
+
+	test("closes structured operations before returning and preserves body failures nested scopes and recovery") do
+		filesystem_scope_values_test()
+	end
+	test("writes and reads real handles with exact cursor advancement and read-only errors") do
+		filesystem_value_methods_test()
+	end
+
+end

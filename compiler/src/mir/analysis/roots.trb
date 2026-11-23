@@ -1,0 +1,165 @@
+import { mir_function_control } from mir/model/control
+import { mir_effect_allocation } from mir/model/effects
+import { mir_op_string_literal } from mir/model/instructions
+import { mir_planned_instruction_effects } from mir/analysis/callables
+import { mir_array_join_roots } from mir/analysis/array_joins
+import { mir_managed_type } from mir/model/types
+import { MirArrayJoin, MirFunction, MirModule, MirRootPlan, MirStringConcat, MirValue, mir_function_index } from mir/model/module
+import { mir_flow_blocks } from mir/analysis/flow
+import { mir_string_concat_index } from mir/analysis/string_concats
+import { mir_concat_live_before, mir_live_equal, mir_live_exit, mir_live_incoming, mir_managed_add, mir_managed_contains } from mir/analysis/liveness
+
+# Native String literals occupy permanent data, including compressed literals
+# initialized in place. Only their exact verified definitions are excluded:
+# parameters and aliases that might hold allocated text remain conservative.
+def mir_static_string_roots(native_module: MirModule, function: MirFunction, plan: MirRootPlan): MirRootPlan
+	if plan.capacity == 0
+		return plan
+	end
+	mut literals: Array<Integer> := []
+	mut index := function.block_start
+	while index < function.block_start + function.block_count
+		block := native_module.blocks[index]
+		mut position := block.instruction_start
+		while position < block.instruction_start + block.instruction_count
+			instruction := native_module.instructions[position]
+			if instruction.kind == mir_op_string_literal()
+				mir_managed_add(literals, instruction.result)
+			end
+			position += 1
+		end
+		index += 1
+	end
+	if literals.size() == 0
+		return plan
+	end
+	mut roots: Array<Array<Integer>> := []
+	mut capacity := 0
+	plan.roots.each do |ordinary|
+		mut retained: Array<Integer> := []
+		ordinary.each do |value|
+			if !mir_managed_contains(literals, value)
+				retained.push(value)
+			end
+		end
+		if retained.size() > capacity
+			capacity = retained.size()
+		end
+		roots.push(retained)
+	end
+	# Empty rows still reset the published count at their original safe points.
+	return MirRootPlan.new(function_id: plan.function_id, instructions: plan.instructions, roots: roots, capacity: capacity)
+end
+
+# Apply storage decisions after canonical liveness. A virtual Array can expose
+# literal fragments, so permanent values are filtered after that replacement.
+# Verification invokes this same derivation from the verified instructions.
+def mir_function_root_plan(native_module: MirModule, function: MirFunction, values: Array<MirValue>, joins: Array<MirArrayJoin>): MirRootPlan
+	ordinary := mir_function_roots_with_values(native_module, function, values)
+	materialized := mir_array_join_roots(native_module, ordinary, joins)
+	return mir_static_string_roots(native_module, function, materialized)
+end
+
+# Called only after storage/types/uses are verified. Sparse IDs have no bearing
+# on allocation size. The least fixed point includes loop/backedge liveness.
+def mir_function_roots_with_values(native_module: MirModule, function: MirFunction, values: Array<MirValue>): MirRootPlan
+	mut points: Array<Integer> := []
+	mut roots: Array<Array<Integer>> := []
+	if function.kind != mir_function_control()
+		return MirRootPlan.new(function_id: function.id, instructions: points, roots: roots, capacity: 0)
+	end
+	blocks := mir_flow_blocks(native_module, function)
+	mut concats: Array<MirStringConcat> := []
+	function_index := mir_function_index(native_module, function.id)
+	if function_index >= 0 && function_index < native_module.string_concats.size()
+		concats = native_module.string_concats[function_index]
+	end
+	mut managed: Array<Integer> := []
+	mut managed_count := 0
+	values.each do |value|
+		if value.function_id == function.id && mir_managed_type(native_module, value.type_id)
+			mir_managed_add(managed, value.id)
+			managed_count += 1
+		end
+	end
+	mut incoming: Array<Array<Integer>> := []
+	if managed_count > 0
+		incoming = mir_live_incoming(native_module, function, blocks, managed)
+	else
+		mut index := 0
+		while index < function.block_count
+			incoming.push([])
+			index += 1
+		end
+	end
+	mut capacity := 0
+	mut index := 0
+	while index < function.block_count
+		block := native_module.blocks[function.block_start + index]
+		mut live := mir_live_exit(native_module, function, blocks, managed, block, incoming)
+		mut cursor := block.instruction_start + block.instruction_count - 1
+		while cursor >= block.instruction_start
+			instruction := native_module.instructions[cursor]
+			if managed_count > 0
+				live = mir_concat_live_before(native_module, concats, managed, cursor, live)
+			end
+			concat := mir_string_concat_index(concats, cursor)
+			mut skipped := false
+			if concat >= 0
+				skipped = concats[concat].fragments.size() == 0
+			end
+			# Allocation is the least significant effect bit; modulo 2 selects it.
+			if !skipped && mir_planned_instruction_effects(native_module, instruction, cursor) % 2 == mir_effect_allocation()
+				if managed_count == 0
+					# Retained empty root lists must remain independent between points.
+					live = []
+				end
+				if live.size() > capacity
+					capacity = live.size()
+				end
+				# Sorting by instruction identity keeps plans stable when a pass
+				# reorders physical block storage without changing the graph.
+				points.push(cursor)
+				roots.push(live)
+				mut at := points.size() - 1
+				while at > 0 && points[at - 1] > cursor
+					points[at] = points[at - 1]
+					roots[at] = roots[at - 1]
+					at -= 1
+				end
+				points[at] = cursor
+				roots[at] = live
+			end
+			cursor -= 1
+		end
+		index += 1
+	end
+	return MirRootPlan.new(function_id: function.id, instructions: points, roots: roots, capacity: capacity)
+end
+
+def mir_function_roots(native_module: MirModule, function: MirFunction): MirRootPlan
+	mut values: Array<MirValue> := []
+	native_module.values.each do |value|
+		if value.function_id == function.id
+			values.push(value)
+		end
+	end
+	return mir_function_roots_with_values(native_module, function, values)
+end
+
+def mir_root_plan_equal(left: MirRootPlan, right: MirRootPlan): Boolean
+	if left.function_id != right.function_id || left.capacity != right.capacity
+		return false
+	end
+	if !mir_live_equal(left.instructions, right.instructions) || left.roots.size() != right.roots.size()
+		return false
+	end
+	mut index := 0
+	while index < left.roots.size()
+		if !mir_live_equal(left.roots[index], right.roots[index])
+			return false
+		end
+		index += 1
+	end
+	return true
+end

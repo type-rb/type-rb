@@ -1,0 +1,532 @@
+{
+  "schemaVersion": 1,
+  "initiative": 626,
+  "state": "frozen-before-activation",
+  "referenceRevision": "c49b67ec0f9e5941c52b787885f11a33c19f795f",
+  "recordedNativeBaseline": "a97e919a4bfe6eb7ab784edc6c95d6a24d96fe16",
+  "scope": "Initial blocking Web deadline, managed cancellation and owned-resource slice; not complete package or release parity.",
+  "sourceBases": {
+    "web": {
+      "repository": "type-rb/type-rb",
+      "revision": "c49b67ec0f9e5941c52b787885f11a33c19f795f",
+      "path": "internal/cli/web_timeout_test.go",
+      "sha256": "9361e29850fd8ae5e1789a9f928bb049fd32f850c00bed67980ef71c3ba3e5c2"
+    },
+    "file": {
+      "repository": "type-rb/type-rb",
+      "revision": "c49b67ec0f9e5941c52b787885f11a33c19f795f",
+      "path": "internal/compiler/filesystem_scoped_test.go",
+      "sha256": "2e849d3909cdb368caad6e8e7a2dc14f14c9979e41c7c3ef0fc3b9ce01153e85"
+    },
+    "concurrent": {
+      "repository": "type-rb/type-rb",
+      "revision": "c49b67ec0f9e5941c52b787885f11a33c19f795f",
+      "path": "internal/compiler/concurrent_map_test.go",
+      "sha256": "fb9a8b0d296743444332cdc42f884d6efb021e14ebe20195b0dbc5d0911ba288"
+    },
+    "oidc": {
+      "repository": "type-rb/type-rb",
+      "revision": "c49b67ec0f9e5941c52b787885f11a33c19f795f",
+      "path": "internal/cli/oidc_bearer_test.go",
+      "sha256": "e7926626c914cd3d1bd8f058e86fe2eb8e59a7d81862180cdd664be5616b17a4"
+    },
+    "socket": {
+      "repository": "type-rb/type-rb-native",
+      "revision": "a97e919a4bfe6eb7ab784edc6c95d6a24d96fe16",
+      "path": "tools/native-web-network-test.py",
+      "sha256": "4739969ef56184a7e1df1b5beb2472b3d2ba337401ba7a2994ffeb0f2e665e5e"
+    },
+    "resource": {
+      "repository": "type-rb/type-rb-native",
+      "revision": "a97e919a4bfe6eb7ab784edc6c95d6a24d96fe16",
+      "path": "compiler/src/backend/qbe/runtime/resource_cleanup_test.trb",
+      "sha256": "678e4df3dd97e097153369ef4dab67039131c2b526f15ea03cd51d2f00627d33"
+    }
+  },
+  "commands": {
+    "reference": [
+      "python3",
+      "tools/native-web-deadline-test.py",
+      "{reference}",
+      "--reference",
+      "--output",
+      "{evidence}"
+    ],
+    "native": [
+      "python3",
+      "tools/native-web-deadline-test.py",
+      "{native}",
+      "--libraries",
+      "{networkLibraries}",
+      "--output",
+      "{evidence}"
+    ],
+    "singleCaseOption": [
+      "--case",
+      "{caseId}"
+    ],
+    "applicationCheck": [
+      "{compiler}",
+      "check",
+      "main.trb"
+    ],
+    "applicationBuild": [
+      "{compiler}",
+      "build",
+      "--compile",
+      "--outfile",
+      "program",
+      "main.trb"
+    ],
+    "applicationExecute": [
+      "./program",
+      "{caseArguments}"
+    ]
+  },
+  "harnessLimits": {
+    "buildWatchdogSeconds": 180,
+    "applicationWatchdogSeconds": 15,
+    "purpose": "test-controller termination bounds, not portable API performance promises"
+  },
+  "dependencies": [
+    "approved single-mutator blocking-process design in Decision 0086",
+    "existing HTTP/libuv/llhttp and OIDC/curl/OpenSSL qualification",
+    "MIR-owned scope/checkpoint effects and verified root/resource lifetimes",
+    "existing Native returns-twice recovery trampoline"
+  ],
+  "cases": [
+    {
+      "id": "fast",
+      "basis": [
+        "web"
+      ],
+      "kind": "application",
+      "files": {
+        "main.trb": "import { Body, Headers, HttpMethod } from trb/http\nimport { Context, Next, Request, Response } from trb/web\nimport { Timeout, TimeoutOptions } from trb/web/middleware/timeout\n\nclass Work implements Next\n  @slow: Boolean\n  def initialize(slow: Boolean)\n    @slow = slow\n    return\n  end\n  def call(_context: Context): Response\n    if @slow\n      mut index := 0\n      while index < 1000000000\n        index += 1\n      end\n    end\n    return Response.text(\"complete\")\n  end\nend\n\ndef context(): Context\n  request := Request.new(method: HttpMethod.get(), path: \"/\", query_string: \"\", headers: Headers.new([]), body: Body.empty())\n  return Context.new(request: request, path_parameters: {})\nend\n\ndef main()\nresponse := Timeout.call(context(), Work.new(false), TimeoutOptions.new(milliseconds: 1000))\nputs(response.status)\nputs(response.body.to_s())\nend\n"
+      },
+      "expected": {
+        "exit": "zero",
+        "stdout": "200\ncomplete\n"
+      },
+      "sourceHashes": {
+        "main.trb": "f957e31c40605c1c59c5333b1e13f6f1247640130bbb0f3a15d9977b0ed9e00b"
+      }
+    },
+    {
+      "id": "slow",
+      "basis": [
+        "web"
+      ],
+      "kind": "application",
+      "files": {
+        "main.trb": "import { Body, Headers, HttpMethod } from trb/http\nimport { Context, Next, Request, Response } from trb/web\nimport { Timeout, TimeoutOptions } from trb/web/middleware/timeout\n\nclass Work implements Next\n  @slow: Boolean\n  def initialize(slow: Boolean)\n    @slow = slow\n    return\n  end\n  def call(_context: Context): Response\n    if @slow\n      mut index := 0\n      while index < 1000000000\n        index += 1\n      end\n    end\n    return Response.text(\"complete\")\n  end\nend\n\ndef context(): Context\n  request := Request.new(method: HttpMethod.get(), path: \"/\", query_string: \"\", headers: Headers.new([]), body: Body.empty())\n  return Context.new(request: request, path_parameters: {})\nend\n\ndef main()\nresponse := Timeout.call(context(), Work.new(true), TimeoutOptions.new(milliseconds: 5))\nputs(response.status)\nputs(response.body.to_s())\nend\n"
+      },
+      "expected": {
+        "exit": "zero",
+        "stdout": "504\n{\"error\":\"gateway_timeout\"}\n"
+      },
+      "sourceHashes": {
+        "main.trb": "53399013bcd91013d7aeacebeeeeac8b795b50df71ab5d870d970e86d5e14698"
+      }
+    },
+    {
+      "id": "zero",
+      "basis": [
+        "web"
+      ],
+      "kind": "application",
+      "files": {
+        "main.trb": "import { Body, Headers, HttpMethod } from trb/http\nimport { Context, Next, Request, Response } from trb/web\nimport { Timeout, TimeoutOptions } from trb/web/middleware/timeout\n\nclass Work implements Next\n  @slow: Boolean\n  def initialize(slow: Boolean)\n    @slow = slow\n    return\n  end\n  def call(_context: Context): Response\n    if @slow\n      mut index := 0\n      while index < 1000000000\n        index += 1\n      end\n    end\n    return Response.text(\"complete\")\n  end\nend\n\ndef context(): Context\n  request := Request.new(method: HttpMethod.get(), path: \"/\", query_string: \"\", headers: Headers.new([]), body: Body.empty())\n  return Context.new(request: request, path_parameters: {})\nend\n\ndef main()\nresponse := Timeout.call(context(), Work.new(false), TimeoutOptions.new(milliseconds: 0))\nputs(response.status)\nputs(response.body.to_s())\nend\n"
+      },
+      "expected": {
+        "exit": "nonzero",
+        "stderrContains": "trb/web timeout milliseconds must be greater than zero",
+        "stdout": ""
+      },
+      "sourceHashes": {
+        "main.trb": "920b783026666b6d3f4b94db5111c1c2ba9968dc8fa63b21a588597a5a099f07"
+      }
+    },
+    {
+      "id": "negative",
+      "basis": [
+        "web"
+      ],
+      "kind": "application",
+      "files": {
+        "main.trb": "import { Body, Headers, HttpMethod } from trb/http\nimport { Context, Next, Request, Response } from trb/web\nimport { Timeout, TimeoutOptions } from trb/web/middleware/timeout\n\nclass Work implements Next\n  @slow: Boolean\n  def initialize(slow: Boolean)\n    @slow = slow\n    return\n  end\n  def call(_context: Context): Response\n    if @slow\n      mut index := 0\n      while index < 1000000000\n        index += 1\n      end\n    end\n    return Response.text(\"complete\")\n  end\nend\n\ndef context(): Context\n  request := Request.new(method: HttpMethod.get(), path: \"/\", query_string: \"\", headers: Headers.new([]), body: Body.empty())\n  return Context.new(request: request, path_parameters: {})\nend\n\ndef main()\nresponse := Timeout.call(context(), Work.new(false), TimeoutOptions.new(milliseconds: -1))\nputs(response.status)\nputs(response.body.to_s())\nend\n"
+      },
+      "expected": {
+        "exit": "nonzero",
+        "stderrContains": "trb/web timeout milliseconds must be greater than zero",
+        "stdout": ""
+      },
+      "sourceHashes": {
+        "main.trb": "fddd1da0530cfbbb01475287977c8fb395536fba2e3a0696fd0beb650863063b"
+      }
+    },
+    {
+      "id": "nested-inner",
+      "basis": [
+        "web"
+      ],
+      "kind": "application",
+      "files": {
+        "main.trb": "import { Body, Headers, HttpMethod } from trb/http\nimport { Context, Next, Request, Response } from trb/web\nimport { Timeout, TimeoutOptions } from trb/web/middleware/timeout\n\nclass Work implements Next\n  @slow: Boolean\n  def initialize(slow: Boolean)\n    @slow = slow\n    return\n  end\n  def call(_context: Context): Response\n    if @slow\n      mut index := 0\n      while index < 1000000000\n        index += 1\n      end\n    end\n    return Response.text(\"complete\")\n  end\nend\n\ndef context(): Context\n  request := Request.new(method: HttpMethod.get(), path: \"/\", query_string: \"\", headers: Headers.new([]), body: Body.empty())\n  return Context.new(request: request, path_parameters: {})\nend\n\nclass Nested implements Next\n  @inner: Integer\n  def initialize(inner: Integer)\n    @inner = inner\n    return\n  end\n  def call(context: Context): Response\n    inner := Timeout.call(context, Work.new(true), TimeoutOptions.new(milliseconds: @inner))\n    return Response.text(\"inner:\" + inner.status.to_s())\n  end\nend\n\ndef main()\nresponse := Timeout.call(context(), Nested.new(5), TimeoutOptions.new(milliseconds: 1000))\nputs(response.status)\nputs(response.body.to_s())\nend\n"
+      },
+      "expected": {
+        "exit": "zero",
+        "stdout": "200\ninner:504\n"
+      },
+      "sourceHashes": {
+        "main.trb": "83cbcdada59e87a77a581482b3eee53be3d1332b16237dbd1e609c24ce514a3b"
+      }
+    },
+    {
+      "id": "nested-parent",
+      "basis": [
+        "web"
+      ],
+      "kind": "application",
+      "files": {
+        "main.trb": "import { Body, Headers, HttpMethod } from trb/http\nimport { Context, Next, Request, Response } from trb/web\nimport { Timeout, TimeoutOptions } from trb/web/middleware/timeout\n\nclass Work implements Next\n  @slow: Boolean\n  def initialize(slow: Boolean)\n    @slow = slow\n    return\n  end\n  def call(_context: Context): Response\n    if @slow\n      mut index := 0\n      while index < 1000000000\n        index += 1\n      end\n    end\n    return Response.text(\"complete\")\n  end\nend\n\ndef context(): Context\n  request := Request.new(method: HttpMethod.get(), path: \"/\", query_string: \"\", headers: Headers.new([]), body: Body.empty())\n  return Context.new(request: request, path_parameters: {})\nend\n\nclass Nested implements Next\n  @inner: Integer\n  def initialize(inner: Integer)\n    @inner = inner\n    return\n  end\n  def call(context: Context): Response\n    inner := Timeout.call(context, Work.new(true), TimeoutOptions.new(milliseconds: @inner))\n    return Response.text(\"inner:\" + inner.status.to_s())\n  end\nend\n\ndef main()\nresponse := Timeout.call(context(), Nested.new(1000), TimeoutOptions.new(milliseconds: 5))\nputs(response.status)\nputs(response.body.to_s())\nend\n"
+      },
+      "expected": {
+        "exit": "zero",
+        "stdout": "504\n{\"error\":\"gateway_timeout\"}\n"
+      },
+      "sourceHashes": {
+        "main.trb": "6e258beba679301820242730501be583ccefe55487ff6ae97bc75054682f7007"
+      }
+    },
+    {
+      "id": "sequential-scopes",
+      "basis": [
+        "web"
+      ],
+      "kind": "application",
+      "files": {
+        "main.trb": "import { Body, Headers, HttpMethod } from trb/http\nimport { Context, Next, Request, Response } from trb/web\nimport { Timeout, TimeoutOptions } from trb/web/middleware/timeout\n\nclass Work implements Next\n  @slow: Boolean\n  def initialize(slow: Boolean)\n    @slow = slow\n    return\n  end\n  def call(_context: Context): Response\n    if @slow\n      mut index := 0\n      while index < 1000000000\n        index += 1\n      end\n    end\n    return Response.text(\"complete\")\n  end\nend\n\ndef context(): Context\n  request := Request.new(method: HttpMethod.get(), path: \"/\", query_string: \"\", headers: Headers.new([]), body: Body.empty())\n  return Context.new(request: request, path_parameters: {})\nend\n\ndef main()\nslow := Timeout.call(context(), Work.new(true), TimeoutOptions.new(milliseconds: 5))\nputs(slow.status)\nfast := Timeout.call(context(), Work.new(false), TimeoutOptions.new(milliseconds: 1000))\nputs(fast.status)\nputs(fast.body.to_s())\nend\n"
+      },
+      "expected": {
+        "exit": "zero",
+        "stdout": "504\n200\ncomplete\n"
+      },
+      "sourceHashes": {
+        "main.trb": "72a5be2603eee80a97f436dce071f36f478ccaa9d6d7f4a7c162f4c0521f703d"
+      }
+    },
+    {
+      "id": "repeated-scopes",
+      "basis": [
+        "web"
+      ],
+      "kind": "application",
+      "files": {
+        "main.trb": "import { Body, Headers, HttpMethod } from trb/http\nimport { Context, Next, Request, Response } from trb/web\nimport { Timeout, TimeoutOptions } from trb/web/middleware/timeout\n\nclass Work implements Next\n  @slow: Boolean\n  def initialize(slow: Boolean)\n    @slow = slow\n    return\n  end\n  def call(_context: Context): Response\n    if @slow\n      mut index := 0\n      while index < 1000000000\n        index += 1\n      end\n    end\n    return Response.text(\"complete\")\n  end\nend\n\ndef context(): Context\n  request := Request.new(method: HttpMethod.get(), path: \"/\", query_string: \"\", headers: Headers.new([]), body: Body.empty())\n  return Context.new(request: request, path_parameters: {})\nend\n\ndef main()\nmut index := 0\nwhile index < 3\nresponse := Timeout.call(context(), Work.new(true), TimeoutOptions.new(milliseconds: 5))\nputs(response.status)\nindex += 1\nend\nfast := Timeout.call(context(), Work.new(false), TimeoutOptions.new(milliseconds: 1000))\nputs(fast.status)\nend\n"
+      },
+      "expected": {
+        "exit": "zero",
+        "stdout": "504\n504\n504\n200\n"
+      },
+      "sourceHashes": {
+        "main.trb": "c1ad0d9aa73c4b92a11d2febbb27aaff21f2805a89e305cccd279825a23841a5"
+      }
+    },
+    {
+      "id": "file-normal",
+      "basis": [
+        "web",
+        "file"
+      ],
+      "kind": "file-lifetime",
+      "files": {
+        "main.trb": "import { Duration, Instant } from trb/std/time\nimport { Body, Headers, HttpMethod } from trb/http\nimport { Context, Next, Request, Response } from trb/web\nimport { Timeout, TimeoutOptions } from trb/web/middleware/timeout\n\ndef context(): Context\n  request := Request.new(method: HttpMethod.get(), path: \"/\", query_string: \"\", headers: Headers.new([]), body: Body.empty())\n  return Context.new(request: request, path_parameters: {})\nend\nimport trb/std/file\nimport trb/std/path\nimport trb/std/result\nclass Work implements Next\n  def call(_context: Context): Response\n    value := File.open(Path.new(\"resource.txt\")) do |file|\n      text := try file.read_text(max_bytes: 64)\n      puts(\"opened:\" + text)\n\n      7\n    end\n    case value\n    when Result::Ok(value)\n      puts(\"value:\" + value.to_s())\n    when Result::Err(error)\n      puts(\"error:\" + error.message)\n    end\n    return Response.text(\"complete\")\n  end\nend\n\ndef main()\nresponse := Timeout.call(context(), Work.new(), TimeoutOptions.new(milliseconds: 1000))\nputs(response.status)\nputs(response.body.to_s())\nputs(\"inspect\")\nhold()\nend\n\ndef hold()\nlimit := Instant.now().add(Duration.seconds(2))\nwhile Instant.now().before?(limit)\nnil\nend\nend\n",
+        "resource.txt": "resource"
+      },
+      "expected": {
+        "exit": "zero",
+        "stdout": "opened:resource\nvalue:7\n200\ncomplete\ninspect\n",
+        "ownedFileDescriptorsAfterContinuation": 0,
+        "inspectionRequiresLiveProcess": true
+      },
+      "sourceHashes": {
+        "main.trb": "bacb465ab829c9327cca5de70bbedc5cfc74708ee809f8abf67c30d05e4d5562",
+        "resource.txt": "5de95319f17467ed6dc58e4e0b16c1193a13b35d60dc48bcf06bf6b7beebbe6c"
+      }
+    },
+    {
+      "id": "file-body-error",
+      "basis": [
+        "web",
+        "file"
+      ],
+      "kind": "file-lifetime",
+      "files": {
+        "main.trb": "import { Duration, Instant } from trb/std/time\nimport { Body, Headers, HttpMethod } from trb/http\nimport { Context, Next, Request, Response } from trb/web\nimport { Timeout, TimeoutOptions } from trb/web/middleware/timeout\n\ndef context(): Context\n  request := Request.new(method: HttpMethod.get(), path: \"/\", query_string: \"\", headers: Headers.new([]), body: Body.empty())\n  return Context.new(request: request, path_parameters: {})\nend\nimport trb/std/file\nimport trb/std/path\nimport trb/std/result\nclass Work implements Next\n  def call(_context: Context): Response\n    value := File.open(Path.new(\"resource.txt\")) do |file|\n      text := try file.read_text(max_bytes: 0)\n      puts(\"opened:\" + text)\n\n      7\n    end\n    case value\n    when Result::Ok(value)\n      puts(\"value:\" + value.to_s())\n    when Result::Err(error)\n      puts(\"error:\" + error.message)\n    end\n    return Response.text(\"complete\")\n  end\nend\n\ndef main()\nresponse := Timeout.call(context(), Work.new(), TimeoutOptions.new(milliseconds: 1000))\nputs(response.status)\nputs(response.body.to_s())\nputs(\"inspect\")\nhold()\nend\n\ndef hold()\nlimit := Instant.now().add(Duration.seconds(2))\nwhile Instant.now().before?(limit)\nnil\nend\nend\n",
+        "resource.txt": "resource"
+      },
+      "expected": {
+        "exit": "zero",
+        "stdout": "error:file exceeds max_bytes\n200\ncomplete\ninspect\n",
+        "ownedFileDescriptorsAfterContinuation": 0,
+        "inspectionRequiresLiveProcess": true
+      },
+      "sourceHashes": {
+        "main.trb": "292ca60757341605f1b11dc01b8b7630f6b3cf18fb74388953ecbc25eb47e04c",
+        "resource.txt": "5de95319f17467ed6dc58e4e0b16c1193a13b35d60dc48bcf06bf6b7beebbe6c"
+      }
+    },
+    {
+      "id": "file-deadline",
+      "basis": [
+        "web",
+        "file"
+      ],
+      "kind": "file-lifetime",
+      "files": {
+        "main.trb": "import { Duration, Instant } from trb/std/time\nimport { Body, Headers, HttpMethod } from trb/http\nimport { Context, Next, Request, Response } from trb/web\nimport { Timeout, TimeoutOptions } from trb/web/middleware/timeout\n\ndef context(): Context\n  request := Request.new(method: HttpMethod.get(), path: \"/\", query_string: \"\", headers: Headers.new([]), body: Body.empty())\n  return Context.new(request: request, path_parameters: {})\nend\nimport trb/std/file\nimport trb/std/path\nimport trb/std/result\nclass Work implements Next\n  def call(_context: Context): Response\n    value := File.open(Path.new(\"resource.txt\")) do |file|\n      text := try file.read_text(max_bytes: 64)\n      puts(\"opened:\" + text)\n      mut index := 0\n      while index < 1000000000\n        index += 1\n      end\n      7\n    end\n    case value\n    when Result::Ok(value)\n      puts(\"value:\" + value.to_s())\n    when Result::Err(error)\n      puts(\"error:\" + error.message)\n    end\n    return Response.text(\"complete\")\n  end\nend\n\ndef main()\nresponse := Timeout.call(context(), Work.new(), TimeoutOptions.new(milliseconds: 100))\nputs(response.status)\nputs(response.body.to_s())\nputs(\"inspect\")\nhold()\nend\n\ndef hold()\nlimit := Instant.now().add(Duration.seconds(2))\nwhile Instant.now().before?(limit)\nnil\nend\nend\n",
+        "resource.txt": "resource"
+      },
+      "expected": {
+        "exit": "zero",
+        "stdout": "opened:resource\n504\n{\"error\":\"gateway_timeout\"}\ninspect\n",
+        "ownedFileDescriptorsAfterContinuation": 0,
+        "inspectionRequiresLiveProcess": true
+      },
+      "sourceHashes": {
+        "main.trb": "1e32f4161504155062bdaf7258dc6f45fb95d0276229b8ca25b27e78845cd014",
+        "resource.txt": "5de95319f17467ed6dc58e4e0b16c1193a13b35d60dc48bcf06bf6b7beebbe6c"
+      }
+    },
+    {
+      "id": "managed-map",
+      "basis": [
+        "web"
+      ],
+      "kind": "application",
+      "files": {
+        "main.trb": "import { Body, Headers, HttpMethod } from trb/http\nimport { Context, Next, Request, Response } from trb/web\nimport { Timeout, TimeoutOptions } from trb/web/middleware/timeout\n\ndef context(): Context\n  request := Request.new(method: HttpMethod.get(), path: \"/\", query_string: \"\", headers: Headers.new([]), body: Body.empty())\n  return Context.new(request: request, path_parameters: {})\nend\nclass Work implements Next\n  def call(_context: Context): Response\n    values := [1, 2, 3].map do |value|\n      mut index := 0\n      while index < 1000000000\n        index += 1\n      end\n      value\n    end\n    puts(values.size())\n    return Response.text(\"complete\")\n  end\nend\n\ndef main()\nresponse := Timeout.call(context(), Work.new(), TimeoutOptions.new(milliseconds: 100))\nputs(response.status)\nputs(response.body.to_s())\nend\n"
+      },
+      "expected": {
+        "exit": "zero",
+        "stdout": "504\n{\"error\":\"gateway_timeout\"}\n"
+      },
+      "sourceHashes": {
+        "main.trb": "34eddf519c1fb2e9602b3edd9039eec327eaa3a6cad0c3da2cab150e8646e69d"
+      }
+    },
+    {
+      "id": "managed-concurrent-map",
+      "basis": [
+        "web",
+        "concurrent"
+      ],
+      "kind": "application",
+      "files": {
+        "main.trb": "import { Body, Headers, HttpMethod } from trb/http\nimport { Context, Next, Request, Response } from trb/web\nimport { Timeout, TimeoutOptions } from trb/web/middleware/timeout\n\ndef context(): Context\n  request := Request.new(method: HttpMethod.get(), path: \"/\", query_string: \"\", headers: Headers.new([]), body: Body.empty())\n  return Context.new(request: request, path_parameters: {})\nend\nclass Work implements Next\n  def call(_context: Context): Response\n    values := [1, 2, 3].concurrent_map(limit: 2) do |value|\n      mut index := 0\n      while index < 1000000000\n        index += 1\n      end\n      value\n    end\n    puts(values.size())\n    return Response.text(\"complete\")\n  end\nend\n\ndef main()\nresponse := Timeout.call(context(), Work.new(), TimeoutOptions.new(milliseconds: 100))\nputs(response.status)\nputs(response.body.to_s())\nend\n"
+      },
+      "expected": {
+        "exit": "zero",
+        "stdout": "504\n{\"error\":\"gateway_timeout\"}\n"
+      },
+      "sourceHashes": {
+        "main.trb": "d1963369549937eaf567fc1fb1afa413c5c7e9e82ef9dc1662b9d813f138f33a"
+      }
+    },
+    {
+      "id": "handler-failure",
+      "basis": [
+        "web"
+      ],
+      "kind": "application",
+      "files": {
+        "main.trb": "import { Body, Headers, HttpMethod } from trb/http\nimport { Context, Next, Request, Response } from trb/web\nimport { Timeout, TimeoutOptions } from trb/web/middleware/timeout\n\ndef context(): Context\n  request := Request.new(method: HttpMethod.get(), path: \"/\", query_string: \"\", headers: Headers.new([]), body: Body.empty())\n  return Context.new(request: request, path_parameters: {})\nend\nclass Work implements Next\n  def call(_context: Context): Response\n    mut denominator := 0\n    puts(12 / denominator)\n    return Response.text(\"complete\")\n  end\nend\n\ndef main()\nresponse := Timeout.call(context(), Work.new(), TimeoutOptions.new(milliseconds: 1000))\nputs(response.status)\nputs(response.body.to_s())\nend\n"
+      },
+      "expected": {
+        "exit": "nonzero",
+        "failure": "ordinary-handler-failure",
+        "mustNotProduceTimeoutResponse": true
+      },
+      "sourceHashes": {
+        "main.trb": "b34536ea913a7e8b3f81cb6ab016f7ffc78b582762e25807bf8c078c1610b526"
+      }
+    },
+    {
+      "id": "foreign-http",
+      "basis": [
+        "web",
+        "oidc"
+      ],
+      "kind": "oidc-lifetime",
+      "files": {
+        "main.trb": "import { OidcBearerOptions } from trb/auth/oidc\nimport { Body, Header, Headers, HttpMethod } from trb/http\nimport { Context, Next, Request, Response } from trb/web\nimport { Timeout, TimeoutOptions } from trb/web/middleware/timeout\nimport trb/web/auth/bearer\nimport trb/std/process\nimport { Duration, Instant } from trb/std/time\n\nclass Reply implements Next\n  def call(_context: Context): Response\n    return Response.text(\"accepted\")\n  end\nend\n\nclass Foreign implements Next\n  @options: OidcBearerOptions\n  def initialize(issuer: String)\n    @options = OidcBearerOptions.new(issuer: issuer, audience: \"api\", jwks_uri: issuer + \"/slow\", roles_claim: \"roles\", clock_skew_seconds: 0)\n    return\n  end\n  def call(context: Context): Response\n    puts(\"foreign-start\")\n    return Bearer.authenticate(context, Reply.new(), @options)\n  end\nend\n\ndef hold(milliseconds: Integer)\n  deadline := Instant.now().add(Duration.milliseconds(milliseconds))\n  while Instant.now().before?(deadline)\n    nil\n  end\nend\n\ndef main()\n  args := Process.argv()\n  request := Request.new(method: HttpMethod.get(), path: \"/\", query_string: \"\",\n    headers: Headers.new([Header.new(name: \"Authorization\", value: \"Bearer \" + args[1])]), body: Body.empty())\n  context := Context.new(request: request, path_parameters: {})\n  response := Timeout.call(context, Foreign.new(args[0]), TimeoutOptions.new(milliseconds: 100))\n  puts(response.status)\n  puts(\"after-response\")\n  hold(6000)\n  puts(\"after-wait\")\n  hold(1000)\nend\n"
+      },
+      "expected": {
+        "exit": "zero",
+        "stdout": "foreign-start\n504\nafter-response\nafter-wait\n",
+        "handlerResponseWatchdogSeconds": 4,
+        "watchdogPurpose": "distinguish deadline response from the independent five-second OIDC timeout; not a public latency SLO",
+        "ownedConnectionsAtNativeContinuation": 0,
+        "referenceConnectionsMayOutliveResponse": true,
+        "ownedConnectionsAfterSixSeconds": 0,
+        "inspectionRequiresLiveProcess": true
+      },
+      "arguments": [
+        "{fixtureIssuer}",
+        "{fixtureBearerToken}"
+      ],
+      "tls": false,
+      "sourceHashes": {
+        "main.trb": "8242ff21124bbc5534b6838e4997f34a27770aabce7e385dff4471da6fc20634"
+      }
+    },
+    {
+      "id": "foreign-https",
+      "basis": [
+        "web",
+        "oidc"
+      ],
+      "kind": "oidc-lifetime",
+      "files": {
+        "main.trb": "import { OidcBearerOptions } from trb/auth/oidc\nimport { Body, Header, Headers, HttpMethod } from trb/http\nimport { Context, Next, Request, Response } from trb/web\nimport { Timeout, TimeoutOptions } from trb/web/middleware/timeout\nimport trb/web/auth/bearer\nimport trb/std/process\nimport { Duration, Instant } from trb/std/time\n\nclass Reply implements Next\n  def call(_context: Context): Response\n    return Response.text(\"accepted\")\n  end\nend\n\nclass Foreign implements Next\n  @options: OidcBearerOptions\n  def initialize(issuer: String)\n    @options = OidcBearerOptions.new(issuer: issuer, audience: \"api\", jwks_uri: issuer + \"/slow\", roles_claim: \"roles\", clock_skew_seconds: 0)\n    return\n  end\n  def call(context: Context): Response\n    puts(\"foreign-start\")\n    return Bearer.authenticate(context, Reply.new(), @options)\n  end\nend\n\ndef hold(milliseconds: Integer)\n  deadline := Instant.now().add(Duration.milliseconds(milliseconds))\n  while Instant.now().before?(deadline)\n    nil\n  end\nend\n\ndef main()\n  args := Process.argv()\n  request := Request.new(method: HttpMethod.get(), path: \"/\", query_string: \"\",\n    headers: Headers.new([Header.new(name: \"Authorization\", value: \"Bearer \" + args[1])]), body: Body.empty())\n  context := Context.new(request: request, path_parameters: {})\n  response := Timeout.call(context, Foreign.new(args[0]), TimeoutOptions.new(milliseconds: 100))\n  puts(response.status)\n  puts(\"after-response\")\n  hold(6000)\n  puts(\"after-wait\")\n  hold(1000)\nend\n"
+      },
+      "expected": {
+        "exit": "zero",
+        "stdout": "foreign-start\n504\nafter-response\nafter-wait\n",
+        "handlerResponseWatchdogSeconds": 4,
+        "watchdogPurpose": "distinguish deadline response from the independent five-second OIDC timeout; not a public latency SLO",
+        "ownedConnectionsAtNativeContinuation": 0,
+        "referenceConnectionsMayOutliveResponse": true,
+        "ownedConnectionsAfterSixSeconds": 0,
+        "inspectionRequiresLiveProcess": true
+      },
+      "arguments": [
+        "{fixtureIssuer}",
+        "{fixtureBearerToken}"
+      ],
+      "tls": true,
+      "sourceHashes": {
+        "main.trb": "8242ff21124bbc5534b6838e4997f34a27770aabce7e385dff4471da6fc20634"
+      }
+    },
+    {
+      "id": "server-recovery",
+      "basis": [
+        "web"
+      ],
+      "kind": "server",
+      "files": {
+        "main.trb": "import trb/web\ndef main()\nWeb.serve(Web::ServerConfig.new(host: \"127.0.0.1\", port: PORT, body_limit_bytes: 4096, shutdown_timeout_milliseconds: 250))\nend\n",
+        "routes/fast.trb": "import { Context, Response } from trb/web\ndef get(_context: Context): Response\nreturn Response.text(\"complete\")\nend\n",
+        "routes/slow.trb": "import { Context, Response } from trb/web\ndef get(_context: Context): Response\nmut index := 0\nwhile index < 1000000000\nindex += 1\nend\nreturn Response.text(\"late\")\nend\n",
+        "routes/bad.trb": "import { Context, Response } from trb/web\ndef get(context: Context): Response\nzero := context.request.body.size()\nputs(1 / zero)\nreturn Response.text(\"unreachable\")\nend\n",
+        "routes/_middleware.trb": "import { Context, Next, Response } from trb/web\nimport { Timeout, TimeoutOptions } from trb/web/middleware/timeout\ndef call(context: Context, next_handler: Next): Response\nreturn Timeout.call(context, next_handler, TimeoutOptions.new(milliseconds: 100))\nend\n"
+      },
+      "expected": {
+        "statuses": [
+          200,
+          504,
+          200,
+          500,
+          200,
+          504,
+          200
+        ],
+        "sameConnection": true,
+        "normalRecoveryAfterTimeout": true,
+        "gracefulShutdown": true
+      },
+      "substitutions": {
+        "PORT": "owned ephemeral loopback port"
+      },
+      "sourceHashes": {
+        "main.trb": "ea166572298be13720666b96912e1ff13f5e068d9e4a2cb7a8a1e5e6651d30d0",
+        "routes/fast.trb": "096c184239284b33062e471519731d67d0b8a8d33c246190117c2454acb79f0b",
+        "routes/slow.trb": "2b631a7b3da716c1df05d1ee83f28071d9a7786b4b0ae587f386d84703918f4f",
+        "routes/bad.trb": "017b0f85b4c79b62e4f30fceed394a5b2a0a4a71fe29e5cf52093e6ff5c4c859",
+        "routes/_middleware.trb": "e3e15390aab203049e41c94f8045309fd29a4f8be86cd787c48d43de3329af05"
+      }
+    },
+    {
+      "id": "no-timeout-control",
+      "basis": [
+        "web"
+      ],
+      "kind": "application",
+      "files": {
+        "main.trb": "def main()\nputs(123)\nend\n"
+      },
+      "expected": {
+        "exit": "zero",
+        "stdout": "123\n",
+        "newTimerOrNetworkCryptoDependency": false
+      },
+      "sourceHashes": {
+        "main.trb": "7d0bb37409de4f07b15174b3b5d8d495d883153ab2b5aa2c096688ede6354f79"
+      }
+    },
+    {
+      "id": "ordinary-resource-unwind",
+      "basis": [
+        "resource"
+      ],
+      "kind": "runtime",
+      "files": {},
+      "expected": {
+        "ordinaryUnwindRegression": true,
+        "deadlineBypassesInnerOrdinaryRecovery": true,
+        "ordinaryFailureRestoresParentDeadline": true,
+        "rootsRestored": true,
+        "cleanupExactlyOnceInLifoOrder": true,
+        "ownedHandlesAtContinuation": 0
+      },
+      "command": [
+        "{reference}",
+        "test",
+        "--config",
+        "compiler/trbconfig.jsonc",
+        "compiler/src/backend/qbe/runtime/deadlines_test.trb",
+        "compiler/src/backend/qbe/runtime/resource_cleanup_test.trb"
+      ],
+      "sourceHashes": {}
+    },
+    {
+      "id": "socket-lifetime",
+      "basis": [
+        "socket"
+      ],
+      "kind": "existing-network",
+      "command": [
+        "python3",
+        "tools/native-web-network-test.py",
+        "{native}",
+        "--libraries",
+        "{networkLibraries}"
+      ],
+      "referenceCommand": [
+        "python3",
+        "tools/native-web-network-test.py",
+        "{reference}",
+        "--reference"
+      ],
+      "expected": {
+        "existingNetworkControls": true,
+        "listenAcceptReadWrite": true,
+        "peerEofAndPartialRequests": true,
+        "shutdownAndOwnedHandleCleanup": true
+      },
+      "files": {},
+      "sourceHashes": {}
+    }
+  ],
+  "remainingObligations": [
+    "Unadopted numerical duration-boundary proposal #1323 is outside this initial manifest; no waiver or passing parity is granted.",
+    "Positive reference REPL execution lacks its JSON adapter; Native REPL qualification is separate and still required for v0.5.",
+    "Full concurrency capture/borrow/rejection, all package operations and four-host release qualification remain outside the initial scenario denominator."
+  ],
+  "baseline": {
+    "reference": "Recorded compiled Go observations at the exact revision cover the application cases. Existing socket controls have independent hosted evidence. Runtime deadline-frame controls do not exist yet.",
+    "native": "Timeout package execution is not runnable: verified internal runtime import/operation support is missing. Existing ordinary resource and network controls passing does not establish deadline support."
+  }
+}

@@ -1,0 +1,185 @@
+import { cli_absolute, cli_create_directory, cli_error, cli_find_config, cli_program_path } from main
+import { CompilerProjectSources, check, compiler_collect_test_paths, compiler_file_exists, compiler_read_source, emit_qbe, load_configured_test_sources } from compiler
+import { cli_diagnostic } from diagnostics
+import { parse_project_config } from project/config
+import { parse_test_options } from project/test_options
+import { TestPathSelection, test_absolute_path, test_project_paths, test_source_path } from project/test_selection
+import { qbe_output_chunk } from backend/qbe/output
+import { resolve } from frontend/checking/program/resolution
+import { has_diagnostic } from state/state
+import { path_directory, path_join, path_normalize } from support/path
+import { native_cli_cwd, native_cli_directory_stat, native_cli_env, native_cli_execute, native_cli_filesystem_message, native_cli_interrupt, native_cli_link_qbe, native_cli_remove, native_cli_rename, native_cli_save, native_cli_signals, native_cli_target, native_cli_temp, native_cli_tempdir, native_cli_write } from host
+
+def cli_test_selections(paths: Array<String>, cwd: String): Array<TestPathSelection>
+	mut selections: Array<TestPathSelection> := []
+	paths.each do |path|
+		absolute := test_absolute_path(cwd, path)
+		mut kind := [0]
+		status := native_cli_directory_stat(absolute, 1, kind)
+		mut error := ""
+		if status != 0
+			error = native_cli_filesystem_message(status)
+		end
+		selections.push(TestPathSelection.new(authored: path, absolute: absolute, directory: kind[0] == 1, error: error))
+	end
+	return selections
+end
+
+# Select metadata before opening bodies. Compile all selected cases once; the
+# resulting process preserves shared module state and isolates case failures.
+def cli_test_command(arguments: Array<String>): Integer
+	mut values: Array<String> := []
+	mut index := 1
+	while index < arguments.size()
+		values.push(arguments[index])
+		index += 1
+	end
+	options := parse_test_options(values)
+	if options.error != ""
+		return cli_error(options.error)
+	end
+	if options.debug
+		return cli_error("test --debug is not available for mode trb in this compiler")
+	end
+	cwd := native_cli_cwd()
+	if cwd == ""
+		return cli_error("cannot resolve the working directory")
+	end
+	mut config_path := options.config
+	if config_path == ""
+		config_path = cli_find_config(cwd)
+	else
+		config_path = path_normalize(cli_absolute(config_path, cwd))
+	end
+	if config_path == ""
+		return cli_error("no trbconfig.jsonc found")
+	end
+	if !compiler_file_exists(config_path)
+		return cli_error("cannot read configuration " + config_path)
+	end
+	config := parse_project_config(compiler_read_source(config_path))
+	if config.error != ""
+		return cli_error(config.error)
+	end
+	if config.mode != "trb"
+		return cli_error("test is not available for mode " + config.mode + " in this compiler")
+	end
+	native_cli_signals()
+	if native_cli_target() == ""
+		return cli_error("unsupported host platform")
+	end
+	root := path_directory(config_path)
+	source_root := test_absolute_path(root, config.source_dir)
+	out_root := test_absolute_path(root, config.out_dir)
+	inventory := compiler_collect_test_paths(source_root, out_root)
+	if inventory.error != ""
+		return cli_error("cannot collect project source " + inventory.error)
+	end
+	mut has_test_files := false
+	inventory.paths.each do |path|
+		if test_source_path(path)
+			has_test_files = true
+		end
+	end
+	if !has_test_files
+		return cli_error("no *_test.trb files found")
+	end
+	selected := test_project_paths(source_root, config.source_dir, inventory.paths, cli_test_selections(options.paths, cwd))
+	if selected.error != ""
+		return cli_error(selected.error)
+	end
+	mut tests: Array<String> := []
+	selected.paths.each do |path|
+		if test_source_path(path)
+			tests.push(path)
+		end
+	end
+	if tests.size() == 0
+		return cli_error("no *_test.trb files found")
+	end
+	mut sources: Array<String> := []
+	selected.paths.each do |path|
+		if !compiler_file_exists(path)
+			return cli_error("cannot read source " + path)
+		end
+		sources.push(compiler_read_source(path))
+	end
+	bundle := CompilerProjectSources.new(paths: selected.paths, sources: sources, error: "")
+	mut state := load_configured_test_sources(config, config_path, source_root, out_root, bundle, tests, options.reporter)
+	if !has_diagnostic(state)
+		resolve(state)
+	end
+	if !has_diagnostic(state)
+		check(state)
+	end
+	if has_diagnostic(state)
+		native_cli_write(cli_diagnostic(state, config_path, 0) + "\n", 2)
+		return 1
+	end
+	mut qbe := native_cli_env("TRBN_QBE")
+	if qbe == ""
+		qbe = path_join(path_directory(cli_program_path(cwd)), "qbe")
+	end
+	qbe = cli_absolute(qbe, cwd)
+	mut cc := native_cli_env("TRBN_CC")
+	if cc == ""
+		cc = "/usr/bin/cc"
+	end
+	cc = cli_absolute(cc, cwd)
+	if !compiler_file_exists(qbe)
+		return cli_error("QBE is missing; place qbe beside trbn or set TRBN_QBE")
+	end
+	mut destination := ""
+	mut temporary := ""
+	if options.compile
+		destination = options.output
+		if destination == ""
+			destination = path_join(root, "bin/" + config.name + ".test")
+		else
+			destination = cli_absolute(destination, cwd)
+		end
+		if !cli_create_directory(path_directory(destination))
+			return cli_error("cannot create output directory")
+		end
+		temporary = native_cli_tempdir(destination + ".build-")
+	else
+		temporary = native_cli_temp()
+	end
+	if temporary == ""
+		return cli_error("cannot create a temporary build directory")
+	end
+	ssa := path_join(temporary, "tests.ssa")
+	program := path_join(temporary, "tests")
+	output := emit_qbe(state)
+	mut status := 0
+	if has_diagnostic(state)
+		native_cli_write(cli_diagnostic(state, config_path, 0) + "\n", 2)
+		status = 1
+	end
+	mut position := [0]
+	mut append := 0
+	while status == 0 && position[0] < output.lines.used[0]
+		status = native_cli_save(ssa, qbe_output_chunk(output, position) + "\n", append)
+		append = 1
+	end
+	if status == 0 && native_cli_interrupt(0) == 0
+		status = native_cli_link_qbe(ssa, program, qbe, cc)
+	end
+	if status == 0 && native_cli_interrupt(0) == 0
+		if options.compile
+			status = native_cli_rename(program, destination)
+		else
+			status = native_cli_execute([program], 0)
+		end
+	end
+	if native_cli_interrupt(0) != 0
+		status = 130
+	end
+	native_cli_remove(program, 0)
+	native_cli_remove(ssa, 0)
+	if native_cli_remove(temporary, 1) != 0
+		native_cli_write("trbn: cannot remove test build directory " + temporary + "\n", 2)
+		return 1
+	end
+	return status
+end

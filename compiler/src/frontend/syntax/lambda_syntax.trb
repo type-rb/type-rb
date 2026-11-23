@@ -1,0 +1,57 @@
+import { LambdaParameter } from frontend/types/callable_types
+import { CompilerState, diagnostic, has_diagnostic } from state/state
+import { load_integer } from support/storage
+import { advance, expect, expect_identifier, parse_type, skip_newlines, token_is } from frontend/syntax/syntax_tokens
+
+# Recursive expression/body parsing remains in parser. This header owns the
+# restricted fn parameter grammar without registering ordinary declarations.
+def parse_lambda_parameters(mut state: CompilerState, mut position: Array<Integer>): Array<LambdaParameter>
+	mut parameters: Array<LambdaParameter> := []
+	if !expect(state, position, "(")
+		return parameters
+	end
+	skip_newlines(state, position)
+	while !token_is(state, position[0], ")") && !has_diagnostic(state)
+		origin := position[0]
+		mut mutable := 0
+		if token_is(state, position[0], "mut")
+			mutable = 1
+			advance(position)
+		end
+		name := expect_identifier(state, position)
+		if !expect(state, position, ":")
+			return parameters
+		end
+		type_name := parse_type(state, position)
+		parameters.each do |parameter|
+			if parameter.name == name
+				diagnostic(state, "TRBN4002", load_integer(state.source_tokens.token_lines, origin), "duplicate fn parameter " + name)
+			end
+		end
+		parameters.push(LambdaParameter.new(name: name, type_name: type_name, origin: origin, mutable: mutable))
+		if !token_is(state, position[0], ",")
+			break
+		end
+		advance(position)
+		skip_newlines(state, position)
+	end
+	skip_newlines(state, position)
+	expect(state, position, ")")
+	return parameters
+end
+
+# The name resolver must not donate nested iteration, catch or pattern names
+# to the containing body. The nested body's own lexical checker binds them.
+def lambda_contains_origin(state: CompilerState, start: Integer, finish: Integer, origin: Integer): Boolean
+	state.callables.call_blocks.each do |syntax|
+		if syntax.origin >= start && syntax.finish <= finish && origin >= syntax.body_start && origin < syntax.body_finish
+			return true
+		end
+	end
+	state.callables.lambdas.each do |syntax|
+		if syntax.origin >= start && syntax.finish <= finish && origin >= syntax.body_start && origin < syntax.body_finish
+			return true
+		end
+	end
+	return false
+end

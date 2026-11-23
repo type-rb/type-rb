@@ -1,0 +1,8 @@
+case	candidate	status	stderr_empty	stdout_exact
+n-body	typerb-native	0	true	true
+n-body	typerb-go	0	true	true
+n-body	c	0	true	true
+n-body	cpp	0	true	true
+n-body	go	0	true	true
+n-body	rust	0	true	true
+n-body	java	0	true	true

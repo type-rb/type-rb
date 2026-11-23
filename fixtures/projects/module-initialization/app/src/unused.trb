@@ -1,0 +1,5 @@
+def mark(): Integer
+	puts("unused")
+	return 99
+end
+UNUSED := mark()

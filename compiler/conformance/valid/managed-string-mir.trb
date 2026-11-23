@@ -1,0 +1,52 @@
+def show(text: String): String
+	puts(text)
+	return text
+end
+
+def pair(left: String, right: String): String
+	return left + ":" + right
+end
+
+def churn(count: Integer): String
+	mut value := "unused"
+	mut index := 0
+	while index < count
+		value = (1000000 + index).to_s()
+		index += 1
+	end
+	return value
+end
+
+def nested(text: String, depth: Integer): String
+	if depth == 0
+		return pair(text, churn(45000))
+	end
+	return nested(text + "x", depth - 1)
+end
+
+def choose(mut text: String, count: Integer): String
+	mut index := 0
+	while index < count
+		index += 1
+		if index == 2
+			next
+		elsif index > 4
+			break
+		end
+		text += index.to_s()
+	end
+	return text
+end
+
+def main()
+	puts(show("left") + show("right"))
+	puts(pair((1000007).to_s(), churn(45000)))
+	puts(choose("a", 10))
+	puts(("ab" + "cd")[-1])
+	puts(("12" + "3").to_i() + (4.9).to_i())
+	puts(("a" + "b") == "ab")
+	puts(("a" + "b") != "ab")
+	puts(false && show("skipped").size() == 0)
+	puts(true || show("skipped").size() == 0)
+	puts(nested("root", 80).size())
+end

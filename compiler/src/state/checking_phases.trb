@@ -1,0 +1,13 @@
+# Callable analysis phases preserve discovery before replay into typed MIR.
+
+def checking_single_pass(): Integer
+	return 0
+end
+
+def checking_discovery(): Integer
+	return 1
+end
+
+def checking_lowering(): Integer
+	return 2
+end

@@ -1,0 +1,251 @@
+import { check, emit_qbe } from compiler
+import { compiler_test_instruction_with_cell } from testing/compiler
+import { control_test_output } from testing/mir/control
+import { logical_checked_source } from testing/pipeline
+import { logical_run_qbe } from testing/qbe_runner
+import { MirRootPlan } from mir/model/module
+import { mir_instruction_effects } from mir/analysis/call_effects
+import { verify_mir } from mir/verify/module
+import { load_string } from support/storage
+import { describe, expect, test } from trb/std/test
+import { hash_value_mir_state, managed_mir_test_fixture } from testing/mir/managed
+import trb/std/process
+import trb/std/result
+
+describe("Hash value MIR") do
+	test("separates encoded and managed key identities from empty and deleted buckets") do
+		managed_mir_test_fixture("hash-probe-identity", 4)
+	end
+	test("boxes explicit and inferred Any collection elements with verified MIR") do
+		sources := [
+			"def main()\nmut values: Array<Any> := [1, \"text\"]\nvalues.push(true)\nputs(values.size())\nend\n",
+			"def main()\nmut values: Hash<Integer, Any> := {}\nvalues[1] = 1\nvalues[2] = \"text\"\nputs(values.size())\nend\n",
+			"def main()\nmut values := {}\nvalues[1] = []\nvalues[2] = [\"x\"]\nvalues[1].push(2)\nputs(values[1].size())\nend\n",
+		]
+		outputs := ["3\n", "2\n", "1\n"]
+		sources.each.with_index do |source, index|
+			mut state := logical_checked_source(source)
+			checked := check(state)
+			if !checked
+				puts(index)
+				puts(load_string(state.diagnostics.messages, 0))
+			end
+			expect(checked).to_be_true()
+			expect(verify_mir(state.scalar_mir, true)).to_equal("")
+			qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+			if qbe != nil
+				case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+				when Result::Ok(actual)
+					expect(actual).to_equal(outputs[index])
+				when Result::Err(error)
+					puts(error)
+					expect(false).to_be_true()
+				end
+			end
+		end
+	end
+	test("rejects an Any injection whose tag does not match its operand") do
+		mut state := logical_checked_source("def main()\nmut values: Array<Any> := [\"kept\"]\nputs(values.size())\nend\n")
+		expect(check(state)).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		mut index := 0
+		while state.scalar_mir.instructions[index].kind != 52
+			index += 1
+		end
+		instruction := state.scalar_mir.instructions[index]
+		state.scalar_mir.instructions[index] = compiler_test_instruction_with_cell(instruction, 4, 1)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR union injection alternative differs")
+	end
+	test("retains colon key evaluation and labels in erased managed MIR") do
+		managed_mir_test_fixture("hash-key-spelling", 6)
+	end
+	test("resolves independent empty types across conditional and loop edges") do
+		mut state := logical_checked_source("def main()\nmut integers := {}\nmut words := {}\nmut i := 0\nwhile i < 2\nintegers[i] = i\ni += 1\nend\nif true\nwords[\"key\"] = \"value\"\nend\nputs(integers[1])\nputs(words[\"key\"])\nend\n")
+		expect(check(state)).to_be_true()
+		expect(state.scalar_mir.functions.size()).to_equal(1)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		mut integers := 0
+		mut words := 0
+		state.scalar_mir.values.each do |value|
+			if value.type_id >= 9
+				row := state.scalar_mir.types[value.type_id - 9]
+				expect(row.kind == 5).to_be_false()
+				if row.name == "Hash<Integer,Integer>"
+					integers += 1
+				elsif row.name == "Hash<String,String>"
+					words += 1
+				end
+			end
+		end
+		expect(integers > 3).to_be_true()
+		expect(words > 3).to_be_true()
+	end
+
+	test("promotes inferred Hash values across one control statement") do
+		sources := [
+			"def main()\nmut values := {}\nif true\nvalues[1] = 2\nelse\nvalues[1] = 4.5\nend\nputs(values[1])\nend\n",
+			"def main()\nmut values := {}\nif false\nvalues[1] = 2\nelse\nvalues[1] = 4.5\nend\nputs(values[1])\nend\n",
+			"def main()\nmut values := {}\nif true\nvalues[\"item\"] = 1.5\nelse\nvalues[\"item\"] = 2\nend\nputs(values[\"item\"])\nend\n",
+			"def main()\nmut values := {}\nif true\nvalues[1] = 2\nvalues[3] = 4.5\nelse\nvalues[1] = 6\nend\nputs(values[1])\nend\n",
+		]
+		outputs := ["2.0\n", "4.5\n", "1.5\n", "2.0\n"]
+		sources.each.with_index do |source, index|
+			mut state := logical_checked_source(source)
+			checked := check(state)
+			if !checked
+				puts(index)
+				puts(load_string(state.diagnostics.messages, 0))
+			end
+			expect(checked).to_be_true()
+			expect(verify_mir(state.scalar_mir, true)).to_equal("")
+			qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+			if qbe != nil
+				case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+				when Result::Ok(actual)
+					expect(actual).to_equal(outputs[index])
+				when Result::Err(error)
+					puts(error)
+					expect(false).to_be_true()
+				end
+			end
+		end
+		rejected := [
+			"def main()\nmut values := {}\nvalues[1] = 2\nvalues[3] = 4.5\nputs(values[1])\nend\n",
+			"def main()\nmut values := {}\nif true\nvalues[1] = 2\nelse\nvalues[1] = 3\nend\nvalues[4] = 4.5\nend\n",
+			"def main()\nmut values: Hash<Integer, Integer> := {}\nif true\nvalues[1] = 2\nelse\nvalues[1] = 4.5\nend\nend\n",
+			"def main()\nmut values := {}\nif true\nvalues[1] = 2\nelse\nvalues[\"item\"] = 4\nend\nend\n",
+		]
+		rejected.each do |source|
+			mut state := logical_checked_source(source)
+			expect(check(state)).to_be_false()
+		end
+	end
+
+	test("joins inferred Hash value alternatives before verified stores") do
+		sources := [
+			"def main()\nmut values := {}\nif true\nvalues[1] = [2]\nelse\nvalues[1] = [4.5]\nend\nputs(values.size())\nend\n",
+			"def main()\nmut values := {}\nif false\nvalues[1] = [2]\nelse\nvalues[1] = [4.5]\nend\nputs(values.size())\nend\n",
+			"def main()\nmut values := {}\nif true\nvalues[1] = 2\nelse\nvalues[1] = nil\nend\nputs(values.size())\nend\n",
+			"def main()\nmut values := {}\nif false\nvalues[1] = 2\nelse\nvalues[1] = nil\nend\nputs(values.size())\nend\n",
+			"def main()\nmut values := {}\nif true\nvalues[1] = 2\nelse\nvalues[1] = \"word\"\nend\nputs(values.size())\nend\n",
+			"def main()\nmut values := {}\nif false\nvalues[1] = 2\nelse\nvalues[1] = \"word\"\nend\nputs(values.size())\nend\n",
+			"def main()\nmut values := {}\ncase 1\nwhen 1\nvalues[1] = 2\nwhen 2\nvalues[1] = 4.5\nelse\nvalues[1] = \"word\"\nend\nputs(values.size())\nend\n",
+			"def main()\nmut values := {}\ncase 3\nwhen 1\nvalues[1] = 2\nwhen 2\nvalues[1] = 4.5\nelse\nvalues[1] = \"word\"\nend\nputs(values.size())\nend\n",
+		]
+		sources.each do |source|
+			mut state := logical_checked_source(source)
+			checked := check(state)
+			if !checked
+				puts(load_string(state.diagnostics.messages, 0))
+			end
+			expect(checked).to_be_true()
+			expect(verify_mir(state.scalar_mir, true)).to_equal("")
+			qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+			if qbe != nil
+				case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+				when Result::Ok(actual)
+					expect(actual).to_equal("1\n")
+				when Result::Err(error)
+					puts(error)
+					expect(false).to_be_true()
+				end
+			end
+			mut interactive := logical_checked_source(source, true)
+			if !check(interactive)
+				puts(load_string(interactive.diagnostics.messages, 0))
+				expect(false).to_be_true()
+			end
+			expect(verify_mir(interactive.scalar_mir, true)).to_equal("")
+		end
+		rejected := [
+			"def main()\nmut values := {}\nvalues[1] = [2]\nvalues[2] = [4.5]\nend\n",
+			"def main()\nmut values := {}\nvalues[1] = 2\nvalues[2] = nil\nend\n",
+			"def main()\nmut values: Hash<Integer, Integer> := {}\nif true\nvalues[1] = 2\nelse\nvalues[1] = \"word\"\nend\nend\n",
+			"def main()\nmut values := {}\nif true\nvalues[1] = [2]\nelse\nvalues[\"key\"] = [4.5]\nend\nend\n",
+		]
+		rejected.each do |source|
+			mut state := logical_checked_source(source)
+			expect(check(state)).to_be_false()
+		end
+	end
+
+	test("resolves a checked unreachable first store through the live exit edge") do
+		mut state := logical_checked_source("def main()\nmut table := {}\n[1].each do |_value|\nbreak\ntable[1] = 2\nend\nputs(table.size())\nend\n")
+		expect(check(state)).to_be_true()
+		expect(state.scalar_mir.functions.size()).to_equal(1)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		mut allocations := 0
+		mut stores := 0
+		state.scalar_mir.instructions.each do |instruction|
+			if instruction.kind == 27
+				allocations += 1
+			elsif instruction.kind == 29
+				stores += 1
+			end
+		end
+		expect(allocations).to_equal(1)
+		expect(stores).to_equal(0)
+	end
+
+	test("rejects malformed capacity, owner, key, stored value and method identity") do
+		mut mutation := 0
+		while mutation < 5
+			mut state := hash_value_mir_state()
+			mut kind := 29
+			if mutation == 0
+				kind = 27
+			elsif mutation == 4
+				kind = 30
+			end
+			mut index := 0
+			while state.scalar_mir.instructions[index].kind != kind
+				index += 1
+			end
+			instruction := state.scalar_mir.instructions[index]
+			mut field := 4
+			mut value := 999999
+			if mutation == 0
+				value = 3
+			elsif mutation == 1
+				field = 2
+			elsif mutation == 2
+				field = 3
+			elsif mutation == 4
+				value = 8
+			end
+			state.scalar_mir.instructions[index] = compiler_test_instruction_with_cell(instruction, field, value)
+			expect(verify_mir(state.scalar_mir, true).empty?()).to_be_false()
+			mutation += 1
+		end
+	end
+
+	test("roots the copied Hash and source across merge update") do
+		mut state := hash_value_mir_state()
+		plan := state.scalar_mir.root_plans[0]
+		mut point := 0
+		while state.scalar_mir.instructions[plan.instructions[point]].kind != 30 || state.scalar_mir.instructions[plan.instructions[point]].payload != 9
+			point += 1
+		end
+		expect(mir_instruction_effects(state.scalar_mir, state.scalar_mir.instructions[plan.instructions[point]])).to_equal(11)
+		expect(plan.roots[point].size()).to_equal(2)
+		mut roots := plan.roots
+		roots[point] = []
+		state.scalar_mir.root_plans[0] = MirRootPlan.new(function_id: plan.function_id, instructions: plan.instructions, roots: roots, capacity: plan.capacity)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR live root plan differs")
+	end
+
+	test("executes erased Hash MIR with captured stores, Float values and forced collection") do
+		managed_mir_test_fixture("managed-hash-mir", 21)
+	end
+
+	test("retains joined Hash alternatives through forced collection and erased MIR") do
+		managed_mir_test_fixture("managed-hash-joined-values", 10)
+	end
+
+	test("retains Any-boxed Hash values through forced collection and erased MIR") do
+		managed_mir_test_fixture("managed-hash-any-values", 8)
+	end
+end
+
+# Verify ownership without source plans, arbitrary block storage and collection
+# before every allocating operation; shared by managed Hash and iteration cases.

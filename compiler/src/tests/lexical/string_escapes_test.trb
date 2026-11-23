@@ -1,0 +1,49 @@
+import { check, emit_qbe } from compiler
+import { control_test_output } from testing/mir/control
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { logical_checked_source } from testing/pipeline
+import { logical_run_qbe } from testing/qbe_runner
+import { verify_mir } from mir/verify/module
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+describe("String escape decoding") do
+	test("decodes single-quoted Strings and Symbols without interpolation") do
+		source := "def main()\nputs('hello')\nputs('it\\'s')\nputs('a\\nb')\nputs('a\"b')\nputs('#" + "{missing}')\nputs(:'quoted')\nputs(:'it\\'s')\nputs(\"#" + "{'embedded'}\")\nend\n"
+		mut state := logical_checked_source(source)
+		expect(check(state)).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		before := control_test_output(emit_qbe(state))
+		intrinsic_mir_erase(state)
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, before)
+			when Result::Ok(output)
+				expect(output).to_equal("hello\nit's\na\nb\na\"b\n#" + "{missing}\nquoted\nit's\nembedded\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("keeps decoded ASCII literals independent of source") do
+		mut state := logical_checked_source("def main()\ntext := \"\\x41\\101\\u0041\\U00000041\"\nputs(text)\nputs(text.size())\nputs(\"\\u0023{missing}\")\nputs(\"\\x22quoted\\x22\")\nend\n")
+		expect(check(state)).to_be_true()
+		before := control_test_output(emit_qbe(state))
+		intrinsic_mir_erase(state)
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, before)
+			when Result::Ok(output)
+				expect(output).to_equal("AAAA\n4\n\#{missing}\n\"quoted\"\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+end

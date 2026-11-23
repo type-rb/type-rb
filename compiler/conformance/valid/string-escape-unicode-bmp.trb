@@ -1,0 +1,9 @@
+def probe()
+	text := "\u65e5\u672c"
+	puts(text.size())
+	text.codepoints().each { |point| puts(point) }
+end
+
+def main()
+	probe()
+end

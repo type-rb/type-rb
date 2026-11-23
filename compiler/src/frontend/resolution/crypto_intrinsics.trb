@@ -1,0 +1,38 @@
+import { crypto_declaration, crypto_names, crypto_parameter_names, crypto_parameters, crypto_result, crypto_source } from mir/model/crypto_contract
+import { CompilerState } from state/state
+import { load_integer, load_string, sparse_integer_at } from support/storage
+
+# Authored declarations cannot acquire this boundary by name or path.
+def standard_crypto(state: CompilerState, function: Integer): Integer
+	if function < 0 || function >= state.declarations.function_count[0]
+		return -1
+	end
+	owner := load_integer(state.declarations.function_modules, function)
+	source := sparse_integer_at(state.standard_modules, owner)
+	name := load_string(state.declarations.function_names, function)
+	mut kind := 0
+	while kind < crypto_names().size()
+		if source == crypto_source(kind) && name == crypto_declaration(kind)
+			parameters := crypto_parameters(kind)
+			names := crypto_parameter_names(kind)
+			if load_integer(state.declarations.function_parameter_counts, function) != parameters.size() || load_string(state.declarations.function_result_types, function) != crypto_result(kind)
+				return -1
+			end
+			if load_integer(state.declarations.function_body_starts, function) != load_integer(state.declarations.function_body_ends, function) || sparse_integer_at(state.parsed.function_expression_bodies, function) != 0
+				return -1
+			end
+			start := load_integer(state.declarations.function_parameter_starts, function)
+			mut index := 0
+			while index < parameters.size()
+				parameter := start + index
+				if load_string(state.declarations.parameter_names, parameter) != names[index] || load_string(state.declarations.parameter_types, parameter) != parameters[index] || load_integer(state.declarations.parameter_mutable, parameter) != 0 || load_integer(state.declarations.parameter_named_only, parameter) != 0 || sparse_integer_at(state.parsed.parameter_defaults, parameter) != 0
+					return -1
+				end
+				index += 1
+			end
+			return kind
+		end
+		kind += 1
+	end
+	return -1
+end

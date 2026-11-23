@@ -1,0 +1,154 @@
+record WorkerBatch
+	payloads: Array<String>
+	attempts: Array<Integer>
+end
+
+record WorkerState
+	recent: Array<String>
+end
+
+def worker_payload(): String
+	return "native-" + "worker"
+end
+
+def worker_batch(size: Integer): WorkerBatch
+	mut payloads: Array<String> := []
+	mut attempts: Array<Integer> := []
+	mut index := 0
+	while index < size
+		payloads.push(worker_payload())
+		attempts.push(0)
+		index += 1
+	end
+	return WorkerBatch.new(payloads: payloads, attempts: attempts)
+end
+
+def worker_state(): WorkerState
+	mut recent: Array<String> := []
+	mut index := 0
+	while index < 64
+		recent.push("empty")
+		index += 1
+	end
+	return WorkerState.new(recent: recent)
+end
+
+def process_worker_batch(
+		mut state: WorkerState,
+		mut batch: WorkerBatch,
+		phase: Integer,
+	): Integer
+	original := batch.payloads.size()
+	mut processed := 0
+	mut succeeded := 0
+	mut retried := 0
+	mut failed := 0
+	mut cancelled := 0
+	mut checksum := 0
+	mut index := 0
+	while index < batch.payloads.size()
+		payload := batch.payloads[index]
+		attempt := batch.attempts[index]
+		if attempt == 0
+			kind := (index + phase) % 16
+			if kind == 0
+				cancelled += 1
+			else
+				if kind == 1
+					retried += 1
+					batch.payloads.push(payload + "-retry")
+					batch.attempts.push(1)
+				else
+					if kind == 2
+						failed += 1
+					else
+						succeeded += 1
+					end
+				end
+			end
+		else
+			succeeded += 1
+		end
+		state.recent[processed % state.recent.size()] = payload
+		checksum += payload.size() + attempt
+		processed += 1
+		index += 1
+	end
+	if original != 128
+		return -1
+	end
+	if processed != 136
+		return -2
+	end
+	if batch.payloads.size() != 136
+		return -3
+	end
+	if batch.attempts.size() != 136
+		return -4
+	end
+	if succeeded != 112
+		return -5
+	end
+	if retried != 8
+		return -6
+	end
+	if failed != 8
+		return -7
+	end
+	if cancelled != 8
+		return -8
+	end
+	return checksum + succeeded + failed + cancelled + retried
+end
+
+def run_worker_lifecycle(phases: Integer, batches: Integer, batch_size: Integer)
+	mut state := worker_state()
+	mut phase := 0
+	mut total := 0
+	while phase < phases
+		mut batch_index := 0
+		mut phase_total := 0
+		while batch_index < batches
+			result := process_worker_batch(state, worker_batch(batch_size), phase + batch_index)
+			if result < 0
+				puts("native-worker-bad")
+				return
+			end
+			phase_total += result
+			batch_index += 1
+		end
+		mut idle_index := 0
+		mut idle_checksum := 0
+		while idle_index < 1000000
+			idle_checksum += idle_index
+			idle_index += 1
+		end
+		if phase_total <= 0
+			puts("native-worker-bad")
+			return
+		else
+			if idle_checksum != 499999500000
+				puts("native-worker-bad")
+				return
+			end
+		end
+		total += phase_total
+		puts("native-worker-phase")
+		phase += 1
+	end
+	if total > 0
+		if state.recent.size() == 64
+			puts("native-worker-ok")
+		else
+			puts("native-worker-bad")
+		end
+	else
+		puts("native-worker-bad")
+	end
+	return
+end
+
+def main()
+	run_worker_lifecycle(60, 120000, 128)
+	return
+end

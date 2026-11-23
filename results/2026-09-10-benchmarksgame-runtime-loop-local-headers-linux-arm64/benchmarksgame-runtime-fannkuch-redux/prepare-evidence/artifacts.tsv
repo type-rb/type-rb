@@ -1,0 +1,8 @@
+case	candidate	artifact	bytes	sha256
+fannkuch-redux	typerb-native	/home/runner/work/_temp/prepare-workspace/backend-pair/fannkuch-redux/native	18648	150267d24bb6a026710702fc0ff6b25b3c738966a08ff1e229758ce1178db93e
+fannkuch-redux	typerb-go	/home/runner/work/_temp/prepare-workspace/backend-pair/fannkuch-redux/reference	2810100	3a76c0e94662824860966d71f465dfd238c7d8ea1c0953b3d6bd426717591c71
+fannkuch-redux	c	/home/runner/work/_temp/prepare-workspace/context/programs/fannkuch-redux/c/program	70648	91599ab5a89e943342986f49440203fe5905a05798c4b2029700b29b7b6a6971
+fannkuch-redux	cpp	/home/runner/work/_temp/prepare-workspace/context/programs/fannkuch-redux/cpp/program	70912	0856522f378d9a20ad475be498b0fe250407aba760f6b92727f3573d484d2aee
+fannkuch-redux	go	/home/runner/work/_temp/prepare-workspace/context/programs/fannkuch-redux/go/program	2381555	52afa1900b5ffd8f3b0e4477fc57f1790b497a1fbaa7a8a5bab775c6bfbb7a7d
+fannkuch-redux	rust	/home/runner/work/_temp/prepare-workspace/context/programs/fannkuch-redux/rust/program	4657984	ba721d295cd89db2b4d383a3d2c410cef2862e53cf32e05b3c500afe0bafeffd
+fannkuch-redux	java	/home/runner/work/_temp/prepare-workspace/context/programs/fannkuch-redux/java/classes/fannkuchredux.class	3839	2ecfcd11f354c94e2ddb16e8ca39740bca848230c5ec0f443be8a8ee06fc7c10

@@ -1,0 +1,209 @@
+import { check, emit_qbe } from compiler
+import { compiler_new, has_diagnostic } from state/state
+import { lex } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { expect_compiler_phase, logical_checked_source } from testing/pipeline
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { control_test_output } from testing/mir/control
+import { managed_mir_test_fixture } from testing/mir/managed
+import { logical_run_qbe } from testing/qbe_runner
+import { verify_mir } from mir/verify/module
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+describe("Generic newtype instance methods") do
+	test("keeps recursive specializations executable after source erasure and block reordering") do
+		managed_mir_test_fixture("newtype-generic-methods-mir", 0)
+	end
+	test("scalar specializations") do
+		mut state := logical_checked_source("newtype Label = String do\ndef identity<T>(value: T): T\nreturn value\nend\nend\n\ndef probe_newtype()\nlabel := Label.new(\"held\")\nputs(label.identity<Integer>(7))\nputs(label.identity<String>(\"word\"))\nputs(label.identity<Boolean>(true))\nputs(label.identity<Float>(1.5))\nend\n\ndef main()\nprobe_newtype()\nend\n")
+		expect_compiler_phase(state, "check", check(state))
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		before := control_test_output(emit_qbe(state))
+		intrinsic_mir_erase(state)
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, before)
+			when Result::Ok(output)
+				expect(output).to_equal("7\nword\ntrue\n1.5\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+	test("collection specializations") do
+		mut state := logical_checked_source("newtype Label = String do\ndef identity<T>(value: T): T\nreturn value\nend\nend\n\ndef probe_newtype()\nlabel := Label.new(\"held\")\nputs(label.identity<Array<String>>([\"a\", \"b\"])[1])\nputs(label.identity<Hash<String, Integer>>({\"one\": 3})[\"one\"])\nend\n\ndef main()\nprobe_newtype()\nend\n")
+		expect_compiler_phase(state, "check", check(state))
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		before := control_test_output(emit_qbe(state))
+		intrinsic_mir_erase(state)
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, before)
+			when Result::Ok(output)
+				expect(output).to_equal("b\n3\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+	test("nominal parameter") do
+		mut state := logical_checked_source("newtype Label = String do\ndef identity<T>(value: T): T\nreturn value\nend\nend\nnewtype Id = Integer\ndef keep<T>(label: Label, value: T): Label\nreturn label\nend\n\ndef probe_newtype()\nputs(keep<Integer>(Label.new(\"held\"), 1).value())\nputs(Label.new(\"receiver\").identity<Id>(Id.new(9)).value())\nend\n\ndef main()\nprobe_newtype()\nend\n")
+		expect_compiler_phase(state, "check", check(state))
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		before := control_test_output(emit_qbe(state))
+		intrinsic_mir_erase(state)
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, before)
+			when Result::Ok(output)
+				expect(output).to_equal("held\n9\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+	test("recursive") do
+		mut state := logical_checked_source("newtype Label = String do\ndef repeat<T>(item: T, count: Integer): T\nif count == 0\nreturn item\nend\nreturn self.repeat<T>(item, count - 1)\nend\nend\ndef probe_newtype()\nputs(Label.new(\"held\").repeat<String>(\"done\", 4))\nend\n\ndef main()\nprobe_newtype()\nend\n")
+		expect_compiler_phase(state, "check", check(state))
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		before := control_test_output(emit_qbe(state))
+		intrinsic_mir_erase(state)
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, before)
+			when Result::Ok(output)
+				expect(output).to_equal("done\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+	test("named default") do
+		mut state := logical_checked_source("newtype Label = String do\ndef choose<T>(item: T, *, count: Integer = 2): T\nputs(count)\nreturn item\nend\nend\ndef probe_newtype()\nputs(Label.new(\"held\").choose<String>(\"first\"))\nputs(Label.new(\"held\").choose<Integer>(8, count: 4))\nend\n\ndef main()\nprobe_newtype()\nend\n")
+		expect_compiler_phase(state, "check", check(state))
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		before := control_test_output(emit_qbe(state))
+		intrinsic_mir_erase(state)
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, before)
+			when Result::Ok(output)
+				expect(output).to_equal("2\nfirst\n4\n8\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+	test("private forwarding") do
+		mut state := logical_checked_source("newtype Label = String do\ndef _identity<T>(item: T): T\nreturn item\nend\ndef forward<U>(item: U): U\nreturn self._identity<U>(item)\nend\nend\ndef probe_newtype()\nputs(Label.new(\"held\").forward<String>(\"private\"))\nend\n\ndef main()\nprobe_newtype()\nend\n")
+		expect_compiler_phase(state, "check", check(state))
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		before := control_test_output(emit_qbe(state))
+		intrinsic_mir_erase(state)
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, before)
+			when Result::Ok(output)
+				expect(output).to_equal("private\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+	test("captured receiver") do
+		mut state := logical_checked_source("newtype Label = String do\ndef reader<T>(item: T): () -> String\nreturn fn(): String\nreturn value()\nend\nend\nend\ndef probe_newtype()\nread := Label.new(\"kept\").reader<Integer>(1)\nnoise := \"allocated\" + \"after\"\nputs(read())\nputs(noise)\nend\n\ndef main()\nprobe_newtype()\nend\n")
+		expect_compiler_phase(state, "check", check(state))
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		before := control_test_output(emit_qbe(state))
+		intrinsic_mir_erase(state)
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, before)
+			when Result::Ok(output)
+				expect(output).to_equal("kept\nallocatedafter\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+	test("closed construction") do
+		mut state := logical_checked_source("newtype Label = String do\nprivate new\ndef self.make(text: String): Label\nreturn self.new(text)\nend\ndef replace<T>(text: String, item: T): Label\nreturn Label.new(text)\nend\nend\ndef probe_newtype()\nputs(Label.make(\"before\").replace<Integer>(\"after\", 2).value())\nend\n\ndef main()\nprobe_newtype()\nend\n")
+		expect_compiler_phase(state, "check", check(state))
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		before := control_test_output(emit_qbe(state))
+		intrinsic_mir_erase(state)
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, before)
+			when Result::Ok(output)
+				expect(output).to_equal("after\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+	test("explicit forwarding") do
+		mut state := logical_checked_source("newtype Label = String do\ndef identity<T>(item: T): T\nreturn item\nend\ndef forward<U>(item: U): U\nreturn self.identity<U>(item)\nend\nend\ndef probe_newtype()\nputs(Label.new(\"held\").forward<Integer>(12))\nend\n\ndef main()\nprobe_newtype()\nend\n")
+		expect_compiler_phase(state, "check", check(state))
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		before := control_test_output(emit_qbe(state))
+		intrinsic_mir_erase(state)
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, before)
+			when Result::Ok(output)
+				expect(output).to_equal("12\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+	test("rejects invalid templates arities receivers privacy and nominal substitutions") do
+		[
+			"newtype Label = String do\ndef identity<T>(item: T): T\nreturn item\nend\ndef forward<U>(item: U): U\nreturn identity<U>(item)\nend\nend\ndef probe_newtype()\nputs(Label.new(\"held\").forward<Integer>(12))\nend\n\ndef main()\nprobe_newtype()\nend\n",
+			"newtype Label = String do\ndef identity<T>(value: T): T\nreturn value\nend\nend\n\ndef probe_newtype()\nputs(Label.new(\"held\").identity(1))\nend\n\ndef main()\nprobe_newtype()\nend\n",
+			"newtype Label = String do\ndef identity<T>(value: T): T\nreturn value\nend\nend\n\ndef probe_newtype()\nputs(Label.new(\"held\").identity<Integer, String>(1))\nend\n\ndef main()\nprobe_newtype()\nend\n",
+			"newtype Label = String do\ndef identity<T>(value: T): T\nreturn value\nend\nend\n\ndef probe_newtype()\nputs(Label.new(\"held\").identity<Missing>(1))\nend\n\ndef main()\nprobe_newtype()\nend\n",
+			"newtype Label = String do\ndef identity<T>(value: T): T\nreturn value\nend\nend\n\ndef probe_newtype()\nputs(Label.new(\"held\").identity<Integer>(\"wrong\"))\nend\n\ndef main()\nprobe_newtype()\nend\n",
+			"newtype Label = String do\ndef identity<T>(value: T): T\nreturn value\nend\nend\n\ndef probe_newtype()\nputs(Label.new(\"held\").identity<Integer>())\nend\n\ndef main()\nprobe_newtype()\nend\n",
+			"newtype Label = String do\ndef identity<T>(value: T): T\nreturn value\nend\nend\n\ndef probe_newtype()\nputs(Label.new(\"held\").identity<Integer>(1, 2))\nend\n\ndef main()\nprobe_newtype()\nend\n",
+			"newtype Label = String do\ndef identity<T>(value: T): T\nreturn value\nend\nend\n\ndef probe_newtype()\nputs(Label.identity<Integer>(1))\nend\n\ndef main()\nprobe_newtype()\nend\n",
+			"newtype Label = String do\ndef identity<T>(value: T): T\nreturn value\nend\nend\n\ndef probe_newtype()\nputs(Label.new(\"held\").value<Integer>())\nend\n\ndef main()\nprobe_newtype()\nend\n",
+			"newtype Label = String do\ndef identity<T>(value: T): T\nreturn value\nend\nend\n\ndef probe_newtype()\nputs(Label.new<String>(\"held\").value())\nend\n\ndef main()\nprobe_newtype()\nend\n",
+			"newtype Label = String do\ndef read(): String\nreturn value()\nend\nend\ndef probe_newtype()\nputs(Label.new(\"held\").read<String>())\nend\n\ndef main()\nprobe_newtype()\nend\n",
+			"newtype Label = String do\ndef invalid<T>(item: T): T\nreturn item + 1\nend\nend\ndef probe_newtype()\nputs(1)\nend\n\ndef main()\nprobe_newtype()\nend\n",
+			"newtype Label = String do\ndef change<T>(item: T): T\nself = Label.new(\"changed\")\nreturn item\nend\nend\ndef probe_newtype()\nputs(Label.new(\"held\").change<Integer>(1))\nend\n\ndef main()\nprobe_newtype()\nend\n",
+			"newtype Label = String do\ndef _identity<T>(item: T): T\nreturn item\nend\nend\ndef probe_newtype()\nputs(Label.new(\"held\")._identity<Integer>(1))\nend\n\ndef main()\nprobe_newtype()\nend\n",
+			"newtype Label = String do\nprivate new\ndef self.make(text: String): Label\nreturn self.new(text)\nend\ndef replace<T>(text: String, item: T): Label\nreturn Label.new(text)\nend\nend\ndef probe_newtype()\nputs(Label.new(\"wrong\").replace<Integer>(\"after\", 2).value())\nend\n\ndef main()\nprobe_newtype()\nend\n",
+			"newtype Label = String do\ndef identity<T>(value: T): T\nreturn value\nend\nend\nnewtype Id = Integer\nnewtype Count = Integer\ndef probe_newtype()\nputs(Label.new(\"held\").identity<Id>(Count.new(1)).value())\nend\n\ndef main()\nprobe_newtype()\nend\n",
+			"module Helpers\ndef self.identity<T>(item: T): T\nreturn item\nend\nend\ndef probe_newtype()\nputs(Helpers.identity<Integer>(1))\nend\n\ndef main()\nprobe_newtype()\nend\n",
+			"newtype Label = String do\ndef choose<T>(item: T, *, count: Integer = 2): T\nputs(count)\nreturn item\nend\nend\ndef probe_newtype()\nputs(Label.new(\"held\").choose<String>(\"first\"))\nputs(Label.new(\"held\").choose<Integer>(count: 4, item: 8))\nend\n\ndef main()\nprobe_newtype()\nend\n",
+		].each do |source|
+			mut state := compiler_new(source.size() + 1)
+			valid := lex(state, source) && parse_module(state, 0, state.module_graph.entry_module[0]) && resolve(state) && check(state)
+			expect(valid).to_be_false()
+			expect(has_diagnostic(state)).to_be_true()
+		end
+	end
+end

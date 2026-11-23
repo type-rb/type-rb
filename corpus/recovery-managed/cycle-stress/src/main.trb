@@ -1,0 +1,24 @@
+alias Callback = () -> Void
+
+def make_cycle(seed: Integer)
+	mut callbacks: Array<Callback> := []
+	label := "cycle" + "-stress"
+	callback: Callback := fn()
+		if callbacks.size() == seed
+			puts(label)
+		end
+		return
+	end
+	callbacks.push(callback)
+	return
+end
+
+def main()
+	mut index := 0
+	while index < 20000
+		make_cycle(0)
+		index += 1
+	end
+	puts("recovery-managed-cycle-stress")
+	return
+end

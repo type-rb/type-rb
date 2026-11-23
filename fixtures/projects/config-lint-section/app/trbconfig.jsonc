@@ -1,0 +1,14 @@
+{
+  "name": "scenario",
+  "mode": "go",
+  "sourceDir": "src",
+  "go": {
+    "module": "example.com/scenario"
+  },
+  "lint": {
+    "preset": "recommended",
+    "rules": {
+      "trb/prefer-conditional-transfer": "warning"
+    }
+  }
+}

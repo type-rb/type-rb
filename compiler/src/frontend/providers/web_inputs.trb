@@ -1,0 +1,172 @@
+import { JsonCodecSchema, json_codec_schema } from frontend/providers/json_schema
+import { web_binding_kind } from frontend/providers/web_declarations
+import { web_parameter_alias, web_parameter_fields } from frontend/providers/web_parameters
+import { find_alias_in_module, find_import_binding } from frontend/resolution/declaration_lookup
+import { find_record_type } from frontend/resolution/type_resolution
+import { parse_statement_block } from frontend/syntax/body_syntax
+import { lex_module } from frontend/syntax/lexer
+import { integer_string } from support/literals
+import { CompilerState, diagnostic, has_diagnostic } from state/state
+import { load_integer, load_string, store_integer, store_string } from support/storage
+
+record WebInputField
+	name: String
+	type_name: String
+	alias_name: String
+end
+
+# The pinned reference reimports a renamed envelope under its consumer name.
+# Preserve rejection until the canonical-identity proposal is resolved. Check
+# each call before instance reuse, so a prior canonical call cannot bypass it.
+def web_input_names_valid(mut state: CompilerState, owner: Integer, arguments: Array<String>, line: Integer): Boolean
+	instance := state.nominal.object_instances[owner]
+	declaration := state.nominal.objects[instance.definition]
+	mut provider := false
+	declaration.methods.each do |method|
+		if method.name == "bind" && web_binding_kind(state, method.generic_function) == 3
+			provider = true
+		end
+	end
+	if !provider
+		return true
+	end
+	arguments.each do |name|
+		if !web_input_name_valid(state, state.module_graph.active_module[0], name, line, 0)
+			return false
+		end
+	end
+	return true
+end
+
+def web_input_name_valid(mut state: CompilerState, owner: Integer, name: String, line: Integer, depth: Integer): Boolean
+	if depth >= 128
+		diagnostic(state, "TRBN4003", line, "endpoint input alias nesting exceeds the compiler limit")
+		return false
+	end
+	binding := find_import_binding(state, owner, name)
+	if binding >= 0 && load_string(state.module_graph.import_symbols, binding) != load_string(state.module_graph.import_declarations, binding)
+		diagnostic(state, "TRBN4003", line, "renamed imported endpoint input types are not supported yet")
+		return false
+	end
+	index := find_alias_in_module(state, owner, name)
+	if index >= 0
+		row := state.type_resolution.type_aliases[index]
+		if row.parameters.size() == 0
+			return web_input_name_valid(state, row.source_id, row.target, line, depth + 1)
+		end
+	end
+	return true
+end
+
+# Canonical record fields own the input schema. Validation follows the same
+# section order as execution, regardless of the record's declaration order.
+def web_input_fields(mut state: CompilerState, target: String, line: Integer): Array<WebInputField>
+	mut fields: Array<WebInputField> := []
+	record_index := find_record_type(state, target)
+	if record_index < 0
+		diagnostic(state, "TRBN4003", line, "endpoint input type must be a non-nullable record")
+		return fields
+	end
+	start := load_integer(state.declarations.record_field_starts, record_index)
+	count := load_integer(state.declarations.record_field_counts, record_index)
+	if count == 0
+		diagnostic(state, "TRBN4003", line, "endpoint input record must declare at least one of params, query, or body")
+		return fields
+	end
+	mut index := start
+	while index < start + count
+		name := load_string(state.declarations.field_names, index)
+		if name != "params" && name != "query" && name != "body"
+			diagnostic(state, "TRBN4003", line, "endpoint input record has unsupported field " + name + "; expected params, query, or body")
+			return fields
+		end
+		index += 1
+	end
+	["params", "query", "body"].each do |name|
+		index = start
+		while index < start + count && !has_diagnostic(state)
+			if load_string(state.declarations.field_names, index) == name
+				type_name := load_string(state.declarations.field_types, index)
+				mut alias_name := "Params"
+				if name == "body"
+					alias_name = "BodyValue"
+					mut schemas: Array<JsonCodecSchema> := []
+					json_codec_schema(state, type_name, true, line, [], schemas)
+				else
+					query := name == "query"
+					if query
+						alias_name = "Query"
+					end
+					web_parameter_fields(state, type_name, query, line)
+				end
+				fields.push(WebInputField.new(name: name, type_name: type_name, alias_name: alias_name))
+			end
+			index += 1
+		end
+	end
+	return fields
+end
+
+def web_input_body(fields: Array<WebInputField>): String
+	mut body := ""
+	mut arguments := ""
+	fields.each do |field|
+		mut operation := "self.params<" + field.alias_name + ">()"
+		mut variant := "Params"
+		if field.name == "query"
+			operation = "self.request.query<" + field.alias_name + ">()"
+			variant = "Query"
+		elsif field.name == "body"
+			operation = "self.request.json<" + field.alias_name + ">()"
+			variant = "Body"
+		end
+		value := field.name + "_value"
+		body += value + " := " + operation + " catch |error|\nreturn Result<Target, EndpointInputError>::Err(EndpointInputError::" + variant + "(error))\nend\n"
+		if arguments != ""
+			arguments += ", "
+		end
+		arguments += field.name + ": " + value
+	end
+	return body + "return Result<Target, EndpointInputError>::Ok(Target.new(" + arguments + "))\nend\n"
+end
+
+def specialize_web_input(mut state: CompilerState, function: Integer, target: String, call_origin: Integer): Boolean
+	mut line := load_integer(state.declarations.function_lines, function)
+	if call_origin >= 0
+		line = load_integer(state.source_tokens.token_lines, call_origin)
+	end
+	fields := web_input_fields(state, target, line)
+	if has_diagnostic(state)
+		return false
+	end
+	# A speculative fork borrows tokens and controls. Validate all child schemas,
+	# but create private aliases and ordinary checked bodies only in live state.
+	if state.type_resolution.generic_template_mode[0]
+		return true
+	end
+	owner := load_integer(state.declarations.function_modules, function)
+	namespace := "$web_input" + integer_string(function)
+	web_parameter_alias(state, owner, namespace, "Target", target, line)
+	fields.each do |field|
+		web_parameter_alias(state, owner, namespace, field.alias_name, field.type_name, line)
+	end
+	previous_module := state.module_graph.active_module[0]
+	previous_owner := state.global_bindings.declaration_owner[0]
+	start := state.source_tokens.token_count[0]
+	lex_module(state, web_input_body(fields), owner)
+	state.global_bindings.declaration_owner[0] = namespace
+	mut token := start
+	while token < state.source_tokens.token_count[0]
+		store_string(state.source_tokens.token_namespaces, token, namespace)
+		token += 1
+	end
+	mut position := [start]
+	if !has_diagnostic(state)
+		parse_statement_block(state, position)
+	end
+	store_integer(state.declarations.function_body_starts, function, start)
+	store_integer(state.declarations.function_body_ends, function, position[0])
+	state.module_graph.active_module[0] = previous_module
+	state.global_bindings.declaration_owner[0] = previous_owner
+	return !has_diagnostic(state)
+end

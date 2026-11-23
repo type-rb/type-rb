@@ -1,0 +1,42 @@
+import { mir_definition_index } from mir/analysis/identities
+import { MirFunction } from mir/model/module
+import { describe, expect, test } from trb/std/test
+import { mir_test_instruction_with_cell, mir_test_module } from testing/mir/model
+
+describe("MIR definition index") do
+	test("separates function-local IDs and retains sparse and repeated definitions") do
+		mut native_module := mir_test_module(false, false)
+		function := native_module.functions[0]
+		native_module.functions.push(MirFunction.new(kind: function.kind, result_type: function.result_type, integer_guard: function.integer_guard, id: 12, entry_block: function.entry_block, source_id: function.source_id, line: function.line, parameter_start: function.parameter_start, parameter_count: function.parameter_count, block_start: function.block_start, block_count: function.block_count))
+		native_module.instructions[0] = mir_test_instruction_with_cell(native_module.instructions[0], 1, 23)
+		index := mir_definition_index(native_module)
+		# Each function owns its table, even when decimal identities overlap.
+		expect(index[0].counts["23"]).to_equal(1)
+		expect(index[1].counts["3"]).to_equal(1)
+		expect(index[0].counts["0"]).to_equal(1)
+		expect(index[1].counts["0"]).to_equal(1)
+		expect(index[0].counts.key?("99")).to_be_false()
+		native_module.instructions[0] = mir_test_instruction_with_cell(native_module.instructions[0], 1, 0)
+		repeated := mir_definition_index(native_module)
+		expect(repeated[0].counts["0"]).to_equal(2)
+		expect(repeated[0].counts.key?("23")).to_be_false()
+		native_module.instructions[0] = mir_test_instruction_with_cell(native_module.instructions[0], 1, 9007199254740991)
+		sparse := mir_definition_index(native_module)
+		expect(sparse[0].counts["9007199254740991"]).to_equal(1)
+		expect(sparse[1].counts["9007199254740991"]).to_equal(1)
+		expect(sparse[0].counts["0"]).to_equal(1)
+		expect(sparse.size()).to_equal(index.size())
+	end
+
+	test("keeps different definition counts in function storage order") do
+		mut native_module := mir_test_module(false, false)
+		function := native_module.functions[0]
+		native_module.functions[0] = MirFunction.new(kind: function.kind, result_type: function.result_type, integer_guard: function.integer_guard, id: 9007199254740991, entry_block: function.entry_block, source_id: function.source_id, line: function.line, parameter_start: 1, parameter_count: 1, block_start: function.block_start, block_count: function.block_count)
+		native_module.functions.push(function)
+		index := mir_definition_index(native_module)
+		expect(index[0].counts.key?("0")).to_be_false()
+		expect(index[0].counts["1"]).to_equal(2)
+		expect(index[1].counts["0"]).to_equal(1)
+		expect(index[1].counts["1"]).to_equal(1)
+	end
+end

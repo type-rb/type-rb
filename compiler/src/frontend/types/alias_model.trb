@@ -1,0 +1,14 @@
+# Transparent aliases are authored declarations, never runtime nominal types.
+record TypeAlias
+	name: String
+	source_id: Integer
+	line: Integer
+	parameters: Array<String>
+	target: String
+end
+
+record TypeAliasInstance
+	definition: Integer
+	arguments: Array<String>
+	type_name: String
+end

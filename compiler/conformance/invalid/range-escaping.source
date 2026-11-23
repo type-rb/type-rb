@@ -1,0 +1,4 @@
+def main()
+(1..2).each { |value| puts(value) }
+puts(value)
+end

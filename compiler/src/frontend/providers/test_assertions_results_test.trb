@@ -1,0 +1,41 @@
+import { CompilerProjectSources, check, emit_qbe, load_package_project_sources_with_tests } from compiler
+import { resolve } from frontend/checking/program/resolution
+import { project_packages_new } from project/packages
+import { append_native_test_runner } from project/test_runner
+import { has_diagnostic } from state/state
+import { expect_compiler_phase } from testing/pipeline
+import { output_source } from testing/compiler
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { logical_run_qbe_arguments } from testing/qbe_runner
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+describe("Standard Result test assertions") do
+	test("retains managed payloads and exact opposite scalar failures through collection") do
+		source := "import { describe, expect, expect_err, expect_ok, test } from trb/std/test\nimport trb/std/result\n\ndescribe(\"Results\") do\n    test(\"managed Ok payload\") do\n        values := expect_ok(Result<Array<Integer>, Integer>::Ok([7, 8]))\n        expect(values.size()).to_equal(2)\n        expect(values[1]).to_equal(8)\n    end\n    test(\"managed Err payload\") do\n        values := expect_err(Result<Boolean, Array<Integer>>::Err([3, 4]))\n        expect(values.size()).to_equal(2)\n        expect(values[0]).to_equal(3)\n    end\n    test(\"scalar payloads\") do\n        amount := expect_ok(Result<Float, Integer>::Ok(2.5))\n        expect(amount == 2.5).to_be_true()\n        error_amount := expect_err(Result<Boolean, Float>::Err(3.5))\n        expect(error_amount == 3.5).to_be_true()\n        expect(expect_ok(Result<Boolean, Integer>::Ok(true))).to_be_true()\n        expect(expect_err(Result<Boolean, Integer>::Err(7))).to_equal(7)\n    end\n    test(\"unexpected Err\") do\n        _value := expect_ok(Result<Float, Boolean>::Err(false))\n    end\n    test(\"unexpected Ok\") do\n        _value := expect_err(Result<Integer, Float>::Ok(9))\n    end\n    test(\"continued\") do\n        expect(1).to_equal(1)\n    end\nend\n"
+		path := "/project/src/sample_test.trb"
+		mut state := load_package_project_sources_with_tests("/project/trbconfig.jsonc", CompilerProjectSources.new(paths: [path], sources: [source], error: ""), ["sample_test"], [-1], project_packages_new(""), false, false, [path])
+		expect_compiler_phase(state, "load", !has_diagnostic(state))
+		expect_compiler_phase(state, "runner", append_native_test_runner(state, "human"))
+		expect_compiler_phase(state, "resolve", resolve(state))
+		expect_compiler_phase(state, "check", check(state))
+		mut runtime := output_source(emit_qbe(state))
+		expect_compiler_phase(state, "emit", !has_diagnostic(state))
+		intrinsic_mir_erase(state)
+		expect(output_source(emit_qbe(state))).to_equal(runtime)
+		allocation := "function l $trbn_gc_alloc(l %descriptor, l %payload_size, l %reserved_size) {\n@start"
+		expect(runtime.split(allocation).size()).to_equal(2)
+		runtime = runtime.replace_all(allocation, allocation + "\n call $trbn_gc_collect(w 0)")
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe_arguments(qbe, runtime, [], 1)
+			when Result::Ok(actual)
+				expect(actual).to_equal("PASS Results / managed Ok payload\nPASS Results / managed Err payload\nPASS Results / scalar payloads\nFAIL Results / unexpected Err\n  /project/src/sample_test.trb:24:19: expected Ok, got Err(false)\nFAIL Results / unexpected Ok\n  /project/src/sample_test.trb:27:19: expected Err, got Ok(9)\nPASS Results / continued\n\n6 test(s), 2 failure(s)\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+end

@@ -1,0 +1,250 @@
+import { ComparisonOperator, RecoveryScalarInstruction, ScalarType } from scalar/mir
+import { RecoveryManagedTypeDefinition, RecoveryManagedValueType } from managed/layout
+import { RecoveryManagedBlock, RecoveryManagedFunction, RecoveryManagedInstruction, RecoveryManagedModule, RecoveryManagedParameter, RecoveryManagedResultType, RecoveryManagedRuntimeStatistic, RecoveryManagedTerminator, verify_recovery_managed_mir } from managed/mir
+import { build_recovery_managed_executable } from managed/toolchain
+import { NativeSource } from snapshot/mir
+import { SourceOrigin } from snapshot/schema
+import { native_create_directory } from support/file_system
+import trb/std/process
+import trb/std/result
+import { describe, expect, test } from trb/std/test
+
+def _recovery_managed_gc_origin(line: Integer): SourceOrigin
+	return SourceOrigin.new(
+		source_id: "main",
+		start_line: line,
+		start_column: 1,
+		end_line: line,
+		end_column: 8,
+	)
+end
+
+def _recovery_managed_gc_closure_type(): RecoveryManagedValueType
+	return RecoveryManagedValueType::Aggregate("() -> Void")
+end
+
+def _recovery_managed_gc_array_type(): RecoveryManagedValueType
+	return RecoveryManagedValueType::Aggregate("Array<() -> Void>")
+end
+
+def _recovery_managed_gc_body(): RecoveryManagedFunction
+	origin := _recovery_managed_gc_origin(1)
+	return RecoveryManagedFunction.new(
+		id: "cycle#body",
+		name: "body",
+		parameters: [],
+		result_type: RecoveryManagedResultType::Void,
+		entry: "entry",
+		origin: origin,
+		blocks: [
+			RecoveryManagedBlock.new(
+				id: "entry",
+				parameters: [],
+				origin: origin,
+				instructions: [],
+				terminator: RecoveryManagedTerminator::Return(nil, origin),
+			),
+		],
+		captures: [RecoveryManagedParameter.new(id: "items", value_type: _recovery_managed_gc_array_type(), origin: origin)],
+	)
+end
+
+def _recovery_managed_gc_make_cycle(): RecoveryManagedFunction
+	origin := _recovery_managed_gc_origin(5)
+	return RecoveryManagedFunction.new(
+		id: "cycle#make",
+		name: "makeCycle",
+		parameters: [],
+		result_type: RecoveryManagedResultType::Void,
+		entry: "entry",
+		origin: origin,
+		blocks: [
+			RecoveryManagedBlock.new(
+				id: "entry",
+				parameters: [],
+				origin: origin,
+				instructions: [
+					RecoveryManagedInstruction::ArrayConstruct("items", "Array<() -> Void>", [], origin),
+					RecoveryManagedInstruction::ClosureConstruct(
+						"callback",
+						"() -> Void",
+						"cycle#body",
+						["items"],
+						origin,
+					),
+					RecoveryManagedInstruction::ArrayPush("Array<() -> Void>", "items", "callback", origin),
+				],
+				terminator: RecoveryManagedTerminator::Return(nil, origin),
+			),
+		],
+	)
+end
+
+def _recovery_managed_gc_main(): RecoveryManagedFunction
+	origin := _recovery_managed_gc_origin(10)
+	boolean_type := RecoveryManagedValueType::Scalar(ScalarType::Boolean)
+	return RecoveryManagedFunction.new(
+		id: "cycle#main",
+		name: "main",
+		parameters: [],
+		result_type: RecoveryManagedResultType::Void,
+		entry: "entry",
+		origin: origin,
+		blocks: [
+			RecoveryManagedBlock.new(
+				id: "entry",
+				parameters: [],
+				origin: origin,
+				instructions: [
+					RecoveryManagedInstruction::Call(nil, "cycle#make", [], origin),
+					RecoveryManagedInstruction::RuntimeCollect(origin),
+					RecoveryManagedInstruction::RuntimeCollect(origin),
+					RecoveryManagedInstruction::RuntimeStatistic("collections", RecoveryManagedRuntimeStatistic::CollectionCount, origin),
+					RecoveryManagedInstruction::RuntimeStatistic("live", RecoveryManagedRuntimeStatistic::HeapBytes, origin),
+					RecoveryManagedInstruction::RuntimeStatistic("reclaimed", RecoveryManagedRuntimeStatistic::ReclaimedBytes, origin),
+					RecoveryManagedInstruction::Scalar(RecoveryScalarInstruction::IntegerLiteral("two", 2, origin)),
+					RecoveryManagedInstruction::Scalar(RecoveryScalarInstruction::IntegerLiteral("liveLimit", 65536, origin)),
+					RecoveryManagedInstruction::Scalar(RecoveryScalarInstruction::IntegerLiteral("zero", 0, origin)),
+					RecoveryManagedInstruction::Scalar(
+						RecoveryScalarInstruction::IntegerCompare(
+							"enoughCollections",
+							ComparisonOperator::GreaterThanOrEqual,
+							"collections",
+							"two",
+							origin,
+						)
+					),
+					RecoveryManagedInstruction::Scalar(
+						RecoveryScalarInstruction::IntegerCompare(
+							"boundedLiveSet",
+							ComparisonOperator::LessThanOrEqual,
+							"live",
+							"liveLimit",
+							origin,
+						)
+					),
+					RecoveryManagedInstruction::Scalar(
+						RecoveryScalarInstruction::IntegerCompare(
+							"reclaimedCycle",
+							ComparisonOperator::GreaterThan,
+							"reclaimed",
+							"zero",
+							origin,
+						)
+					),
+				],
+				terminator: RecoveryManagedTerminator::Branch(
+					"enoughCollections",
+					"checkLive",
+					["boundedLiveSet", "reclaimedCycle"],
+					"failure",
+					[],
+					origin,
+				),
+			),
+			RecoveryManagedBlock.new(
+				id: "checkLive",
+				parameters: [
+					RecoveryManagedParameter.new(id: "liveOK", value_type: boolean_type, origin: origin),
+					RecoveryManagedParameter.new(id: "reclaimedOK", value_type: boolean_type, origin: origin),
+				],
+				origin: origin,
+				instructions: [],
+				terminator: RecoveryManagedTerminator::Branch(
+					"liveOK",
+					"checkReclaimed",
+					["reclaimedOK"],
+					"failure",
+					[],
+					origin,
+				),
+			),
+			RecoveryManagedBlock.new(
+				id: "checkReclaimed",
+				parameters: [RecoveryManagedParameter.new(id: "cycleOK", value_type: boolean_type, origin: origin)],
+				origin: origin,
+				instructions: [],
+				terminator: RecoveryManagedTerminator::Branch(
+					"cycleOK",
+					"success",
+					[],
+					"failure",
+					[],
+					origin,
+				),
+			),
+			RecoveryManagedBlock.new(
+				id: "success",
+				parameters: [],
+				origin: origin,
+				instructions: [RecoveryManagedInstruction::Scalar(RecoveryScalarInstruction::WriteStatic("gc-ok\n", origin))],
+				terminator: RecoveryManagedTerminator::Return(nil, origin),
+			),
+			RecoveryManagedBlock.new(
+				id: "failure",
+				parameters: [],
+				origin: origin,
+				instructions: [RecoveryManagedInstruction::Scalar(RecoveryScalarInstruction::WriteStatic("gc-fail\n", origin))],
+				terminator: RecoveryManagedTerminator::Return(nil, origin),
+			),
+		],
+	)
+end
+
+def recovery_managed_gc_stress_module(): RecoveryManagedModule
+	return RecoveryManagedModule.new(
+		id: "cycle",
+		entry_function: "cycle#main",
+		sources: [NativeSource.new(id: "main", path: "src/main.trb")],
+		types: [
+			RecoveryManagedTypeDefinition::Function("() -> Void", [], nil),
+			RecoveryManagedTypeDefinition::Array("Array<() -> Void>", _recovery_managed_gc_closure_type()),
+		],
+		functions: [_recovery_managed_gc_body(), _recovery_managed_gc_make_cycle(), _recovery_managed_gc_main()],
+	)
+end
+
+describe("Managed recovery tracing collector") do
+	test("verifies the closure and Array cycle stress MIR") do
+		case verify_recovery_managed_mir(recovery_managed_gc_stress_module())
+		when Result::Ok(valid)
+			expect(valid).to_be_true()
+		when Result::Err(diagnostic)
+			puts(diagnostic.path + ": " + diagnostic.message)
+			expect(false).to_be_true()
+		end
+	end
+
+	test("reclaims an unreachable closure and Array cycle across repeated collections") do
+		qbe_command := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe_command == nil
+			expect(true).to_be_true()
+		else
+			workspace := "/tmp/type-rb-native-recovery-managed-gc"
+			case native_create_directory(workspace)
+			when Result::Ok(_unit)
+			when Result::Err(_error)
+			end
+			case build_recovery_managed_executable(
+					recovery_managed_gc_stress_module(),
+					qbe_command,
+					"/usr/bin/cc",
+					workspace,
+					workspace + "/stress",
+				)
+			when Result::Ok(report)
+				case Process.run(report.output_path, [])
+				when Result::Ok(process)
+					expect(process.success).to_be_true()
+					expect(process.stdout).to_equal("gc-ok\n")
+					expect(process.stderr).to_equal("")
+				when Result::Err(_error)
+					expect(false).to_be_true()
+				end
+			when Result::Err(error)
+				puts(error.phase + ": " + error.message + "\n" + error.stderr)
+				expect(false).to_be_true()
+			end
+		end
+	end
+end

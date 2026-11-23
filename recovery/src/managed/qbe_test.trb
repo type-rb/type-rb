@@ -1,0 +1,146 @@
+import { decode_recovery_managed_snapshot } from managed/snapshot
+import { build_compiler_recovery_executable, build_recovery_managed_executable } from managed/toolchain
+import { emit_bootstrap_qbe, emit_recovery_managed_qbe } from managed/qbe
+import { native_create_directory, native_read_text } from support/file_system
+import trb/std/process
+import trb/std/result
+import { describe, expect, test } from trb/std/test
+
+def _recovery_managed_qbe_fixture(): String
+	root := Process.environment("TYPE_RB_NATIVE_ROOT")
+	if root == nil
+		return ""
+	end
+	case native_read_text(root + "/fixtures/recovery-managed/valid/managed-values.json")
+	when Result::Ok(source)
+		return source
+	when Result::Err(_error)
+		return ""
+	end
+end
+
+describe("Managed recovery managed QBE runtime") do
+	test("rejects a module without the Native bootstrap ABI") do
+		case decode_recovery_managed_snapshot(_recovery_managed_qbe_fixture())
+		when Result::Ok(native_module)
+			case emit_bootstrap_qbe(native_module)
+			when Result::Ok(_source)
+				expect(false).to_be_true()
+			when Result::Err(diagnostic)
+				expect(diagnostic.code).to_equal("TRBN0004")
+				expect(diagnostic.path).to_equal("/functions")
+				expect(diagnostic.message).to_equal("Native bootstrap requires compiler_main")
+			end
+			# Bootstrap selection must reject before file writes or external tools.
+			case build_compiler_recovery_executable(native_module, "/missing-qbe", "/missing-cc", "/missing-workspace", "/missing-output")
+			when Result::Ok(_report)
+				expect(false).to_be_true()
+			when Result::Err(error)
+				expect(error.phase).to_equal("verify")
+				expect(error.message).to_equal("TRBN0004 /functions: Native bootstrap requires compiler_main")
+			end
+		when Result::Err(diagnostic)
+			puts(diagnostic.path + ": " + diagnostic.message)
+			expect(false).to_be_true()
+		end
+	end
+
+	test("emits deterministic managed runtime IL and exact-root frames") do
+		case decode_recovery_managed_snapshot(_recovery_managed_qbe_fixture())
+		when Result::Ok(native_module)
+			first := emit_recovery_managed_qbe(native_module)
+			second := emit_recovery_managed_qbe(native_module)
+			expect(first).to_equal(second)
+			case first
+			when Result::Ok(source)
+				expect(source.include?("function $trbn_collect(w %automatic)")).to_be_true()
+				expect(source.include?("data $trbn_managed_desc_t1 = align 8 { l 2, l 1 }")).to_be_true()
+				expect(source.include?("data $trbn_managed_string_")).to_be_true()
+				expect(source.include?("storel %root_frame, $trbn_roots")).to_be_true()
+				expect(source.include?("call %g3_0_3_call_code")).to_be_true()
+			when Result::Err(_diagnostic)
+				expect(false).to_be_true()
+			end
+		when Result::Err(diagnostic)
+			puts(diagnostic.path + ": " + diagnostic.message)
+			expect(false).to_be_true()
+		end
+	end
+
+	test("builds and executes managed Strings, Arrays, and a capturing closure") do
+		qbe_command := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe_command == nil
+			expect(true).to_be_true()
+		else
+			case decode_recovery_managed_snapshot(_recovery_managed_qbe_fixture())
+			when Result::Ok(native_module)
+				workspace := "/tmp/type-rb-native-recovery-managed-managed-runtime"
+				case native_create_directory(workspace)
+				when Result::Ok(_unit)
+				when Result::Err(_error)
+				end
+				case build_recovery_managed_executable(
+						native_module,
+						qbe_command,
+						"/usr/bin/cc",
+						workspace,
+						workspace + "/sample",
+					)
+				when Result::Ok(report)
+					case Process.run(report.output_path, [])
+					when Result::Ok(process)
+						expect(process.success).to_be_true()
+						expect(process.stdout).to_equal("o\n")
+						expect(process.stderr).to_equal("")
+					when Result::Err(_error)
+						expect(false).to_be_true()
+					end
+				when Result::Err(error)
+					puts(error.phase + ": " + error.message + "\n" + error.stderr)
+					expect(false).to_be_true()
+				end
+			when Result::Err(_diagnostic)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("reports checked negative-index failure deterministically") do
+		qbe_command := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe_command == nil
+			expect(true).to_be_true()
+		else
+			broken := _recovery_managed_qbe_fixture().replace_all("\"value\": -1", "\"value\": -99")
+			case decode_recovery_managed_snapshot(broken)
+			when Result::Ok(native_module)
+				workspace := "/tmp/type-rb-native-recovery-managed-index-failure"
+				case native_create_directory(workspace)
+				when Result::Ok(_unit)
+				when Result::Err(_error)
+				end
+				case build_recovery_managed_executable(
+						native_module,
+						qbe_command,
+						"/usr/bin/cc",
+						workspace,
+						workspace + "/sample",
+					)
+				when Result::Ok(report)
+					case Process.run(report.output_path, [])
+					when Result::Ok(process)
+						expect(process.status).to_equal(2)
+						expect(process.stdout).to_equal("")
+						expect(process.stderr).to_equal("panic: Array index is out of bounds\n")
+					when Result::Err(_error)
+						expect(false).to_be_true()
+					end
+				when Result::Err(error)
+					puts(error.phase + ": " + error.message + "\n" + error.stderr)
+					expect(false).to_be_true()
+				end
+			when Result::Err(_diagnostic)
+				expect(false).to_be_true()
+			end
+		end
+	end
+end

@@ -1,0 +1,297 @@
+import { check } from compiler
+import { has_diagnostic } from state/state
+import { expect_compiler_phase, logical_checked_source } from testing/pipeline
+import { verify_mir } from mir/verify/module
+import { mir_op_nullable_inject } from mir/model/instructions
+import { MirValue } from mir/model/module
+import { mir_semantic_type_id } from mir/model/types
+import { describe, expect, test } from trb/std/test
+
+def nullable_collection_functions(): String
+	return "def count(values: Array<String>?): Integer\nif values != nil\nreturn values.size()\nend\nreturn -1\nend\ndef size(values: Hash<String, String>?): Integer\nif values != nil\nreturn values.size()\nend\nreturn -1\nend\n"
+end
+
+describe("Nullable empty collection contexts") do
+	test("types the declaration before arguments, aliases and nil assignments") do
+		bodies := [
+			"mut values := []\nputs(count(values))\nvalues = nil\nputs(count(values))",
+			"mut values := {}\nputs(size(values))\nvalues = nil\nputs(size(values))",
+			"mut values := []\nmut kept: Array<String>? := values\nif kept != nil\nkept.push(\"held\")\nend\nif values != nil\nputs(values[0])\nend\nvalues = nil\nputs(count(values))\nputs(count(kept))",
+			"mut values := {}\nmut kept: Hash<String, String>? := values\nif kept != nil\nkept[\"key\"] = \"held\"\nend\nif values != nil\nputs(values[\"key\"])\nend\nvalues = nil\nputs(size(values))\nputs(size(kept))",
+		]
+		bodies.each do |body|
+			mut state := logical_checked_source(nullable_collection_functions() + "def main()\n" + body + "\nend\n")
+			expect_compiler_phase(state, "check", check(state))
+			expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		end
+	end
+	test("honors guards before the nullable constraint and exact first-statement contexts") do
+		bodies := [
+			"mut values := []\nif values != nil\nputs(values.size())\nend\nputs(count(values))",
+			"mut values := []\nif values != nil\nif values.size() > 0\nputs(values[0])\nend\nend\nputs(count(values))",
+			"mut values := []\nif values != nil\nvalues.push(\"held\")\nputs(count(values))\nend",
+			"mut values := {}\nif values != nil\nvalues[\"key\"] = \"held\"\nputs(size(values))\nend",
+			"if true\nmut values := []\nputs(count(values))\nkept := values\nputs(count(kept))\nend",
+			"if true\nmut values := {}\nputs(size(values))\nkept := values\nputs(size(kept))\nend",
+		]
+		bodies.each do |body|
+			mut state := logical_checked_source(nullable_collection_functions() + "def main()\n" + body + "\nend\n")
+			expect_compiler_phase(state, "check", check(state))
+			expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		end
+	end
+	test("infers nullable returns and nested literal contexts") do
+		sources := [
+			"def make(): Array<String>?\nmut values := []\nreturn values\nend\ndef main()\nputs(count(make()))\nend",
+			"def make(): Hash<String, String>?\nmut values := {}\nreturn values\nend\ndef main()\nputs(size(make()))\nend",
+			"def main()\nmut values := []\nnested: Array<Array<String>?> := [values]\nputs(count(nested[0]))\nvalues = nil\nputs(count(values))\nend",
+		]
+		sources.each do |source|
+			mut state := logical_checked_source(nullable_collection_functions() + source + "\n")
+			expect_compiler_phase(state, "check", check(state))
+			expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		end
+	end
+	test("keeps local lambda and concrete generic inference independent") do
+		sources := [
+			"def main()\nread := fn(): Integer\nmut values := []\nreturn count(values)\nend\nputs(read())\nend",
+			"def make<T>(): Array<T>?\nmut values := []\nreturn values\nend\ndef main()\nputs(count(make<String>()))\nnumbers := make<Integer>()\nif numbers != nil\nputs(numbers.size())\nend\nend",
+			"def main()\nmut values := []\nputs(count(values))\nread := fn(): Integer\nreturn count(values)\nend\nputs(read())\nvalues = nil\nputs(read())\nend",
+			"def main()\nmut values := []\nread := fn(): Integer\nreturn count(values)\nend\nputs(read())\nend",
+			"def main()\nmut values := {}\nread := fn(): Integer\nreturn size(values)\nend\nputs(read())\nend",
+			"def main()\nmut values := []\nif true\nkept := [values]\nputs(count(kept[0]))\nputs(count(values))\nend\nend",
+		]
+		sources.each do |source|
+			mut state := logical_checked_source(nullable_collection_functions() + source + "\n")
+			expect_compiler_phase(state, "check", check(state))
+			expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		end
+	end
+	test("rejects earlier or later unguarded reads and writes") do
+		bodies := [
+			"mut values := []\nputs(values.size())\nputs(count(values))",
+			"mut values := []\nputs(count(values))\nvalues.push(\"held\")",
+			"mut values := []\nif true\nvalues.push(\"held\")\nputs(count(values))\nend",
+			"mut values := {}\nputs(values.size())\nputs(size(values))",
+		]
+		bodies.each do |body|
+			mut state := logical_checked_source(nullable_collection_functions() + "def main()\n" + body + "\nend\n")
+			expect(check(state)).to_be_false()
+			expect(has_diagnostic(state)).to_be_true()
+		end
+	end
+	test("keeps immutable values, untyped escapes and later conflicts invalid") do
+		bodies := [
+			"values := []\nputs(count(values))",
+			"mut values := []\nkept := values\nputs(count(values))\nputs(count(kept))",
+			"mut values := []\nif true\nputs(count(values))\nkept := values\nputs(count(kept))\nend",
+			"mut values := []\nputs(count(values))\nif values != nil\nvalues.push(1)\nend",
+			"mut values := {}\nputs(size(values))\nif values != nil\nvalues[1] = \"held\"\nend",
+			"mut values := []\nkept := [values]\nputs(count(kept[0]))\nputs(count(values))",
+			"mut values := []\nread := fn(): Integer\nreturn values.size()\nend\nputs(count(values))\nputs(read())",
+		]
+		bodies.each do |body|
+			mut state := logical_checked_source(nullable_collection_functions() + "def main()\n" + body + "\nend\n")
+			expect(check(state)).to_be_false()
+			expect(has_diagnostic(state)).to_be_true()
+		end
+	end
+	test("requires the nullable MIR payload and result types to agree") do
+		mut state := logical_checked_source(nullable_collection_functions() + "def main()\nmut values := []\nputs(count(values))\nend\n")
+		expect_compiler_phase(state, "check", check(state))
+		mut changed := false
+		state.scalar_mir.instructions.each do |instruction|
+			if !changed && instruction.kind == mir_op_nullable_inject()
+				mut index := 0
+				while index < state.scalar_mir.values.size()
+					value := state.scalar_mir.values[index]
+					if value.id == instruction.result && value.source_id == instruction.source_id && value.line == instruction.line
+						state.scalar_mir.values[index] = MirValue.new(function_id: value.function_id, id: value.id, type_id: mir_semantic_type_id(state.scalar_mir, "Array<Integer>?"), source_id: value.source_id, line: value.line)
+						changed = true
+					end
+					index += 1
+				end
+			end
+		end
+		expect(changed).to_be_true()
+		expect(verify_mir(state.scalar_mir, true).empty?()).to_be_false()
+	end
+end
+
+describe("Closure collection inference") do
+	test("array lambda write") do
+		mut state := logical_checked_source("def main()\nmut values := []\nfill := fn()\nvalues.push(\"held\")\nreturn\nend\nfill()\nputs(values[0])\nend\n")
+		expect_compiler_phase(state, "check", check(state))
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	end
+	test("hash lambda write") do
+		mut state := logical_checked_source("def main()\nmut values := {}\nfill := fn()\nvalues[\"key\"] = \"held\"\nreturn\nend\nfill()\nputs(values[\"key\"])\nend\n")
+		expect_compiler_phase(state, "check", check(state))
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	end
+	test("array lambda context") do
+		mut state := logical_checked_source("def fill(mut values: Array<String>)\nvalues.push(\"held\")\nend\ndef main()\nmut values := []\nrun := fn()\nfill(values)\nreturn\nend\nrun()\nputs(values[0])\nend\n")
+		expect_compiler_phase(state, "check", check(state))
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	end
+	test("array each writes") do
+		mut state := logical_checked_source("def main()\nmut values := []\n[1, 2].each do |value|\nvalues.push(value)\nend\nputs(values[0])\nend\n")
+		expect_compiler_phase(state, "check", check(state))
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	end
+	test("array lambda numeric region") do
+		mut state := logical_checked_source("def main()\nmut values := []\nfill := fn()\nvalues.push(1)\nvalues.push(2.5)\nreturn\nend\nfill()\nputs(values[0])\nputs(values[1])\nend\n")
+		expect_compiler_phase(state, "check", check(state))
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	end
+	test("hash lambda context") do
+		mut state := logical_checked_source("def fill(mut values: Hash<String, String>)\nvalues[\"key\"] = \"held\"\nend\ndef main()\nmut values := {}\nrun := fn()\nfill(values)\nreturn\nend\nrun()\nputs(values[\"key\"])\nend\n")
+		expect_compiler_phase(state, "check", check(state))
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	end
+	test("array lambda union") do
+		mut state := logical_checked_source("def main()\nmut values := []\nfill := fn()\nvalues.push(1)\nvalues.push(\"two\")\nreturn\nend\nfill()\nputs(values[0])\nputs(values[1])\nend\n")
+		expect_compiler_phase(state, "check", check(state))
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	end
+	test("hash lambda numeric") do
+		mut state := logical_checked_source("def main()\nmut values := {}\nfill := fn()\nvalues[\"one\"] = 1\nvalues[\"two\"] = 2.5\nreturn\nend\nfill()\nputs(values[\"one\"])\nputs(values[\"two\"])\nend\n")
+		expect_compiler_phase(state, "check", check(state))
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	end
+	test("hash lambda union") do
+		mut state := logical_checked_source("def main()\nmut values := {}\nfill := fn()\nvalues[1] = \"one\"\nvalues[2] = 2\nreturn\nend\nfill()\nputs(values[1])\nputs(values[2])\nend\n")
+		expect_compiler_phase(state, "check", check(state))
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	end
+	test("nested lambda") do
+		mut state := logical_checked_source("def main()\nmut values := []\nfill := fn()\ninner := fn()\nvalues.push(\"nested\")\nreturn\nend\ninner()\nreturn\nend\nfill()\nputs(values[0])\nend\n")
+		expect_compiler_phase(state, "check", check(state))
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	end
+	test("nested scope lambda") do
+		mut state := logical_checked_source("def main()\nif true\nmut values := []\nfill := fn()\nvalues.push(\"scoped\")\nreturn\nend\nfill()\nputs(values[0])\nend\nend\n")
+		expect_compiler_phase(state, "check", check(state))
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	end
+	test("uninvoked lambda") do
+		mut state := logical_checked_source("def main()\nmut values := []\nfill := fn()\nvalues.push(\"never\")\nreturn\nend\nif false\nfill()\nend\nvalues.push(\"actual\")\nputs(values[0])\nend\n")
+		expect_compiler_phase(state, "check", check(state))
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	end
+	test("lambda before alias") do
+		mut state := logical_checked_source("def main()\nmut values := []\nfill := fn()\nvalues.push(\"shared\")\nreturn\nend\nkept := values\nfill()\nputs(kept[0])\nend\n")
+		expect_compiler_phase(state, "check", check(state))
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	end
+	test("lambda replacement") do
+		mut state := logical_checked_source("def main()\nmut values := []\nfill := fn()\nvalues = [\"replacement\"]\nreturn\nend\nfill()\nputs(values[0])\nend\n")
+		expect_compiler_phase(state, "check", check(state))
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	end
+	test("lambda exact float") do
+		mut state := logical_checked_source("def accept(values: Array<Float>)\nputs(values.size())\nend\ndef main()\nmut values := []\nfill := fn()\nvalues.push(1)\naccept(values)\nreturn\nend\nfill()\nputs(values[0])\nend\n")
+		expect_compiler_phase(state, "check", check(state))
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	end
+	test("returning closure") do
+		mut state := logical_checked_source("def make(): () -> Void\nmut values := []\nreturn fn()\nvalues.push(\"held\")\nputs(values.size())\nreturn\nend\nend\ndef main()\nfill := make()\nfill()\nfill()\nend\n")
+		expect_compiler_phase(state, "check", check(state))
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	end
+	test("generic closure") do
+		mut state := logical_checked_source("def make<T>(item: T): Array<T>\nmut values := []\nfill := fn()\nvalues.push(item)\nreturn\nend\nfill()\nreturn values\nend\ndef main()\nputs(make<String>(\"held\")[0])\nputs(make<Integer>(3)[0])\nend\n")
+		expect_compiler_phase(state, "check", check(state))
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	end
+	test("separate bindings") do
+		mut state := logical_checked_source("def main()\nmut values := []\nmut table := {}\nfill := fn()\nvalues.push(\"array\")\ntable[\"key\"] = \"hash\"\nreturn\nend\nfill()\nputs(values[0])\nputs(table[\"key\"])\nend\n")
+		expect_compiler_phase(state, "check", check(state))
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	end
+	test("invalid later array write") do
+		mut state := logical_checked_source("def main()\nmut values := []\nfill := fn()\nvalues.push(1)\nreturn\nend\nfill()\nvalues.push(\"later\")\nend\n")
+		expect(check(state)).to_be_false()
+		expect(has_diagnostic(state)).to_be_true()
+	end
+	test("invalid later hash write") do
+		mut state := logical_checked_source("def main()\nmut values := {}\nfill := fn()\nvalues[\"key\"] = 1\nreturn\nend\nfill()\nvalues[\"later\"] = \"wrong\"\nend\n")
+		expect(check(state)).to_be_false()
+		expect(has_diagnostic(state)).to_be_true()
+	end
+	test("invalid mixed hash key") do
+		mut state := logical_checked_source("def main()\nmut values := {}\nfill := fn()\nvalues[\"key\"] = \"first\"\nvalues[1] = \"second\"\nreturn\nend\nfill()\nend\n")
+		expect(check(state)).to_be_false()
+		expect(has_diagnostic(state)).to_be_true()
+	end
+	test("invalid read only capture") do
+		mut state := logical_checked_source("def main()\nmut values := []\nread := fn(): Integer\nreturn values.size()\nend\nvalues.push(1)\nputs(read())\nend\n")
+		expect(check(state)).to_be_false()
+		expect(has_diagnostic(state)).to_be_true()
+	end
+	test("invalid untyped alias in closure") do
+		mut state := logical_checked_source("def main()\nmut values := []\nfill := fn()\nkept := values\nvalues.push(1)\nputs(kept.size())\nreturn\nend\nfill()\nend\n")
+		expect(check(state)).to_be_false()
+		expect(has_diagnostic(state)).to_be_true()
+	end
+	test("invalid any escape in closure") do
+		mut state := logical_checked_source("def observe(value: Any)\nputs(value)\nend\ndef main()\nmut values := []\nfill := fn()\nvalues.push(1)\nobserve(values)\nreturn\nend\nfill()\nend\n")
+		expect(check(state)).to_be_false()
+		expect(has_diagnostic(state)).to_be_true()
+	end
+	test("invalid first exact context") do
+		mut state := logical_checked_source("def accept(values: Array<Float>)\nputs(values.size())\nend\ndef main()\nmut values := []\nfill := fn()\nvalues.push(\"wrong\")\naccept(values)\nreturn\nend\nfill()\nend\n")
+		expect(check(state)).to_be_false()
+		expect(has_diagnostic(state)).to_be_true()
+	end
+	test("array lambda unshift") do
+		mut state := logical_checked_source("def main()\nmut values := []\nfill := fn()\nvalues.unshift(1)\nvalues.unshift(\"two\")\nreturn\nend\nfill()\nputs(values[0])\nputs(values[1])\nend\n")
+		expect_compiler_phase(state, "check", check(state))
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	end
+	test("hash lambda update") do
+		mut state := logical_checked_source("def main()\nmut values := {}\nfill := fn()\nvalues.update({\"first\" => 1})\nvalues.update({\"second\" => 2.5})\nreturn\nend\nfill()\nputs(values[\"first\"])\nputs(values[\"second\"])\nend\n")
+		expect_compiler_phase(state, "check", check(state))
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	end
+	test("array empty replacement") do
+		mut state := logical_checked_source("def main()\nmut values := []\nvalues = []\nfill := fn()\nvalues.push(\"held\")\nreturn\nend\nfill()\nputs(values[0])\nend\n")
+		expect_compiler_phase(state, "check", check(state))
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	end
+	test("hash empty replacement") do
+		mut state := logical_checked_source("def main()\nmut values := {}\nvalues = {}\nfill := fn()\nvalues[\"key\"] = \"held\"\nreturn\nend\nfill()\nputs(values[\"key\"])\nend\n")
+		expect_compiler_phase(state, "check", check(state))
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	end
+	test("same statement closures") do
+		mut state := logical_checked_source("def main()\nmut values := []\nif true\nread := fn(): Integer\nreturn values.size()\nend\nfill := fn()\nvalues.push(\"held\")\nreturn\nend\nfill()\nputs(read())\nend\nend\n")
+		expect_compiler_phase(state, "check", check(state))
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	end
+	test("sibling closure writes") do
+		mut state := logical_checked_source("def main()\nmut values := []\nif true\nfirst := fn()\nvalues.push(1)\nreturn\nend\nsecond := fn()\nvalues.push(2.5)\nreturn\nend\nfirst()\nsecond()\nend\nputs(values[0])\nputs(values[1])\nend\n")
+		expect_compiler_phase(state, "check", check(state))
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	end
+	test("invalid later closure write") do
+		mut state := logical_checked_source("def main()\nmut values := []\nfirst := fn()\nvalues.push(1)\nreturn\nend\nsecond := fn()\nvalues.push(2.5)\nreturn\nend\nfirst()\nsecond()\nend\n")
+		expect(check(state)).to_be_false()
+		expect(has_diagnostic(state)).to_be_true()
+	end
+	test("shadowed closure binding") do
+		mut state := logical_checked_source("def main()\nmut values := []\nfill := fn()\nif true\nmut values := []\nvalues.push(1)\nputs(values[0])\nend\nvalues.push(\"outer\")\nreturn\nend\nfill()\nputs(values[0])\nend\n")
+		expect_compiler_phase(state, "check", check(state))
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	end
+	test("closure typed alias") do
+		mut state := logical_checked_source("def main()\nmut values := []\nfill := fn()\nmut kept: Array<String> := values\nkept.push(\"shared\")\nreturn\nend\nfill()\nputs(values[0])\nend\n")
+		expect_compiler_phase(state, "check", check(state))
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	end
+	test("hash sibling closure writes") do
+		mut state := logical_checked_source("def main()\nmut values := {}\nif true\nfirst := fn()\nvalues[\"first\"] = 1\nreturn\nend\nsecond := fn()\nvalues[\"second\"] = 2.5\nreturn\nend\nfirst()\nsecond()\nend\nputs(values[\"first\"])\nputs(values[\"second\"])\nend\n")
+		expect_compiler_phase(state, "check", check(state))
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	end
+end

@@ -1,0 +1,149 @@
+{
+  "startedAt": "2026-09-10T00:40:24Z",
+  "revision": "4ad461eb0d21b73179bacff5345eff1f4c1cedf6",
+  "qbeSHA": "bd16f2eeef52167f59e9eede726fc924c3564752e2ba9e728fbcfecbf51ffbc0",
+  "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+  "machine": "arm64",
+  "hardware": "Apple M2 Pro",
+  "identities": [
+    {
+      "case": "n-body",
+      "role": "candidate",
+      "input": "50000000",
+      "sourceSHA": "796fc08a4747102e1ca08fc75cb81cb0a69b65666c11e45baeafcae2a1064b20",
+      "compilerSHA": "e3aff8518639c0c77e735fb8efe18f9db1431ca6371418194ff8efb7108e4c0c",
+      "binarySHA": "f2e5b759b8370ec22b3a22f42d839caa08ed979c5deae851efe5208309b9b2ee",
+      "binaryBytes": 50984,
+      "qbeSHA": "2a88c5c0bc0cc24cd1eae2b25ae260b15615d411b97336b16a4266242a3077a2",
+      "qbeBytes": 65544,
+      "bounds": 46,
+      "correct": true
+    },
+    {
+      "case": "n-body",
+      "role": "control",
+      "input": "50000000",
+      "sourceSHA": "796fc08a4747102e1ca08fc75cb81cb0a69b65666c11e45baeafcae2a1064b20",
+      "compilerSHA": "fb0cec0eecf56adb18bb08b07c9293839cb7b71cec6493645c0450b79721416f",
+      "binarySHA": "f2e5b759b8370ec22b3a22f42d839caa08ed979c5deae851efe5208309b9b2ee",
+      "binaryBytes": 50984,
+      "qbeSHA": "2a88c5c0bc0cc24cd1eae2b25ae260b15615d411b97336b16a4266242a3077a2",
+      "qbeBytes": 65544,
+      "bounds": 46,
+      "correct": true
+    },
+    {
+      "case": "n-body",
+      "role": "cumulative",
+      "input": "50000000",
+      "sourceSHA": "796fc08a4747102e1ca08fc75cb81cb0a69b65666c11e45baeafcae2a1064b20",
+      "compilerSHA": "ed16ad3c638a9aa4dba5bb19fb4ef5b5a15ef129a0422d4421be5792357dfb9c",
+      "binarySHA": "295391e4a1a0468360a78cf03128f681d1f29fcc6ee4eb62ad9cfd7b6ffeede9",
+      "binaryBytes": 50984,
+      "qbeSHA": "7f33397e45878ab95e51801fd29a1393c7283a6f92e053030657a65ec808bfc2",
+      "qbeBytes": 66802,
+      "bounds": 46,
+      "correct": true
+    },
+    {
+      "case": "fannkuch-redux",
+      "role": "candidate",
+      "input": "10",
+      "sourceSHA": "6fa788a62edda1755f05bf493f0cebe9903b97be176359b9ceeadea0b1bef92d",
+      "compilerSHA": "e3aff8518639c0c77e735fb8efe18f9db1431ca6371418194ff8efb7108e4c0c",
+      "binarySHA": "8b9f6d683273542dbd486e04b2086e673d856f01240128ab8664f35a4bd68f8b",
+      "binaryBytes": 50952,
+      "qbeSHA": "6bc10b2e6e2fddcc70d4ce313c44cfdc6a51583a129c08f95bd8e94976f45580",
+      "qbeBytes": 52521,
+      "bounds": 16,
+      "correct": true
+    },
+    {
+      "case": "fannkuch-redux",
+      "role": "control",
+      "input": "10",
+      "sourceSHA": "6fa788a62edda1755f05bf493f0cebe9903b97be176359b9ceeadea0b1bef92d",
+      "compilerSHA": "fb0cec0eecf56adb18bb08b07c9293839cb7b71cec6493645c0450b79721416f",
+      "binarySHA": "1a2834d27442f7d78e37994e1ea6fda7427aa7c871bd4bb1e53c966052ec7d38",
+      "binaryBytes": 50952,
+      "qbeSHA": "bf8585e7658c7e3044e576ae568f0bcbb3bef15545bb8bdaab7094785a02ae50",
+      "qbeBytes": 52507,
+      "bounds": 16,
+      "correct": true
+    },
+    {
+      "case": "fannkuch-redux",
+      "role": "cumulative",
+      "input": "10",
+      "sourceSHA": "6fa788a62edda1755f05bf493f0cebe9903b97be176359b9ceeadea0b1bef92d",
+      "compilerSHA": "ed16ad3c638a9aa4dba5bb19fb4ef5b5a15ef129a0422d4421be5792357dfb9c",
+      "binarySHA": "1a2834d27442f7d78e37994e1ea6fda7427aa7c871bd4bb1e53c966052ec7d38",
+      "binaryBytes": 50952,
+      "qbeSHA": "bf8585e7658c7e3044e576ae568f0bcbb3bef15545bb8bdaab7094785a02ae50",
+      "qbeBytes": 52507,
+      "bounds": 16,
+      "correct": true
+    },
+    {
+      "case": "spectral-norm",
+      "role": "candidate",
+      "input": "5500",
+      "sourceSHA": "b85e0d8cecf4e7455bdd34a6a02cb3a9a6e7bbe57ec29bb2f1b99afbbb5312f2",
+      "compilerSHA": "e3aff8518639c0c77e735fb8efe18f9db1431ca6371418194ff8efb7108e4c0c",
+      "binarySHA": "ce57fc8bc5bd4b97decd2f2ffa85b751affbdf4c6cc68ab517fa848f3a39da7d",
+      "binaryBytes": 50984,
+      "qbeSHA": "8697d260c3a6718279f8dcaab4c6218e6b2ec36f0e252aaa39dc5f70570ee3a4",
+      "qbeBytes": 52373,
+      "bounds": 17,
+      "correct": true
+    },
+    {
+      "case": "spectral-norm",
+      "role": "control",
+      "input": "5500",
+      "sourceSHA": "b85e0d8cecf4e7455bdd34a6a02cb3a9a6e7bbe57ec29bb2f1b99afbbb5312f2",
+      "compilerSHA": "fb0cec0eecf56adb18bb08b07c9293839cb7b71cec6493645c0450b79721416f",
+      "binarySHA": "3b5404dbc518f566e83546ce7d53ca3ea5c0e8f93180adf2d04d97542ea90934",
+      "binaryBytes": 50984,
+      "qbeSHA": "9cf0115515f0aa9036c998faabcf370794c87463c8a0c5850357d737fa2a40a9",
+      "qbeBytes": 52331,
+      "bounds": 17,
+      "correct": true
+    },
+    {
+      "case": "spectral-norm",
+      "role": "cumulative",
+      "input": "5500",
+      "sourceSHA": "b85e0d8cecf4e7455bdd34a6a02cb3a9a6e7bbe57ec29bb2f1b99afbbb5312f2",
+      "compilerSHA": "ed16ad3c638a9aa4dba5bb19fb4ef5b5a15ef129a0422d4421be5792357dfb9c",
+      "binarySHA": "f21210399e94e814b129d18e03434f2abbcefa1fd450eed5a09b270c1e296175",
+      "binaryBytes": 50984,
+      "qbeSHA": "d2002cbc354f9c30382559860722e03b80c583351080a971eed65aa361f3529c",
+      "qbeBytes": 51699,
+      "bounds": 15,
+      "correct": true
+    }
+  ],
+  "observer": "Fresh process, monotonic wall and wait4 CPU/max RSS; uncontrolled local host; no filtering, affinity or cache manipulation",
+  "cases": [
+    [
+      "n-body",
+      "50000000"
+    ],
+    [
+      "fannkuch-redux",
+      "10"
+    ],
+    [
+      "spectral-norm",
+      "5500"
+    ]
+  ],
+  "roles": [
+    "control",
+    "candidate",
+    "cumulative"
+  ],
+  "warmups": 2,
+  "retained": 11
+}

@@ -1,0 +1,78 @@
+import { emit_qbe } from compiler
+import { mir_op_scalar_literal } from mir/model/instructions
+import { mir_function_index } from mir/model/module
+import { optimize_verified_mir } from mir/passes/optimize
+import { verify_mir } from mir/verify/module
+import { array_loop_mir_check } from testing/mir/array_loops
+import { control_test_output } from testing/mir/control
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { logical_run_qbe } from testing/qbe_runner
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+describe("Array nonnegative loop starts") do
+	test("uses a checked outer induction to guard a nested pair scan") do
+		source := "def pairs(values: Array<Integer>): Integer\nmut total := 0\nmut index := 0\nwhile index < values.size()\nmut other := index + 1\nwhile other < values.size()\ntotal += values[index] + values[other]\nother += 1\nend\nindex += 1\nend\nreturn total\nend\ndef main()\nputs(pairs([1, 2, 3]))\nend\n"
+		mut state := array_loop_mir_check(source)
+		index := mir_function_index(state.scalar_mir, 0)
+		expect(state.scalar_mir.array_loops[index].size()).to_equal(2)
+		state.scalar_mir.array_loops[index].each do |plan|
+			expect(plan.accesses.size() > 0).to_be_true()
+		end
+		before := control_test_output(emit_qbe(state))
+		intrinsic_mir_erase(state)
+		optimize_verified_mir(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, before)
+			when Result::Ok(actual)
+				expect(actual).to_equal("12\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("retains unknown and negative starts and rejects stale positive facts") do
+		["2", "-1", "start"].each do |initial|
+			source := "def scan(values: Array<Integer>, start: Integer): Integer\nmut index := " + initial + "\nmut total := 0\nwhile index < values.size()\ntotal += values[index]\nindex += 1\nend\nreturn total\nend\ndef main()\nputs(scan([1, 2, 3], -1))\nend\n"
+			mut state := array_loop_mir_check(source)
+			index := mir_function_index(state.scalar_mir, 0)
+			if initial == "2"
+				expect(state.scalar_mir.array_loops[index].size()).to_equal(1)
+			else
+				expect(state.scalar_mir.array_loops[index].size()).to_equal(1)
+				# Stable storage does not prove a negative or unknown index safe.
+				expect(state.scalar_mir.array_loops[index][0].owner).to_equal(-1)
+				expect(state.scalar_mir.array_loops[index][0].accesses.size()).to_equal(0)
+				expect(state.scalar_mir.array_loops[index][0].headers[0].bounded_accesses.size()).to_equal(0)
+			end
+			qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+			if qbe != nil
+				case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+				when Result::Ok(actual)
+					if initial == "2"
+						expect(actual).to_equal("3\n")
+					else
+						expect(actual).to_equal("9\n")
+					end
+				when Result::Err(error)
+					puts(error)
+					expect(false).to_be_true()
+				end
+			end
+			if initial == "2"
+				state.scalar_mir.instructions.each do |instruction|
+					if instruction.kind == mir_op_scalar_literal() && state.scalar_mir.literal_texts[instruction.payload] == "2"
+						state.scalar_mir.literal_texts[instruction.payload] = "-2"
+					end
+				end
+				expect(verify_mir(state.scalar_mir, true).empty?()).to_be_false()
+			end
+		end
+	end
+end

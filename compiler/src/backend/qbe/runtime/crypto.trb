@@ -1,0 +1,71 @@
+import { crypto_adapter_start, crypto_names } from mir/model/crypto_contract
+import { mir_signature_standard } from mir/model/call_kinds
+import { MirModule } from mir/model/module
+import { QbeOutput, qbe_output_line } from backend/qbe/output
+
+# External dependencies are selected from verified MIR, never source names.
+def crypto_runtime_operations(native_module: MirModule): Array<Boolean>
+	mut needed := [false, false, false, false, false, false, false, false]
+	native_module.signatures.each do |signature|
+		if signature.kind == mir_signature_standard() && signature.adapter >= crypto_adapter_start() && signature.adapter < crypto_adapter_start() + crypto_names().size()
+			needed[signature.adapter - crypto_adapter_start()] = true
+		end
+	end
+	return needed
+end
+
+def crypto_runtime_needed(native_module: MirModule): Boolean
+	mut needed := false
+	crypto_runtime_operations(native_module).each do |operation|
+		if operation
+			needed = true
+		end
+	end
+	return needed
+end
+
+# EVP owns per-call native contexts. The 64-byte output stays on the native
+# stack across the sole managed allocation, then is cleansed after copying.
+# Input Bytes are not read again after that allocation. No owned crypto state
+# survives a call; OpenSSL owns its process cache and registered exit cleanup.
+def emit_crypto_runtime(native_module: MirModule, mut output: QbeOutput)
+	needed := crypto_runtime_operations(native_module)
+	mut digest := false
+	mut index := 0
+	while index < 6
+		if needed[index]
+			digest = true
+		end
+		index += 1
+	end
+	if digest
+		qbe_output_line(output, "data $trbn_crypto_error = { b \"panic: cryptography provider failed\", b 10 }\ndata $trbn_crypto_algorithm_md5 = { b \"MD5\", b 0 }\ndata $trbn_crypto_algorithm_sha1 = { b \"SHA1\", b 0 }\ndata $trbn_crypto_algorithm_sha256 = { b \"SHA256\", b 0 }\ndata $trbn_crypto_algorithm_sha512 = { b \"SHA512\", b 0 }\ndata $trbn_crypto_hmac = { b \"HMAC\", b 0 }\nfunction $trbn_crypto_initialize() {\n@start\n %marker =w loadub $trbn_crypto_build_identity\n %valid =w ceqw %marker, 84\n jnz %valid, @initialize, @fatal\n@initialize\n %ok =w call $OPENSSL_init_crypto(l 128, l 0)\n jnz %ok, @done, @fatal\n@done\n ret\n@fatal\n call $trbn_fatal(l $trbn_crypto_error, l 36)\n hlt\n}\nfunction l $trbn_crypto_copy(l %raw, l %length) {\n@start\n %size =l add %length, 17\n %result =l call $trbn_string_alloc(l %size)\n %lenp =l add %result, 8\n storel %length, %lenp\n %pointp =l add %result, 16\n storel %length, %pointp\n %data =l add %result, 24\n call $memcpy(l %data, l %raw, l %length)\n %end =l add %data, %length\n storeb 0, %end\n call $OPENSSL_cleanse(l %raw, l 64)\n ret %result\n}\nfunction l $trbn_crypto_hash(l %algorithm, l %expected, l %value) {\n@start\n call $trbn_crypto_initialize()\n %raw =l alloc8 64\n %used =l alloc8 8\n storel 0, %used\n %lenp =l add %value, 8\n %length =l loadl %lenp\n %data =l add %value, 24\n %ok =w call $EVP_Q_digest(l 0, l %algorithm, l 0, l %data, l %length, l %raw, l %used)\n %length_used =l loadl %used\n %right_length =w ceql %length_used, %expected\n %valid =w and %ok, %right_length\n jnz %valid, @copy, @fatal\n@copy\n %result =l call $trbn_crypto_copy(l %raw, l %expected)\n ret %result\n@fatal\n call $OPENSSL_cleanse(l %raw, l 64)\n call $trbn_fatal(l $trbn_crypto_error, l 36)\n hlt\n}\nfunction l $trbn_crypto_mac(l %algorithm, l %expected, l %key, l %message) {\n@start\n call $trbn_crypto_initialize()\n %raw =l alloc8 64\n %used =l alloc8 8\n storel 0, %used\n %keylenp =l add %key, 8\n %keylen =l loadl %keylenp\n %keydata =l add %key, 24\n %lenp =l add %message, 8\n %length =l loadl %lenp\n %data =l add %message, 24\n %ok =l call $EVP_Q_mac(l 0, l $trbn_crypto_hmac, l 0, l %algorithm, l 0, l %keydata, l %keylen, l %data, l %length, l %raw, l 64, l %used)\n %length_used =l loadl %used\n %right_length =w ceql %length_used, %expected\n %present =w cnel %ok, 0\n %valid =w and %present, %right_length\n jnz %valid, @copy, @fatal\n@copy\n %result =l call $trbn_crypto_copy(l %raw, l %expected)\n ret %result\n@fatal\n call $OPENSSL_cleanse(l %raw, l 64)\n call $trbn_fatal(l $trbn_crypto_error, l 36)\n hlt\n}\n")
+	end
+	if needed[6] || needed[7]
+		qbe_output_line(output, "data $trbn_crypto_compare_error = { b \"panic: cryptography provider failed\", b 10 }\nfunction l $trbn_crypto_compare(l %left, l %right) {\n@start\n %marker =w loadub $trbn_crypto_build_identity\n %valid =w ceqw %marker, 84\n jnz %valid, @lengths, @fatal\n@fatal\n call $trbn_fatal(l $trbn_crypto_compare_error, l 36)\n hlt\n@lengths\n %leftp =l add %left, 8\n %leftlen =l loadl %leftp\n %rightp =l add %right, 8\n %rightlen =l loadl %rightp\n %different =w cnel %leftlen, %rightlen\n jnz %different, @different, @same_length\n@different\n ret 0\n@same_length\n %leftdata =l add %left, 24\n %rightdata =l add %right, 24\n %compared =w call $CRYPTO_memcmp(l %leftdata, l %rightdata, l %leftlen)\n %equal =w ceqw %compared, 0\n %result =l extuw %equal\n ret %result\n}\n")
+	end
+	if needed[0]
+		qbe_output_line(output, "function l $trbn_crypto_md5(l %value) {\n@start\n %result =l call $trbn_crypto_hash(l $trbn_crypto_algorithm_md5, l 16, l %value)\n ret %result\n}\n")
+	end
+	if needed[1]
+		qbe_output_line(output, "function l $trbn_crypto_sha1(l %value) {\n@start\n %result =l call $trbn_crypto_hash(l $trbn_crypto_algorithm_sha1, l 20, l %value)\n ret %result\n}\n")
+	end
+	if needed[2]
+		qbe_output_line(output, "function l $trbn_crypto_sha256(l %value) {\n@start\n %result =l call $trbn_crypto_hash(l $trbn_crypto_algorithm_sha256, l 32, l %value)\n ret %result\n}\n")
+	end
+	if needed[3]
+		qbe_output_line(output, "function l $trbn_crypto_sha512(l %value) {\n@start\n %result =l call $trbn_crypto_hash(l $trbn_crypto_algorithm_sha512, l 64, l %value)\n ret %result\n}\n")
+	end
+	if needed[4]
+		qbe_output_line(output, "function l $trbn_crypto_hmac_sha256(l %key, l %message) {\n@start\n %result =l call $trbn_crypto_mac(l $trbn_crypto_algorithm_sha256, l 32, l %key, l %message)\n ret %result\n}\n")
+	end
+	if needed[5]
+		qbe_output_line(output, "function l $trbn_crypto_hmac_sha512(l %key, l %message) {\n@start\n %result =l call $trbn_crypto_mac(l $trbn_crypto_algorithm_sha512, l 64, l %key, l %message)\n ret %result\n}\n")
+	end
+	if needed[6]
+		qbe_output_line(output, "function l $trbn_crypto_hmac_equal(l %left, l %right) {\n@start\n %result =l call $trbn_crypto_compare(l %left, l %right)\n ret %result\n}\n")
+	end
+	if needed[7]
+		qbe_output_line(output, "function l $trbn_crypto_secure_equal(l %left, l %right) {\n@start\n %result =l call $trbn_crypto_compare(l %left, l %right)\n ret %result\n}\n")
+	end
+end

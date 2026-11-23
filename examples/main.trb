@@ -1,0 +1,8 @@
+def greeting(): String
+	return "Hello from TypeRB Native!"
+end
+
+def main()
+	puts(greeting())
+	return
+end

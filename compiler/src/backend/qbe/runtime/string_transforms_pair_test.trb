@@ -1,0 +1,111 @@
+import { check, emit_qbe } from compiler
+import { mir_literal_fragment } from mir/analysis/string_splits
+import { output_source } from testing/compiler
+import { logical_checked_source } from testing/pipeline
+import { logical_run_qbe } from testing/qbe_runner
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+describe("Split fragment count reuse") do
+	test("preserves every fragment byte and count across malformed boundaries and collection") do
+		fixtures: Array<Array<Integer>> := [[65, 194, 162, 226, 130, 172, 240, 159, 152, 128], [192, 128, 237, 160, 128, 244, 144, 128, 128], [], [65, 44, 0, 66], [0, 65, 127, 128, 191, 192, 193, 194, 224, 237, 240, 244, 245, 255]]
+		mut state := logical_checked_source("def split(text: String, separator: String): Array<String>\nreturn text.split(separator)\nend\ndef main()\nputs(0)\nend\n")
+		expect(check(state)).to_be_true()
+		mut output := output_source(emit_qbe(state)).split("export function w $main(").join("function w $unused_main(")
+		mut data := "\ndata $split_format = { b \"%ld,%ld,%d,%d,%d\\n\", b 0 }\ndata $split_size_format = { b \"%ld,%ld,%ld\\n\", b 0 }\n"
+		output += "\nexport function w $main() {\n@start\n call $trbn_gc_trace_initialize()\n"
+		mut expected := ""
+		mut sample := 0
+		fixtures.each do |original|
+			# The first iteration leaves the input as-is, including absent separators.
+			mut cut := -1
+			while cut <= original.size()
+				# Non-ASCII separators also check that the general path is retained.
+				[0, 44, 128, 194].each do |separator|
+					mut bytes: Array<Integer> := []
+					mut index := 0
+					while index <= original.size()
+						if index == cut
+							bytes.push(separator)
+						end
+						if index < original.size()
+							bytes.push(original[index])
+						end
+						index += 1
+					end
+					name := sample.to_s()
+					symbol := "$split_bytes_" + name
+					data += "data " + symbol + " = { "
+					bytes.each { |byte| data += "b " + byte.to_s() + ", " }
+					data += "b 0 }\ndata $split_separator_" + name + " = { b " + separator.to_s() + " }\n"
+					output += " %source" + name + " =l call $trbn_string_from_bytes(l " + symbol + ", l " + bytes.size().to_s() + ")\n"
+					output += " %separator" + name + " =l call $trbn_string_from_bytes(l $split_separator_" + name + ", l 1)\n"
+					output += " %roots" + name + " =l loadl $trbn_gc_temp_count\n"
+					output += " storel 0, $split_find_calls\n"
+					output += " %result" + name + " =l call $trbn_string_split(l %source" + name + ", l %separator" + name + ")\n"
+					output += " %after" + name + " =l loadl $trbn_gc_temp_count\n %retained" + name + " =l sub %after" + name + ", %roots" + name + "\n"
+					# Keep only the result rooted, so every element must survive through it.
+					output += " call $trbn_gc_temp_reset(l 0)\n call $trbn_gc_temp_push(l %result" + name + ")\n call $trbn_gc_collect(w 0)\n"
+					output += " %size_slot" + name + " =l add %result" + name + ", 8\n %size" + name + " =l loadl %size_slot" + name + "\n"
+					output += " %finds" + name + " =l loadl $split_find_calls\n"
+					output += " call $printf(l $split_size_format, ..., l %size" + name + ", l %retained" + name + ", l %finds" + name + ")\n"
+					output += " %items_slot" + name + " =l add %result" + name + ", 24\n %items" + name + " =l loadl %items_slot" + name + "\n"
+					mut parts := 1
+					bytes.each do |byte|
+						if byte == separator
+							parts += 1
+						end
+					end
+					expected += parts.to_s() + ",1," + parts.to_s() + "\n"
+					mut reused := "0"
+					if parts == 1
+						reused = "1"
+					end
+					mut start := 0
+					mut finish := 0
+					mut part := 0
+					while finish <= bytes.size()
+						if finish == bytes.size() || bytes[finish] == separator
+							item := name + "_" + part.to_s()
+							length := finish - start
+							output += " %item_slot" + item + " =l add %items" + name + ", " + (part * 8).to_s() + "\n %item" + item + " =l loadl %item_slot" + item + "\n"
+							output += " %length_slot" + item + " =l add %item" + item + ", 8\n %length" + item + " =l loadl %length_slot" + item + "\n"
+							output += " %points_slot" + item + " =l add %item" + item + ", 16\n %points" + item + " =l loadl %points_slot" + item + "\n"
+							output += " %data" + item + " =l add %item" + item + ", 24\n %expected" + item + " =l add " + symbol + ", " + start.to_s() + "\n"
+							output += " %different" + item + " =w call $memcmp(l %data" + item + ", l %expected" + item + ", l " + length.to_s() + ")\n"
+							output += " %end" + item + " =l add %data" + item + ", %length" + item + "\n %nul" + item + " =w loadub %end" + item + "\n"
+							output += " %reused" + item + " =w ceql %item" + item + ", %source" + name + "\n"
+							output += " call $printf(l $split_format, ..., l %length" + item + ", l %points" + item + ", w %different" + item + ", w %nul" + item + ", w %reused" + item + ")\n"
+							expected += length.to_s() + "," + mir_literal_fragment(bytes, start, finish).points.to_s() + ",0,0," + reused + "\n"
+							part += 1
+							start = finish + 1
+						end
+						finish += 1
+					end
+					output += " call $trbn_gc_temp_reset(l 0)\n"
+					sample += 1
+				end
+				cut += 1
+			end
+		end
+		output += " call $trbn_gc_finish()\n ret 0\n}\n" + data
+		allocation := "function l $trbn_gc_alloc(l %descriptor, l %payload_size, l %reserved_size) {\n@start"
+		expect(output.split(allocation).size()).to_equal(2)
+		output = output.split(allocation).join(allocation + "\n call $trbn_gc_collect(w 0)")
+		search := "function l $trbn_string_find_bytes(l %source, l %pattern, l %start) {\n@start"
+		expect(output.split(search).size()).to_equal(2)
+		output = output.split(search).join(search + "\n %observed_searches =l loadl $split_find_calls\n %next_searches =l add %observed_searches, 1\n storel %next_searches, $split_find_calls")
+		output += "\ndata $split_find_calls = align 8 { l 0 }\n"
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, output)
+			when Result::Ok(actual)
+				expect(actual).to_equal(expected)
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+end

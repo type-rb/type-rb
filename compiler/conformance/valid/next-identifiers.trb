@@ -1,0 +1,15 @@
+record NextValue
+	next: Integer
+end
+
+def next_parameter(next: Integer): Integer
+	return next
+end
+
+def main()
+	next_value := 1
+	next2 := 2
+	mut next := 3
+	value := NextValue.new(next: 4)
+	puts((next_value + next_parameter(next2) + next +value.next).to_s())
+end

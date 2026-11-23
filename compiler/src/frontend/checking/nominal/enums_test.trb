@@ -1,0 +1,96 @@
+import { check, emit_qbe } from compiler
+import { lex } from frontend/syntax/lexer
+import { parse_module } from frontend/syntax/parser
+import { resolve } from frontend/checking/program/resolution
+import { compiler_new } from state/state
+import { load_string } from support/storage
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { control_test_output } from testing/mir/control
+import { logical_run_qbe } from testing/qbe_runner
+import { verify_mir } from mir/verify/module
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+describe("Explicit generic enum patterns") do
+	test("checks instantiated owners and lowers payloads without frontend facts") do
+		sources := ["enum Box<T>\nValue(value: T)\nOther(note: String)\nend\ndef read(box: Box<String>): String\nreturn case box\nwhen Box<String>::Value(item)\nitem\nwhen Box<String>::Other(_note)\n\"empty\"\nend\nend\n\ndef main()\nputs(read(Box<String>::Value(\"held\")))\nputs(read(Box<String>::Other(\"empty\")))\n\nend\n",
+			"enum Box<T>\nValue(value: T)\nOther(note: String)\nend\ndef unwrap<T>(box: Box<T>, fallback: T): T\nreturn case box\nwhen Box<T>::Value(item)\nitem\nwhen Box<T>::Other(_note)\nfallback\nend\nend\n\ndef main()\nputs(unwrap<String>(Box<String>::Value(\"generic\"), \"empty\"))\nputs(unwrap<Integer>(Box<Integer>::Other(\"empty\"), 7))\n\nend\n",
+			"enum Box<T>\nValue(value: T)\nOther(note: String)\ndef get(fallback: T): T\nreturn case self\nwhen Box<T>::Value(item)\nitem\nwhen Box<T>::Other(_note)\nfallback\nend\nend\nend\n\ndef main()\nputs(Box<String>::Value(\"method\").get(\"empty\"))\nputs(Box<Integer>::Other(\"empty\").get(7))\n\nend\n",
+			"enum Box<T>\nValue(value: T)\nOther(note: String)\nend\n\ndef main()\ncallback := fn(value: String): String; return value + \"!\"; end\ncase Box<(String) -> String>::Value(callback)\nwhen Box<(String) -> String>::Value(call)\nputs(call(\"held\"))\nwhen Box<(String) -> String>::Other(_note)\nputs(\"empty\")\nend\n\nend\n",
+			"module Domain\nenum Box<T>\nValue(value: T)\nOther(note: String)\nend\nalias Parcel<U> = Box<U>\nend\ndef read(box: Domain::Parcel<String>): String\nreturn case box\nwhen Domain::Parcel<String>::Value(item)\nitem\nwhen Domain::Parcel<String>::Other(_note)\n\"empty\"\nend\nend\n\ndef main()\nputs(read(Domain::Parcel<String>::Value(\"qualified alias\")))\n\nend\n",
+			"enum Pair<A, B>\nValues(id: Integer, *, first: A, second: B)\nend\nalias Swapped<X, Y> = Pair<Y, X>\n\ndef main()\ncase Swapped<String, Integer>::Values(3, second: \"right\", first: 7)\nwhen Swapped<String, Integer>::Values(id, second: text, first: number)\nputs(id)\nputs(number)\nputs(text)\nend\n\nend\n",
+			"enum Box<T>\nValue(value: T)\nOther(note: String)\nend\n\ndef main()\ncase Box<Box<String>>::Value(Box<String>::Value(\"nested\"))\nwhen Box<Box<String>>::Value(inner)\ncase inner\nwhen Box<String>::Value(text)\nputs(text)\nwhen Box<String>::Other(_note)\nputs(\"inner empty\")\nend\nwhen Box<Box<String>>::Other(_note)\nputs(\"outer empty\")\nend\n\nend\n",
+			"enum Box<T>\nValue(value: T)\nOther(note: String)\nend\n\ndef main()\nvalues := [Box<String>::Value(\"closure\")]\nvalues.each do |box|\ncase box\nwhen Box<String>::Value(item)\nputs(item)\nwhen Box<String>::Other(_note)\nputs(\"empty\")\nend\nend\n\nend\n"]
+		outputs := ["held\nempty\n",
+			"generic\n7\n",
+			"method\n7\n",
+			"held!\n",
+			"qualified alias\n",
+			"3\n7\nright\n",
+			"nested\n",
+			"closure\n"]
+		mut index := 0
+		sources.each do |source|
+			mut state := compiler_new(source.size() * 3 + 16)
+			valid := lex(state, source) && parse_module(state, 0, state.module_graph.entry_module[0]) && resolve(state) && check(state)
+			if !valid
+				puts(index)
+				puts(load_string(state.diagnostics.messages, 0))
+			end
+			expect(valid).to_be_true()
+			if valid
+				before := control_test_output(emit_qbe(state))
+				intrinsic_mir_erase(state)
+				state.callables.checked_bodies.each do |body|
+					body.generic_application_types.used[0] = 0
+					body.generic_application_finishes.used[0] = 0
+					body.enum_pattern_origins.used[0] = 0
+				end
+				expect(verify_mir(state.scalar_mir, true)).to_equal("")
+				expect(control_test_output(emit_qbe(state))).to_equal(before)
+				qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+				if qbe != nil
+					case logical_run_qbe(qbe, before)
+					when Result::Ok(actual)
+						expect(actual).to_equal(outputs[index])
+					when Result::Err(error)
+						puts(error)
+						expect(false).to_be_true()
+					end
+				end
+			end
+			index += 1
+		end
+	end
+
+	test("rejects mismatched instantiated owners and invalid closed patterns") do
+		sources := ["enum Box<T>\nValue(value: T)\nOther(note: String)\nend\ndef read(box: Box<String>): String\nreturn case box\nwhen Box<Integer>::Value(item)\nitem\nwhen Box<Integer>::Other(_note)\n\"empty\"\nend\nend\n\ndef main()\nputs(read(Box<String>::Value(\"held\")))\n\nend\n",
+			"enum Box<T>\nValue(value: T)\nOther(note: String)\nend\nenum Other<T>\nValue(value: T)\nOther(note: String)\nend\ndef read(box: Box<String>): String\nreturn case box\nwhen Other<String>::Value(item)\nitem\nwhen Other<String>::Other(_note)\n\"empty\"\nend\nend\n\ndef main()\nputs(read(Box<String>::Value(\"held\")))\n\nend\n",
+			"enum Box<T>\nValue(value: T)\nOther(note: String)\nend\nrecord Holder<T>\nvalue: T\nend\ndef read(box: Box<String>): String\nreturn case box\nwhen Holder<String>::Value(item)\nitem\nwhen Holder<String>::Other(_note)\n\"empty\"\nend\nend\n\ndef main()\nputs(read(Box<String>::Value(\"held\")))\n\nend\n",
+			"enum Box<T>\nValue(value: T)\nOther(note: String)\nend\nalias Parcel<U> = Box<U>\ndef read(box: Box<String>): String\nreturn case box\nwhen Parcel<Integer>::Value(item)\nitem\nwhen Parcel<Integer>::Other(_note)\n\"empty\"\nend\nend\n\ndef main()\nputs(read(Box<String>::Value(\"held\")))\n\nend\n",
+			"enum Box<T>\nValue(value: T)\nOther(note: String)\nend\n\ndef main()\ncase Box<String>::Value(\"held\")\nwhen Box<String>::Value(item)\nputs(item)\nend\n\nend\n",
+			"enum Box<T>\nValue(value: T)\nOther(note: String)\nend\n\ndef main()\ncase Box<String>::Value(\"held\")\nwhen Box<String>::Value(first)\nputs(first)\nwhen Box<String>::Value(second)\nputs(second)\nwhen Box<String>::Other(_note)\nputs(\"empty\")\nend\n\nend\n",
+			"enum Pair<A, B>\nValues(id: Integer, *, first: A, second: B)\nend\n\ndef main()\ncase Pair<String, String>::Values(1, first: \"left\", second: \"right\")\nwhen Pair<String, String>::Values(id, first: left)\nputs(id)\nputs(left)\nend\n\nend\n",
+			"enum Pair<A, B>\nValues(id: Integer, *, first: A, second: B)\nend\n\ndef main()\ncase Pair<String, String>::Values(1, first: \"left\", second: \"right\")\nwhen Pair<String, String>::Values(id, first: repeated, second: repeated)\nputs(id)\nputs(repeated)\nend\n\nend\n"]
+		messages := ["case pattern must belong to the selector enum",
+			"case pattern must belong to the selector enum",
+			"case pattern must belong to the selector enum",
+			"case pattern must belong to the selector enum",
+			"enum case is not exhaustive",
+			"enum variant is handled more than once",
+			"enum pattern must bind every payload field",
+			"enum pattern binding is duplicated"]
+		mut index := 0
+		sources.each do |source|
+			mut state := compiler_new(source.size() * 3 + 16)
+			resolved := lex(state, source) && parse_module(state, 0, state.module_graph.entry_module[0]) && resolve(state)
+			expect(resolved).to_be_true()
+			if resolved
+				expect(check(state)).to_be_false()
+				expect(load_string(state.diagnostics.messages, 0)).to_equal(messages[index])
+			end
+			index += 1
+		end
+	end
+end

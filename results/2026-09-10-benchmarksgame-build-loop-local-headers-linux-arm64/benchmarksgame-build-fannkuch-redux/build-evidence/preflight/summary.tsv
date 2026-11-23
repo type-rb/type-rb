@@ -1,0 +1,3 @@
+candidate	build_status	build_stderr_empty	program_status	program_stderr_empty	program_stdout_exact
+typerb-native	0	true	0	true	true
+typerb-go	0	true	0	true	true

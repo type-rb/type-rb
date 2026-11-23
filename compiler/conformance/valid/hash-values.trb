@@ -1,0 +1,40 @@
+record HashBox
+	values: Hash<String, Integer>
+end
+
+def hash_fill(mut values: Hash<Integer, String>)
+	values[-9007199254740991] = "minimum"
+	values[9007199254740991] = "maximum"
+end
+
+def main()
+	mut labels: Hash<Integer, String> := {}
+	hash_fill(labels)
+	puts(labels[-9007199254740991])
+	puts(labels[9007199254740991])
+	labels[0] = "zero"
+	labels[0] = "replaced"
+	puts(labels.size())
+	puts(labels.delete(0))
+	puts(labels.key?(0))
+	mut copy := labels.dup()
+	copy.update({ 0 => "copy" })
+	puts(labels.size())
+	puts(copy.size())
+	puts(labels.merge(copy).fetch(0))
+	puts(copy.keys().size())
+	puts(copy.values().size())
+	puts({ answer: 42 }["answer"])
+	box := HashBox.new(values: { "answer" => 42 })
+	puts(box.values["answer"])
+	floats := { 1 => 1, 2 => 2.5 }
+	puts(floats[1] == 1.0)
+	puts(floats[2] == 2.5)
+	flags := { "yes" => true, "no" => false }
+	puts(flags["yes"])
+	puts(flags["no"])
+	mut fresh := {}
+	fresh["first"] = 42
+	puts(fresh["first"])
+	puts(fresh.empty?())
+end

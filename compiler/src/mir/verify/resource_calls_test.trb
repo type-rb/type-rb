@@ -1,0 +1,72 @@
+import { check } from compiler
+import { MirCall, MirSignature } from mir/model/module
+import { mir_resource_calls_error } from mir/verify/resource_calls
+import { mir_refine_call_effects } from mir/analysis/call_effects
+import { verify_mir } from mir/verify/module
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { expect_compiler_phase, logical_checked_source } from testing/pipeline
+import { describe, expect, test } from trb/std/test
+
+describe("Scoped resource MIR call proof") do
+	test("rederives a changed transitive call edge after source erasure") do
+		mut state := logical_checked_source("import trb/std/file\ndef safe(_callback: () -> Integer): Integer\nreturn 1\nend\ndef opaque(callback: () -> Integer): Integer\nreturn callback()\nend\ndef borrow(_file: File, callback: () -> Integer): Integer\nreturn safe(callback)\nend\ndef main()\nreturn\nend\n")
+		expect_compiler_phase(state, "check", check(state))
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		mut safe := -1
+		mut opaque := -1
+		state.scalar_mir.signatures.each do |signature|
+			if signature.name == "safe"
+				safe = signature.id
+			elsif signature.name == "opaque"
+				opaque = signature.id
+			end
+		end
+		expect(safe >= 0 && opaque >= 0).to_be_true()
+		intrinsic_mir_erase(state)
+		expect(mir_resource_calls_error(state.scalar_mir)).to_equal("")
+		mut changed := false
+		mut index := 0
+		while index < state.scalar_mir.calls.size()
+			call := state.scalar_mir.calls[index]
+			if call.callee == safe
+				state.scalar_mir.calls[index] = MirCall.new(callee: opaque, effects: call.effects, argument_start: call.argument_start, argument_count: call.argument_count)
+				changed = true
+			end
+			index += 1
+		end
+		expect(changed).to_be_true()
+		expect(mir_resource_calls_error(state.scalar_mir)).to_equal("MIR scoped resource call graph contains an opaque or unverified edge")
+		mir_refine_call_effects(state.scalar_mir)
+		expect(verify_mir(state.scalar_mir, true) != "").to_be_true()
+	end
+
+	test("rejects mutable borrow signatures independently of source checking") do
+		mut state := logical_checked_source("import trb/std/file\ndef borrow(_file: File)\nend\ndef main()\nend\n")
+		expect_compiler_phase(state, "check", check(state))
+		mut changed := false
+		mut index := 0
+		while index < state.scalar_mir.signatures.size()
+			row := state.scalar_mir.signatures[index]
+			if row.name == "borrow"
+				state.scalar_mir.signatures[index] = MirSignature.new(id: row.id, kind: row.kind, name: row.name, adapter: row.adapter, source_id: row.source_id, line: row.line, parameter_types: row.parameter_types, parameter_mutable: [1], result_type: row.result_type)
+				changed = true
+			end
+			index += 1
+		end
+		expect(changed).to_be_true()
+		intrinsic_mir_erase(state)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR scoped resource requires an immutable source borrow")
+	end
+
+	test("keeps admitted synchronous standard operations and ordinary lookalikes") do
+		[
+			"import trb/std/file\nimport trb/std/string_builder\ndef borrow(_file: File): String\nmut builder := StringBuilder.new()\nbuilder.append(\"ok\")\nputs(builder.size())\nreturn builder.to_s()\nend\ndef main()\nend\n",
+			"class File\nend\ndef ordinary(_file: File, callback: () -> Integer): Integer\nreturn callback()\nend\ndef main()\nend\n",
+		].each do |source|
+			mut state := logical_checked_source(source)
+			expect_compiler_phase(state, "check", check(state))
+			intrinsic_mir_erase(state)
+			expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		end
+	end
+end

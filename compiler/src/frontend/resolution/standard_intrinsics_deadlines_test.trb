@@ -1,0 +1,20 @@
+import { deadline_intrinsic_test_state } from testing/mir/deadlines
+import { standard_runtime_deadline } from frontend/resolution/standard_intrinsics
+import { store_integer } from support/storage
+import { describe, expect, test } from trb/std/test
+
+describe("Deadline intrinsic identity") do
+	test("does not grant a deadline by its authored spelling") do
+		mut state := deadline_intrinsic_test_state()
+		mut tested := false
+		state.scalar_mir.signatures.each do |signature|
+			if standard_runtime_deadline(state, signature.id)
+				tested = true
+				store_integer(state.standard_modules, signature.source_id, 0)
+				expect(standard_runtime_deadline(state, signature.id)).to_be_false()
+			end
+		end
+		expect(tested).to_be_true()
+	end
+
+end

@@ -1,0 +1,23 @@
+# Only the loader-owned Web server may import these declarations.
+# Foreign callbacks retain raw buffers only. Reading copies into managed Bytes;
+# writing copies out before returning. Tokens are validated connection identities.
+module NetworkHost
+end
+
+def start(host: String, port: Integer, body_limit: Integer, shutdown_timeout: Integer): String
+end
+
+def next_request(): Integer
+end
+
+def read(connection: Integer, field: Integer): Bytes
+end
+
+def status(connection: Integer): Integer
+end
+
+def write(connection: Integer, response: Bytes, close: Boolean): Boolean
+end
+
+def stop()
+end

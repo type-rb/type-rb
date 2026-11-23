@@ -1,0 +1,8 @@
+{
+  "name": "recovery-managed-string-index-failure",
+  "mode": "go",
+  "sourceDir": "src",
+  "go": {
+    "module": "github.com/type-rb/type-rb-native/corpus/recovery-managed/string-index-failure"
+  }
+}

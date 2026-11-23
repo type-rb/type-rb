@@ -1,0 +1,234 @@
+import { check, emit_qbe } from compiler
+import { MirInstruction, MirNumericPlan } from mir/model/module
+import { mir_numeric_plans_equal } from mir/analysis/numeric
+import { optimize_verified_mir } from mir/passes/optimize
+import { verify_mir } from mir/verify/module
+import { control_test_output } from testing/mir/control
+import { intrinsic_mir_erase } from testing/mir/intrinsics
+import { logical_checked_source } from testing/pipeline
+import { logical_run_qbe } from testing/qbe_runner
+import { CompilerState } from state/state
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+def guarded_interface_source(): String
+	return "interface Counter\napply(step: Integer): Integer\nend\nclass Accumulator implements Counter\n@total: Integer\ndef initialize(value: Integer)\n@total = value\nend\ndef apply(step: Integer): Integer\n@total = @total + step\nreturn @total\nend\nend\nclass Offset implements Counter\n@base: Integer\ndef initialize(value: Integer)\n@base = value\nend\ndef apply(step: Integer): Integer\nreturn @base + step * 2\nend\nend\nclass Difference implements Counter\ndef apply(step: Integer): Integer\nreturn step - 1\nend\nend\nclass Allocating implements Counter\ndef apply(step: Integer): Integer\nvalues := [step]\nreturn values[0]\nend\nend\ndef run(): Integer\nitems: Array<Counter> := [Accumulator.new(10), Offset.new(20), Difference.new(), Allocating.new()]\nmut total := 0\nmut index := 0\nwhile index < 8\nitem := items[index % items.size()]\ntotal += item.apply(index)\nindex += 1\nend\nreturn total\nend\ndef main()\nputs(run())\nend\n"
+end
+
+def guarded_interface_check(source: String): CompilerState
+	mut state := logical_checked_source(source)
+	expect(check(state)).to_be_true()
+	expect(verify_mir(state.scalar_mir, true)).to_equal("")
+	return state
+end
+
+def guarded_interface_count(state: CompilerState): Integer
+	mut count := 0
+	state.scalar_mir.numeric_plans[0].each do |plan|
+		if plan.witness >= 0
+			count += 1
+		end
+	end
+	return count
+end
+
+def guarded_interface_run(state: CompilerState, expected: String)
+	qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+	if qbe != nil
+		case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+		when Result::Ok(actual)
+			expect(actual).to_equal(expected)
+		when Result::Err(error)
+			puts(error)
+			expect(false).to_be_true()
+		end
+	end
+end
+
+describe("MIR guarded interface expansion") do
+	test("publishes fallback roots and republishes after nonallocating alternatives") do
+		source := guarded_interface_source().split("total += item.apply(index)").join("delta := item.apply(index)\nlabel := (index + 100).to_s()\ntotal += delta + label.size() - 3")
+		state := guarded_interface_check(source)
+		expect(guarded_interface_count(state)).to_equal(2)
+		emitted := control_test_output(emit_qbe(state))
+		mut forced := ""
+		mut ordinary := false
+		mut hooks := 0
+		emitted.split("\n").each do |line|
+			if line.start_with?("function ")
+				ordinary = line.include?("$trbnf")
+			elsif line == "}"
+				ordinary = false
+			end
+			# These actual allocation sites cover both an unselected witness
+			# and the allocation immediately following a selected scalar body.
+			if ordinary && (line.include?("call $trbn_gc_alloc(") || line.include?("call $trbn_array_new(") || line.include?("call $trbn_array_push_paced(") || line.include?("call $trbn_integer_to_string("))
+				forced += "\tcall $trbn_gc_collect(w 0)\n"
+				hooks += 1
+			end
+			forced += line + "\n"
+		end
+		expect(hooks >= 10).to_be_true()
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, forced)
+			when Result::Ok(actual)
+				expect(actual).to_equal("92\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
+	test("guards two exact witnesses and retains scalar and allocating fallback") do
+		state := guarded_interface_check(guarded_interface_source())
+		expect(guarded_interface_count(state)).to_equal(2)
+		emitted := control_test_output(emit_qbe(state))
+		expect(emitted.include?(", $trbn_interface_table_0")).to_be_true()
+		expect(emitted.include?(", $trbn_interface_table_1")).to_be_true()
+		state.scalar_mir.numeric_plans[0].each do |plan|
+			if plan.witness >= 0
+				instruction := state.scalar_mir.instructions[plan.call_instruction]
+				expect(state.scalar_mir.calls[instruction.payload].effects).to_equal(15)
+			end
+		end
+		guarded_interface_run(state, "92\n")
+	end
+
+	test("rejects forged guard targets owners sites and missing alternatives") do
+		mut mode := 0
+		while mode < 6
+			mut state := guarded_interface_check(guarded_interface_source())
+			mut plans := state.scalar_mir.numeric_plans[0]
+			mut index := 0
+			while plans[index].witness < 0
+				index += 1
+			end
+			original := plans[index]
+			mut witness := original.witness
+			mut function := original.function_id
+			mut caller := original.caller
+			mut site := original.call_instruction
+			if mode == 0
+				witness = 999999
+			elsif mode == 1
+				witness = -1
+			elsif mode == 2
+				function = 999999
+			elsif mode == 3
+				caller = 999999
+			elsif mode == 4
+				site = 999999
+			else
+				plans.push(original)
+			end
+			plans[index] = MirNumericPlan.new(witness: witness, function_id: function, caller: caller, call_instruction: site, operations: original.operations)
+			expect(verify_mir(state.scalar_mir, true)).to_equal("MIR numeric plan differs")
+			mode += 1
+		end
+	end
+
+	test("rederives guards after erasure and physical block and value reordering") do
+		mut state := guarded_interface_check(guarded_interface_source())
+		before := control_test_output(emit_qbe(state))
+		plans := state.scalar_mir.numeric_plans[0]
+		intrinsic_mir_erase(state)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		expect(control_test_output(emit_qbe(state))).to_equal(before)
+		state.scalar_mir.functions.each do |function|
+			mut left := function.block_start
+			mut right := left + function.block_count - 1
+			while left < right
+				saved := state.scalar_mir.blocks[left]
+				state.scalar_mir.blocks[left] = state.scalar_mir.blocks[right]
+				state.scalar_mir.blocks[right] = saved
+				left += 1
+				right -= 1
+			end
+		end
+		mut left := 0
+		mut right := state.scalar_mir.values.size() - 1
+		while left < right
+			saved := state.scalar_mir.values[left]
+			state.scalar_mir.values[left] = state.scalar_mir.values[right]
+			state.scalar_mir.values[right] = saved
+			left += 1
+			right -= 1
+		end
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		optimize_verified_mir(state.scalar_mir)
+		expect(mir_numeric_plans_equal(plans, state.scalar_mir.numeric_plans[0])).to_be_true()
+		guarded_interface_run(state, "92\n")
+	end
+
+	test("keeps nonidentity named argument mappings on the unchanged path") do
+		state := guarded_interface_check("interface Named\ncalculate(value: Integer, *, left: Integer, right: Integer): Integer\nend\nclass Reordered implements Named\ndef calculate(value: Integer, *, right: Integer, left: Integer): Integer\nreturn value + left * right\nend\nend\ndef run(): Integer\nvalue: Named := Reordered.new()\nmut index := 0\nmut total := 0\nwhile index < 2\ntotal += value.calculate(1, left: 2, right: 3)\nindex += 1\nend\nreturn total\nend\ndef main()\nputs(run())\nend\n")
+		expect(guarded_interface_count(state)).to_equal(0)
+		guarded_interface_run(state, "14\n")
+	end
+
+	test("preserves inherited receiver ownership") do
+		state := guarded_interface_check("interface Counter\napply(step: Integer): Integer\nend\nclass Parent implements Counter\ndef apply(step: Integer): Integer\nreturn step + 1\nend\nend\nclass Child < Parent\nend\ndef run(): Integer\nvalue: Counter := Child.new()\nmut index := 0\nmut total := 0\nwhile index < 3\ntotal += value.apply(index)\nindex += 1\nend\nreturn total\nend\ndef main()\nputs(run())\nend\n")
+		expect(guarded_interface_count(state)).to_equal(2)
+		guarded_interface_run(state, "6\n")
+	end
+
+	test("uses Float results and operands without Integer guards") do
+		state := guarded_interface_check("interface Scale\napply(value: Float): Float\nend\nclass Double implements Scale\ndef apply(value: Float): Float\nreturn value * 2.0\nend\nend\ndef run(): Float\nvalue: Scale := Double.new()\nmut index := 0\nmut total := 0.0\nwhile index < 2\ntotal += value.apply(1.25)\nindex += 1\nend\nreturn total\nend\ndef main()\nputs(run())\nend\n")
+		expect(guarded_interface_count(state)).to_equal(1)
+		guarded_interface_run(state, "5.0\n")
+	end
+
+	test("preserves Boolean results") do
+		state := guarded_interface_check("interface Predicate\napply(value: Boolean): Boolean\nend\nclass Invert implements Predicate\ndef apply(value: Boolean): Boolean\nreturn !value\nend\nend\ndef run(): Integer\nvalue: Predicate := Invert.new()\nmut index := 0\nmut total := 0\nwhile index < 2\nif value.apply(false)\ntotal += 1\nend\nindex += 1\nend\nreturn total\nend\ndef main()\nputs(run())\nend\n")
+		expect(guarded_interface_count(state)).to_equal(1)
+		guarded_interface_run(state, "2\n")
+	end
+	test("rejects supplied raw plans and a mismatched receiver witness") do
+		mut state := guarded_interface_check(guarded_interface_source())
+		mut raw := guarded_interface_check(guarded_interface_source())
+		while !raw.scalar_mir.enum_stack_functions.empty?()
+			raw.scalar_mir.enum_stack_functions.pop()
+		end
+		expect(verify_mir(raw.scalar_mir, false)).to_equal("MIR input cannot supply numeric plans")
+		mut index := 0
+		mut changed := false
+		while index < state.scalar_mir.instructions.size() && !changed
+			original := state.scalar_mir.instructions[index]
+			if original.kind == 66 && original.payload == 0
+				state.scalar_mir.instructions[index] = MirInstruction.new(kind: original.kind, result: original.result, first: original.first, second: original.second, payload: 1, failure: original.failure, source_id: original.source_id, line: original.line)
+				changed = true
+			end
+			index += 1
+		end
+		expect(changed).to_be_true()
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR interface conversion types differ")
+	end
+
+	test("preserves the first checked Integer failure inside matching guards") do
+		mut mode := 0
+		while mode < 2
+			mut expression := "(9007199254740991 + step) / 0"
+			mut expected := "panic: Integer is outside the portable range\n"
+			if mode == 1
+				expression = "(step / 0) + 9007199254740991"
+				expected = "panic: division by zero\n"
+			end
+			state := guarded_interface_check("interface Checked\napply(step: Integer): Integer\nend\nclass Operation implements Checked\ndef apply(step: Integer): Integer\nreturn " + expression + "\nend\nend\ndef run(): Integer\nvalue: Checked := Operation.new()\nmut index := 0\nmut total := 0\nwhile index < 2\ntotal += value.apply(1)\nindex += 1\nend\nreturn total\nend\ndef main()\nputs(run())\nend\n")
+			expect(guarded_interface_count(state)).to_equal(1)
+			qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+			if qbe != nil
+				case logical_run_qbe(qbe, control_test_output(emit_qbe(state)), 2)
+				when Result::Err(actual)
+					expect(actual).to_equal(expected)
+				when Result::Ok(_actual)
+					expect(false).to_be_true()
+				end
+			end
+			mode += 1
+		end
+	end
+
+end

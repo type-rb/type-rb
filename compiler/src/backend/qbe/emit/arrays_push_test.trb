@@ -1,0 +1,22 @@
+import { check, emit_qbe } from compiler
+import { logical_checked_source } from testing/pipeline
+import { control_test_output } from testing/mir/control
+import { managed_mir_test_fixture } from testing/mir/managed
+import { describe, expect, test } from trb/std/test
+
+describe("Integer Array push expansion") do
+	test("keeps the caller fast path and delegates allocation to paced growth") do
+		mut state := logical_checked_source("def main()\nmut values: Array<Integer> := []\nvalues.push(1)\nputs(values.size())\nend\n")
+		expect(check(state)).to_be_true()
+		output := control_test_output(emit_qbe(state))
+		caller := output.split("function $trbnf0")[1].split("\n}\n")[0]
+		expect(caller.include?("call $trbn_array_push_paced(")).to_be_false()
+		expect(caller.include?("call $trbn_array_grow_paced(")).to_be_true()
+	end
+
+	test("preserves aliases evaluation order and growth through forced collection") do
+		managed_mir_test_fixture("array-push-growth", 5)
+		managed_mir_test_fixture("array-assignment-targets", 5)
+		managed_mir_test_fixture("array-push-conditional-roots", 5)
+	end
+end

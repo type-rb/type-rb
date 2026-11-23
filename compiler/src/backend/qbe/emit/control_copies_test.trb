@@ -1,0 +1,74 @@
+import { emit_control_mir_edge } from backend/qbe/emit/control
+import { emit_context_new } from backend/qbe/context
+import { qbe_output_new } from backend/qbe/output
+import { compiler_new } from state/state
+import { mir_block } from mir/build/blocks
+import { mir_function_control, mir_terminator_return } from mir/model/control
+import { MirFunction } from mir/model/module
+import { control_test_output } from testing/mir/control
+import { logical_run_qbe } from testing/qbe_runner
+import { describe, expect, test } from trb/std/test
+import trb/std/process
+import trb/std/result
+
+def control_copy_edge(sources: Array<Integer>): String
+	mut state := compiler_new(1)
+	[0, 1, 2, 3].each do |value|
+		state.scalar_mir.arguments.push(value)
+	end
+	sources.each do |value|
+		state.scalar_mir.arguments.push(value)
+	end
+	state.scalar_mir.blocks.push(mir_block(0, 0, 1, 0, 4, 0, 0, mir_terminator_return(), -1, -1, -1, 0, 0, 0, 0, -1))
+	function := MirFunction.new(kind: mir_function_control(), result_type: "Void", integer_guard: 0, id: 0, entry_block: 0, source_id: 0, line: 1, parameter_start: 0, parameter_count: 0, block_start: 0, block_count: 1)
+	mut context := emit_context_new()
+	mut output := qbe_output_new(32, [])
+	emit_control_mir_edge(state, function, 0, "@done", 4, 4, ["%a", "%b", "%c", "%d", "%external"], ["Integer", "Integer", "Integer", "Integer", "Integer"], context, output)
+	return control_test_output(output)
+end
+
+describe("QBE parallel edge copies") do
+	test("omits identities and captures only overwritten sources") do
+		expect(control_copy_edge([0, 1, 2, 3])).to_equal("\tjmp @done\n")
+		expect(control_copy_edge([4, 4, 2, 3])).to_equal("\t%a =l copy %external\n\t%b =l copy %external\n\tjmp @done\n")
+		expect(control_copy_edge([1, 0, 2, 3])).to_equal("\t%t0 =l copy %b\n\t%t1 =l copy %a\n\t%a =l copy %t0\n\t%b =l copy %t1\n\tjmp @done\n")
+	end
+
+	test("preserves every four-slot assignment with cycles fanout identities and external sources") do
+		mut program := "data $format = { b \"%lld\", b 10, b 0 }\n"
+		mut calls := ""
+		mut expected := ""
+		mut mapping := 0
+		while mapping < 625
+			mut digits := mapping
+			mut sources: Array<Integer> := []
+			mut answer := 0
+			mut slot := 0
+			while slot < 4
+				source := digits % 5
+				sources.push(source)
+				answer = answer * 10 + source + 1
+				digits /= 5
+				slot += 1
+			end
+			name := mapping.to_s()
+			program += "function l $case" + name + "() {\n@start\n\t%a =l copy 1\n\t%b =l copy 2\n\t%c =l copy 3\n\t%d =l copy 4\n\t%external =l copy 5\n"
+			program += control_copy_edge(sources)
+			program += "@done\n\t%r0 =l mul %a, 10\n\t%r1 =l add %r0, %b\n\t%r2 =l mul %r1, 10\n\t%r3 =l add %r2, %c\n\t%r4 =l mul %r3, 10\n\t%r5 =l add %r4, %d\n\tret %r5\n}\n"
+			calls += "\t%answer" + name + " =l call $case" + name + "()\n\tcall $printf(l $format, ..., l %answer" + name + ")\n"
+			expected += answer.to_s() + "\n"
+			mapping += 1
+		end
+		program += "export function w $main() {\n@start\n" + calls + "\tret 0\n}\n"
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, program)
+			when Result::Ok(actual)
+				expect(actual).to_equal(expected)
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+end

@@ -1,0 +1,15 @@
+def add_values(left: Integer, right: Integer): Integer
+	return left + right
+end
+
+def main()
+	minimum := -9007199254740991
+	mut result := 0
+	mut index := 0
+	while index < 1
+		result = add_values(1 + minimum, -2)
+		index += 1
+	end
+	puts(result.to_s())
+	return
+end
