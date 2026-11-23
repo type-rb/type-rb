@@ -74,7 +74,21 @@ func upperCamel(value string) string {
 
 func (g *generator) testRuntimeSupport() {
 	g.testInspectionRuntime()
-	g.line(`class TrbTestFailure extends Error { constructor(readonly path: string, readonly line: number, readonly column: number, message: string) { super(message); } }`)
+	g.line("class TrbTestFailure extends Error {")
+	g.indent++
+	g.line("readonly path: string;")
+	g.line("readonly line: number;")
+	g.line("readonly column: number;")
+	g.line("constructor(path: string, line: number, column: number, message: string) {")
+	g.indent++
+	g.line("super(message);")
+	g.line("this.path = path;")
+	g.line("this.line = line;")
+	g.line("this.column = column;")
+	g.indent--
+	g.line("}")
+	g.indent--
+	g.line("}")
 	g.line(`const trbTestSuites: string[] = [];`)
 	g.line(`let trbTestTotal = 0;`)
 	g.line(`let trbTestFailed = 0;`)

@@ -13,20 +13,24 @@ import (
 )
 
 func TestAssertionValuesUseAuthoredNamesAcrossBackends(t *testing.T) {
-	for _, mode := range []string{"go", "ruby", "typescript"} {
-		t.Run(mode, func(t *testing.T) {
-			runtime := map[string]string{"go": "go", "ruby": "ruby", "typescript": "bun"}[mode]
-			if _, err := exec.LookPath(runtime); err != nil {
-				t.Skipf("%s unavailable: %v", runtime, err)
+	for _, target := range []struct{ mode, runtime, packageManager string }{
+		{"go", "go", ""},
+		{"ruby", "ruby", ""},
+		{"typescript", project.TypeScriptRuntimeBun, "bun"},
+		{"typescript", project.TypeScriptRuntimeNode, "npm"},
+	} {
+		t.Run(target.runtime, func(t *testing.T) {
+			if _, err := exec.LookPath(target.runtime); err != nil {
+				t.Skipf("%s unavailable: %v", target.runtime, err)
 			}
-			config := project.New(t.TempDir(), mode)
+			config := project.New(t.TempDir(), target.mode)
 			config.SourceDir = "src"
-			if mode == "go" {
+			if target.mode == "go" {
 				config.Go.Module = "example.com/assertion-values"
 			}
-			if mode == "typescript" {
-				config.TypeScript.Runtime = project.TypeScriptRuntimeBun
-				config.TypeScript.PackageManager = "bun"
+			if target.mode == "typescript" {
+				config.TypeScript.Runtime = target.runtime
+				config.TypeScript.PackageManager = target.packageManager
 			}
 			if err := config.Save(); err != nil {
 				t.Fatal(err)
