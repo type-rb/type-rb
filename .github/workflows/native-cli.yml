@@ -375,7 +375,10 @@ jobs:
           PLATFORM: ${{ matrix.platform }}
         run: |
           mkdir -p dist/package
+          native_version=$(cat NATIVE_VERSION)
+          test "$(bin/trbn --version)" = "trbn $native_version (development; default mode: trb)"
           cp bin/trbn bin/qbe bin/build-info.txt bin/qbe-backend.json dist/package/
+          printf 'version=%s\n' "$native_version" >> dist/package/build-info.txt
           cp docs/native-cli.md dist/package/README.md
           cp LICENSE dist/package/LICENSE
           cp docs/licenses/qbe-1.3.txt dist/package/QBE-LICENSE
