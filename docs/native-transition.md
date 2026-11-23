@@ -4,14 +4,16 @@ Implementation is tracked by [the v0.5.0 transition initiative](https://github.c
 
 ## Release outcome
 
-TypeRB v0.5.0 makes the TypeRB-authored Native compiler the canonical
-implementation in `type-rb/type-rb`. It must provide every feature in the
-reviewed Go implementation release contract, subject only to the explicitly
-approved v0.5 deferrals below, before the switch is released.
-The existing Go implementation is preserved, with its Git history, in
-`type-rb/type-rb-go` and maintained at matching release version numbers for the
-time being. This is the accepted destination; it does not claim that current
-Native builds have reached feature parity or authorize an immediate cutover.
+The TypeRB-authored Native compiler becomes the canonical implementation in
+`type-rb/type-rb` during the v0.5.0 alpha series. The canonical command is `trb`.
+The existing Go implementation and its Git history are preserved in
+`type-rb/type-rb-go` and distributed as `trbg`. Both implementations publish
+the same release version during the alpha series and for the time being
+afterward.
+
+Alpha releases may have documented feature gaps. The final v0.5.0 release must
+satisfy the reviewed Go implementation contract and the Native executable
+contract, with the explicit deferrals below.
 
 Compiler implementation and program output are separate choices:
 
@@ -37,11 +39,10 @@ application contracts with its own qualified runtime providers.
   implementation-specific tests and build tooling. It consumes the same
   versioned shared contracts rather than maintaining an independent dialect or
   a separately edited copy of the specification and official packages.
-- `type-rb/type-rb-native` remains the Native development repository until the
-  migration gates pass. Then archive it as a historical repository, point users
-  to the canonical project, and retain access to its history and immutable
-  release, seed and evidence assets. Do not keep a third independent active
-  implementation line.
+- `type-rb/type-rb-native` remains the Native development repository through the
+  migration. Archive it after verifying that active development, support and
+  distribution are carried by the canonical repository. Retain its public URLs,
+  history and immutable release, seed and evidence assets.
 
 ## Complete feature contract
 
@@ -158,11 +159,13 @@ recovery and performance gates are not weakened by this transition.
 
 ## Versions and shared maintenance
 
-Starting with the switch, publish matching TypeRB and Go implementation
-release versions, beginning with v0.5.0. A matching version means both releases
-satisfy the same shared contract, with the output difference and the explicit
-v0.5 deferrals above. Record implementation identity, source revision, contract digest, artifacts and
-provenance separately so equal version numbers never hide different binaries.
+Starting with the switch, publish matching versions for the Native and Go
+implementations. Use the next available `v0.5.0-alpha.N` tag in both
+repositories for each alpha pair. Record the implementation, source revision,
+contract digest, artifacts, and provenance separately. For each alpha, record
+which obligations lack passing evidence and which features users can run with
+`trbg`. For the final v0.5.0 pair, both implementations must satisfy the shared
+contract subject to the specified output differences and deferrals.
 Pair subsequent releases, including implementation-specific fixes; no shared
 feature is released on only one implementation under a supposedly equivalent
 version. Shared specifications, package sources and conformance fixtures have
@@ -174,9 +177,9 @@ date or silent reduction in the promised shared functionality is established.
 
 Before cutover, the Native repository retains its current independent
 implementation identity and exact compatibility pins. This policy replaces
-independent release numbering prospectively at v0.5.0; it does not rename old
-tags, relabel existing seeds, update a pin without validation, or reinterpret
-historical measurements. New immutable identities are required for new assets.
+independent release numbering prospectively during the v0.5.0 alpha series.
+Preserve old tags, seed identities, and historical measurements. Validate
+changes to compatibility pins. New immutable identities are required for new assets.
 
 ## Development and release gates
 
@@ -186,7 +189,35 @@ pass; publish their supported boundary explicitly. A preview does not waive
 the final parity gate or require delaying useful application work until every
 language edge case is complete.
 
-The release and repository cutover require:
+### Alpha cutover
+
+1. Keep the existing canonical repository, its history, issues, and tagged
+   v0.4 assets at their current URLs. Bring the Native source history into the
+   canonical repository through a merge commit. Preserve the Go history in
+   `type-rb/type-rb-go`. Verify the historical Go module path at its original
+   tags and the maintained module path on new Go release tags.
+2. Verify that `brew install type-rb/tap/trbg` installs the Go compiler without
+   taking ownership of `trb`. Verify that both commands can run in the same
+   environment and that VS Code can select either through `typerb.server.path`.
+3. Publish and validate both prereleases before updating `Formula/trb.rb`.
+   Verify platform archives and checksums, installation, upgrades from v0.4,
+   command identity, REPL, a small application, and packaged toolchain assets.
+   Record the available targets and release gaps in the alpha notes. Keep the
+   existing v0.4 install available until its replacement passes on that host.
+   Native executable builds need the system C toolchain. Install the pinned QBE
+   and library sidecars with the Native compiler.
+4. Update the existing tap through a pull request. The normal `trb` upgrade
+   selects Native, and `trbg` retains Go source builds. Rehearse restoring the
+   Go formula in an already upgraded prefix as well as a fresh one. If an
+   emergency rollback needs to upgrade users to an older package version,
+   retain the resulting Homebrew `version_scheme` in subsequent formulas.
+5. Verify canonical documentation and installation links at cutover. Keep
+   existing issues, PRs, releases, and seeds reachable until all affected
+   consumers and owners have a verified destination.
+
+### Final v0.5.0 qualification
+
+The final release requires:
 
 1. All non-deferred obligations in the reviewed full feature manifest pass for
    exact candidates on both implementations and every applicable output/target. There are no missing
@@ -207,8 +238,9 @@ The release and repository cutover require:
    supported existing workflows still work with the replacement compiler.
 6. Transfer or explicitly dispose of every active issue, PR, claim, workflow,
    consumer and support/security route before archiving `type-rb-native`.
-   Verify old links and historical assets remain useful, publish the redirect
-   notice, then archive. Do not archive the development repository first.
+   Verify old links and historical assets remain useful and publish the redirect
+   notice before archiving. This archive gate also applies during the alpha
+   series.
 
 Work state, ownership, acceptance evidence and remaining dependencies belong
 in the linked initiative and its tasks. Existing language, MIR, tooling and
