@@ -758,81 +758,76 @@ def _decoding_path(parser: JsonParser, identity: Integer): String
 	return _path(parents, parts, positions, identity)
 end
 
+# Assemble each reachable child directly into its parent. The traversal stacks
+# hold only open containers, with one ordered key list per open object.
 def _value(parser: JsonParser, identity: Integer): Result<PublicJSON::Value, PublicJSON::Error>
-	# Node identities are dense indexes; unreachable duplicate-key nodes keep
-	# their unused placeholder without requiring a second Hash lookup per edge.
-	mut values: Array<PublicJSON::Value> := []
-	mut index := 0
-	while index < parser.nodes.size()
-		values.push(PublicJSON::Value::Null)
-		index += 1
+	root := parser.nodes[identity]
+	if _closing_byte(root) < 0
+		return _atomic_value(root)
 	end
 	mut pending := [identity]
-	mut entered := [false]
-	# Keep each active object's canonical order across its child traversal.
-	# Nested objects push and pop their own keys without sorting a parent twice.
+	mut positions := [0]
+	mut arrays: Array<Array<PublicJSON::Value>> := []
+	mut objects: Array<Hash<String, PublicJSON::Value>> := []
 	mut object_keys: Array<Array<String>> := []
+	mut completed := PublicJSON::Value::Null
 	while !pending.empty?()
 		top := pending.size() - 1
 		current := pending[top]
+		index := positions[top]
 		node := parser.nodes[current]
 		case node
 		when JsonNode::Array(items_index)
 			children := parser.arrays[items_index]
-			if !entered[top]
-				entered[top] = true
-				index = children.size()
-				while index > 0
-					index -= 1
-					child := children[index]
-					pending.push(child)
-					entered.push(false)
-				end
+			if index == 0
+				arrays.push([])
+			end
+			if index < children.size()
+				positions[top] = index + 1
+				pending.push(children[index])
+				positions.push(0)
 				next
 			end
-			mut items: Array<PublicJSON::Value> := []
-			index = 0
-			while index < children.size()
-				items.push(values[children[index]])
-				index += 1
-			end
-			values[current] = PublicJSON::Value::Array(items)
+			completed = PublicJSON::Value::Array(arrays[arrays.size() - 1])
+			arrays.pop()
 		when JsonNode::Object(members_index)
 			children := parser.objects[members_index]
-			if !entered[top]
-				keys := children.keys().sort()
-				object_keys.push(keys)
-				entered[top] = true
-				index = keys.size()
-				while index > 0
-					index -= 1
-					child := children.fetch(keys[index])
-					pending.push(child)
-					entered.push(false)
-				end
-				next
+			if index == 0
+				objects.push({})
+				object_keys.push(children.keys().sort())
 			end
 			keys := object_keys[object_keys.size() - 1]
-			object_keys.pop()
-			mut members: Hash<String, PublicJSON::Value> := {}
-			index = 0
-			while index < keys.size()
-				members[keys[index]] = values[children.fetch(keys[index])]
-				index += 1
+			if index < keys.size()
+				positions[top] = index + 1
+				pending.push(children.fetch(keys[index]))
+				positions.push(0)
+				next
 			end
-			values[current] = PublicJSON::Value::Object(members)
+			completed = PublicJSON::Value::Object(objects[objects.size() - 1])
+			objects.pop()
+			object_keys.pop()
 		else
 			case _atomic_value(node)
 			when Result::Ok(value)
-				values[current] = value
+				completed = value
 			when Result::Err(error)
 				return Result<PublicJSON::Value, PublicJSON::Error>::Err(_error(error.kind, error.message, _decoding_path(parser, current)))
 			end
 		end
 		pending.pop()
-		entered.pop()
+		positions.pop()
+		if !pending.empty?()
+			parent := pending.size() - 1
+			case parser.nodes[pending[parent]]
+			when JsonNode::Object(_members)
+				keys := object_keys[object_keys.size() - 1]
+				objects[objects.size() - 1][keys[positions[parent] - 1]] = completed
+			else
+				arrays[arrays.size() - 1].push(completed)
+			end
+		end
 	end
-	return Result<PublicJSON::Value, PublicJSON::Error>::Ok(values[identity])
+	return Result<PublicJSON::Value, PublicJSON::Error>::Ok(completed)
 end
 
 def parse(source: String): Result<PublicJSON::Value, PublicJSON::Error>
@@ -1119,7 +1114,9 @@ def _floating(number: Float): String
 	return result + exponent.to_s()
 end
 
-def _encoding_error_path(value: PublicJSON::Value): PublicJSON::Error?
+# The writer found a nonfinite Float. Visit the original object order to choose
+# the diagnostic even when multiple members fail and output keys are sorted.
+def _nonfinite_path(value: PublicJSON::Value): String
 	mut values := [value]
 	mut parents := [-1]
 	mut parts := [""]
@@ -1131,7 +1128,7 @@ def _encoding_error_path(value: PublicJSON::Value): PublicJSON::Error?
 		case values[current]
 		when PublicJSON::Value::Float(number)
 			if !number.finite?()
-				return _error(PublicJSON::ErrorKind::Encode, "JSON Float must be finite", _path(parents, parts, positions, current))
+				return _path(parents, parts, positions, current)
 			end
 		when PublicJSON::Value::Array(items)
 			mut index := items.size()
@@ -1158,44 +1155,12 @@ def _encoding_error_path(value: PublicJSON::Value): PublicJSON::Error?
 			nil
 		end
 	end
-	return nil
-end
-
-# Valid documents need only the pending values. Keep diagnostic paths and
-# already visited values alive only when a nonfinite number requires an error.
-def _encoding_error(value: PublicJSON::Value): PublicJSON::Error?
-	mut pending := [value]
-	while !pending.empty?()
-		current := pending[pending.size() - 1]
-		pending.pop()
-		case current
-		when PublicJSON::Value::Float(number)
-			if !number.finite?()
-				return _encoding_error_path(value)
-			end
-		when PublicJSON::Value::Array(items)
-			mut index := items.size()
-			while index > 0
-				index -= 1
-				pending.push(items[index])
-			end
-		when PublicJSON::Value::Object(members)
-			keys := members.keys()
-			mut index := keys.size()
-			while index > 0
-				index -= 1
-				pending.push(members.fetch(keys[index]))
-			end
-		else
-			nil
-		end
-	end
-	return nil
+	return ""
 end
 
 # Keep only the active path and its next child positions. Each object owns one
 # sorted key list until it closes; siblings do not need pending value/token pairs.
-def _serialize_compound(value: PublicJSON::Value): String
+def _serialize_compound(value: PublicJSON::Value): Result<String, PublicJSON::Error>
 	mut values := [value]
 	mut positions := [0]
 	mut object_keys: Array<Array<String>> := []
@@ -1212,6 +1177,9 @@ def _serialize_compound(value: PublicJSON::Value): String
 		when PublicJSON::Value::Integer(integer)
 			builder.append(integer.to_s())
 		when PublicJSON::Value::Float(number)
+			if !number.finite?()
+				return Result<String, PublicJSON::Error>::Err(_error(PublicJSON::ErrorKind::Encode, "JSON Float must be finite", _nonfinite_path(value)))
+			end
 			builder.append(_floating(number))
 		when PublicJSON::Value::String(string)
 			_append_quoted(builder, string)
@@ -1253,33 +1221,28 @@ def _serialize_compound(value: PublicJSON::Value): String
 		values.pop()
 		positions.pop()
 	end
-	return builder.to_s()
+	return Result<String, PublicJSON::Error>::Ok(builder.to_s())
 end
 
 # Scalar roots need neither traversal stacks nor a mutable document buffer.
-def _serialize(value: PublicJSON::Value): String
+def stringify(value: PublicJSON::Value): Result<String, PublicJSON::Error>
 	case value
 	when PublicJSON::Value::Null
-		return "null"
+		return Result<String, PublicJSON::Error>::Ok("null")
 	when PublicJSON::Value::Boolean(boolean)
-		return boolean.to_s()
+		return Result<String, PublicJSON::Error>::Ok(boolean.to_s())
 	when PublicJSON::Value::Integer(integer)
-		return integer.to_s()
+		return Result<String, PublicJSON::Error>::Ok(integer.to_s())
 	when PublicJSON::Value::Float(number)
-		return _floating(number)
+		if !number.finite?()
+			return Result<String, PublicJSON::Error>::Err(_error(PublicJSON::ErrorKind::Encode, "JSON Float must be finite", ""))
+		end
+		return Result<String, PublicJSON::Error>::Ok(_floating(number))
 	when PublicJSON::Value::String(string)
-		return _escape(string)
+		return Result<String, PublicJSON::Error>::Ok(_escape(string))
 	else
 		return _serialize_compound(value)
 	end
-end
-
-def stringify(value: PublicJSON::Value): Result<String, PublicJSON::Error>
-	error := _encoding_error(value)
-	if error != nil
-		return Result<String, PublicJSON::Error>::Err(error)
-	end
-	return Result<String, PublicJSON::Error>::Ok(_serialize(value))
 end
 
 # BEGIN GENERATED JSON DIAGNOSTIC DATA

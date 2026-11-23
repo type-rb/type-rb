@@ -158,7 +158,8 @@ def interpolation_end(source: String, source_length: Integer, mut index: Integer
 	while index < source_length
 		character := source[index]
 		if character == "\"" || character == "'"
-			index = interpolation_quote_end(source, source_length, index + 1, character)
+			mut nested_interpolation := [false]
+			index = interpolation_quote_end(source, source_length, index + 1, character, nested_interpolation)
 			if index < 0
 				return -1
 			end
@@ -181,7 +182,7 @@ def interpolation_end(source: String, source_length: Integer, mut index: Integer
 	return -1
 end
 
-def interpolation_quote_end(source: String, source_length: Integer, mut index: Integer, quote: String): Integer
+def interpolation_quote_end(source: String, source_length: Integer, mut index: Integer, quote: String, mut interpolated: Array<Boolean>): Integer
 	while index < source_length
 		character := source[index]
 		if character == "\\"
@@ -197,6 +198,7 @@ def interpolation_quote_end(source: String, source_length: Integer, mut index: I
 			if opening
 				if index + 1 < source_length
 					if source[index + 1] == "{"
+						interpolated[0] = true
 						index = interpolation_end(source, source_length, index + 2)
 						if index < 0
 							return -1
@@ -391,29 +393,27 @@ def scan_quoted_token(mut state: CompilerState, source: String, source_length: I
 	if source[position[0]] == "'"
 		return scan_string(state, source, source_length, position, line, false)
 	end
-	finish := interpolation_quote_end(source, source_length, position[0] + 1, "\"")
-	if finish < 0
+	# The delimiter scan already recognizes unescaped interpolation. Ordinary
+	# quoted strings can go straight to decoding without another scalar scan.
+	mut interpolated := [false]
+	finish := interpolation_quote_end(source, source_length, position[0] + 1, "\"", interpolated)
+	if finish < 0 || !interpolated[0]
 		return scan_string(state, source, source_length, position, line, true)
 	end
 	mut index := position[0] + 1
-	mut deferred := false
 	mut lines := 0
 	while index < finish
-		if source[index] == "\\"
+		character := source[index]
+		if character == "\\"
 			index += 1
-		elsif source[index] == "#" && index + 1 < finish && source[index + 1] == "{"
-			deferred = true
-		elsif source[index] == "\n"
+		elsif character == "\n"
 			lines += 1
 		end
 		index += 1
 	end
-	if deferred
-		push_token(state, token_kind_interpolation(), compiler_source_slice(source, position[0], finish + 1), line)
-		position[0] = finish + 1
-		return lines
-	end
-	return scan_string(state, source, source_length, position, line, true)
+	push_token(state, token_kind_interpolation(), compiler_source_slice(source, position[0], finish + 1), line)
+	position[0] = finish + 1
+	return lines
 end
 
 def two_character_symbol(pair: String): Boolean

@@ -205,8 +205,14 @@ end
 ```
 
 Build a read query from the model or its transaction scope. Equality filters
-accept named scalar columns, including `nil` for nullable columns. The
-three-argument form checks the column, operator and value against the lock.
+accept scalar values (including `nil` for nullable columns), integer ranges
+and single-column subqueries.
+For example, `Report.where(id: 2...5)` includes 2, 3 and 4.
+`select(:id)` creates a typed subquery and preserves its filters, ordering,
+limit and offset. A transaction-scoped subquery requires the same outer
+transaction or savepoint. An unscoped subquery can be used in either context.
+The three-argument form checks the column, operator and value against the lock;
+`=` and `!=` also accept a compatible subquery.
 Text columns also support SQLite `LIKE`. Each modifier returns a new query. Table reads also work when the locked
 schema has no primary key or has a composite primary key.
 
@@ -222,6 +228,13 @@ order. Use an explicit order when row identity matters. `first()` returns a
 nullable model. `count()` counts the selected page, including its limit and
 offset. A zero limit gives an empty array, a missing first row and a count of
 zero. These reads also work through `Report.using(tx)`.
+
+Use `sum(:column)` and `average(:column)` for numeric columns. For example,
+`Report.order(id: :desc).offset(2).limit(3).sum(:id)` adds the IDs of the
+three rows after the first two. `minimum` and `maximum` also accept text
+and temporal columns. These operations ignore SQL NULL and respect the
+selected transaction. If the page has no non-NULL values, `sum` gives a
+typed zero and the other three operations give `nil`.
 
 Use `pluck(:column)` to read one typed column and `pick(:column)` to
 read its first value. Both preserve the ordering and bounds on the query.

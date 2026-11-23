@@ -478,9 +478,13 @@ end
 
 def check_expression_argument(mut state: CompilerState, mut position: Array<Integer>, mut locals: CheckedLocals, minimum_precedence: Integer, expected: String, borrowed: Boolean, context: String): CheckedValue
 	# Context guides Array literals without coercing a grouped operand early.
-	expression_origin := position[0]
+	origin := position[0]
+	value := check_expression_value(state, position, locals, minimum_precedence, expected)
+	return finish_expression_argument(state, locals, value, expected, origin, position[0], borrowed, context)
+end
+
+def finish_expression_argument(mut state: CompilerState, mut locals: CheckedLocals, mut value: CheckedValue, expected: String, expression_origin: Integer, finish: Integer, borrowed: Boolean, context: String): CheckedValue
 	line := load_integer(state.source_tokens.token_lines, expression_origin)
-	mut value := check_expression_value(state, position, locals, minimum_precedence, expected)
 	if !checked_resource_use(state, locals, value, expected, borrowed, line)
 		return checked_value("Invalid", checked_category_value(), expression_origin, 0)
 	end
@@ -488,7 +492,7 @@ def check_expression_argument(mut state: CompilerState, mut position: Array<Inte
 	if expected != ""
 		value = checked_collection_context(state, locals, value, expected)
 	end
-	value = mir_literal_context(state, locals, value, expected, expression_origin, position[0])
+	value = mir_literal_context(state, locals, value, expected, expression_origin, finish)
 	check_expected_argument(state, value.type_name, expected, line, expression_origin, context)
 	value = mir_nullable_coerce(state, locals, value, expected, expression_origin)
 	mut displayed_mutable := 0

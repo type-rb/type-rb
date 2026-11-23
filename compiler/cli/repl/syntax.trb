@@ -41,6 +41,7 @@ end
 
 def repl_syntax_flat(source: String): ReplSyntax
 	mut spans := ReplSyntax.new(starts: [], ends: [], kinds: [], words: [])
+	mut interpolation := [false]
 	mut index := 0
 	mut previous := ""
 	while index < source.size()
@@ -65,7 +66,7 @@ def repl_syntax_flat(source: String): ReplSyntax
 		else
 			if character == "\"" || character == "'"
 				kind = repl_style_string()
-				finish := interpolation_quote_end(source, source.size(), index, character)
+				finish := interpolation_quote_end(source, source.size(), index, character, interpolation)
 				if finish < 0
 					index = source.size()
 					kind = repl_style_incomplete()
