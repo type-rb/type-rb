@@ -16,7 +16,8 @@ jobs:
   qualify:
     outputs:
       validation_run: ${{ steps.validation.outputs.run }}
-    if: github.repository == 'type-rb/type-rb'
+    # The canonical repository retains its existing GitHub identity at cutover.
+    if: github.repository_id == '1323586441'
     runs-on: ubuntu-24.04
     permissions:
       actions: read
