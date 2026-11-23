@@ -241,7 +241,7 @@ def orm_lookup_methods(mut state: CompilerState, index: Integer, table: OrmTable
 	end
 	query_type := find_object_in_module(state, generated, "OrmQuery")
 	scope_type := find_object_in_module(state, generated, "OrmScope")
-	orm_query_columns(table, key).each do |method|
+	orm_query_columns(table, key, connection).each do |method|
 		orm_add_method(state, query_type, method.source, method.name, "OrmQuery")
 	end
 	orm_query_roots("@_scope", "").each do |method|

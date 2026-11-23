@@ -35,6 +35,18 @@
         }
       }
     },
+    "observations": {
+      "columns": {
+        "id": {"type": "Integer", "primaryKey": true, "generated": true},
+        "label": {"type": "String"},
+        "score": {"type": "Integer", "nullable": true},
+        "weight": {"type": "Float", "nullable": true},
+        "day": {"type": "Date", "nullable": true}
+      },
+      "uniqueConstraints": {
+        "primary:id": {"primary": true, "columns": ["id"]}
+      }
+    },
     "metrics": {
       "columns": {
         "id": {

@@ -29,6 +29,7 @@ end
 
 def format_lex(source: String): FormatTokens
 	mut tokens: Array<FormatToken> := []
+	mut interpolation := [false]
 	mut index := 0
 	while index < source.size()
 		start := index
@@ -47,7 +48,7 @@ def format_lex(source: String): FormatTokens
 			end
 		elsif character == "\"" || character == "'"
 			kind = 3
-			finish := interpolation_quote_end(source, source.size(), index, character)
+			finish := interpolation_quote_end(source, source.size(), index, character, interpolation)
 			if finish < 0
 				return FormatTokens.new(tokens: tokens, error: "unterminated quoted literal")
 			end

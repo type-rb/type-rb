@@ -1,0 +1,83 @@
+import { Observation } from models
+import { projection_error } from projections
+import { expired_transaction } from queries
+import { Database, DbErrorKind, DbResult } from trb/orm
+
+def aggregate_values(): DbResult<Integer>
+	page := Observation.where(label: "prod").order(id: :desc).offset(1).limit(2)
+	puts(try page.sum(:score))
+	average := try page.average("score")
+	if average != nil
+		puts(average == 4.0)
+	end
+	low := try page.minimum(:score)
+	if low != nil
+		puts(low == 4)
+	end
+	high := try page.maximum(:weight)
+	if high != nil
+		puts(high == 3.0)
+	end
+	puts((try page.sum(:weight)) == 3.0)
+	day := try page.minimum(:day)
+	if day != nil
+		puts(day.to_s())
+	end
+	first := try Observation.minimum(:label)
+	if first != nil
+		puts(first == "other")
+	end
+	last := try Observation.maximum(:label)
+	if last != nil
+		puts(last == "prod")
+	end
+	mean := try Observation.average(:score)
+	if mean != nil
+		puts(mean == 13.5)
+	end
+	empty := page.limit(0)
+	puts(try empty.sum(:id))
+	puts((try empty.sum(:weight)) == 0.0)
+	puts((try empty.maximum(:label)) == nil)
+	nulls := Observation.where(id: 2)
+	puts(try nulls.sum(:score))
+	puts((try nulls.average(:weight)) == nil)
+	puts((try nulls.minimum(:day)) == nil)
+	puts((try nulls.maximum(:score)) == nil)
+	tx := try expired_transaction()
+	case Observation.using(tx).sum(:score)
+	when DbResult::Err(error)
+		puts(error.kind == DbErrorKind::Query)
+		puts(error.message)
+	when DbResult::Ok(_value)
+		puts("unexpected success")
+	end
+	return Database.transaction() do |open|
+		scoped := Observation.using(open)
+		_row := try scoped.create(label: "tx", score: 6)
+		try scoped.sum(:score)
+	end
+end
+
+def print_aggregate_errors()
+	puts(projection_error<Integer>(Observation.sum(:score)))
+	puts(projection_error<Float?> (Observation.average(:score)))
+	puts(projection_error<String?> (Observation.minimum(:label)))
+	puts(projection_error<Integer?> (Observation.maximum(:id)))
+end
+
+def print_aggregate_data_errors()
+	case Observation.sum(:score)
+	when DbResult::Err(error)
+		puts(error.kind == DbErrorKind::InvalidData)
+		puts(error.message)
+	when DbResult::Ok(value)
+		puts(value)
+	end
+	case Observation.maximum(:day)
+	when DbResult::Err(error)
+		puts(error.kind == DbErrorKind::InvalidData)
+	when DbResult::Ok(value)
+		puts(value == nil)
+	end
+end
