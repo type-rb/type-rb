@@ -198,6 +198,123 @@ def exercise(executable, configured):
         print(f"{'configured' if configured else 'standalone'} editor session passed")
 
 
+def document_point(text, offset):
+    lines = text[:offset].split("\n")
+    return {"line": len(lines) - 1, "character": len(lines[-1].encode("utf-16-le")) // 2}
+
+
+def retry_response(check, expected):
+    deadline = time.monotonic() + 5
+    while True:
+        actual = check()
+        if expected(actual):
+            return actual
+        if time.monotonic() >= deadline:
+            raise AssertionError(f"semantic request returned {actual!r}")
+        time.sleep(0.1)
+
+
+def semantic_session(executable, configured):
+    with tempfile.TemporaryDirectory(prefix="trb-semantic-workspace-") as tmp:
+        root = Path(tmp).resolve()
+        first, other = root / "first", root / "other"
+        first.mkdir()
+        other.mkdir()
+        main, helper, args = fixture(first, configured)
+        unrelated, _, _ = fixture(other, configured)
+        source = main.read_text().replace(
+            "greeting_text(row))", 'combine(greeting_text(row), "🍋"))')
+        source += ('\ndef combine(left: String, right: String): String\n'
+                   '\treturn left + right\nend\n'
+                   '\ndef separate(row: Integer): Integer\n\treturn row + 1\nend\n')
+        main.write_text(source)
+        doc = {"uri": main.as_uri()}
+        imported = {"uri": helper.as_uri()}
+        with server([executable, "lsp", *args], first) as client:
+            caps = client.request("initialize", {"capabilities": {}}, 1)["capabilities"]
+            for cap in ("completionProvider", "hoverProvider", "signatureHelpProvider"):
+                assert caps.get(cap), cap
+            client.send("initialized", {})
+            client.send("textDocument/didOpen", {"textDocument": dict(
+                doc, version=1, languageId="trb", text=source)})
+            client.diagnostics(doc["uri"], 1, nonempty=False)
+            expect_definition(client, doc, helper, 0)
+            request_id = 100
+
+            def ask(method, offset, text=source, document=doc):
+                nonlocal request_id
+                request_id += 1
+                return client.request("textDocument/" + method, {"textDocument": document,
+                    "position": document_point(text, offset)}, request_id)
+
+            def details(offset, text=source):
+                result = ask("completion", offset, text)
+                return {item["label"]: item for item in result["items"]}
+
+            def change(text, version):
+                client.send("textDocument/didChange", {"textDocument": dict(doc, version=version),
+                    "contentChanges": [{"text": text}]})
+
+            receiver = source.index("row.text")
+            member = receiver + len("row.")
+            end = receiver + len("row.text")
+            hover = ask("hover", receiver + 1)
+            assert "row: Greeting" in hover["contents"]["value"], hover
+            assert hover["range"] == {"start": document_point(source, receiver),
+                                      "end": document_point(source, receiver + 3)}, hover
+            for needle, offset, expected in [("row.text", 5, "text: String"),
+                    ("Greeting.new", 2, "record Greeting"), ("return row + 1", 8, "row: Integer"),
+                    ("greeting_text(row)", 2, "greeting_text(row: Greeting): String")]:
+                answer = ask("hover", source.index(needle) + offset)
+                assert answer and expected in answer["contents"]["value"], (needle, answer)
+            field = details(member)["text"]
+            assert (field["kind"], field["detail"]) == (5, "String"), field
+            assert field["textEdit"] == {"range": {"start": document_point(source, member),
+                "end": document_point(source, end)}, "newText": "text"}, field
+            visible = details(source.index("greeting_text(row)") + 4)
+            assert visible["greeting_text"]["kind"] == 3, visible
+            for needle, param, label in [('greeting_text(', 0, "greeting_text(row: Greeting): String"),
+                    ('greeting_text(row), ', 1, "combine(left: String, right: String): String")]:
+                # Skip the import statement and target the call after three emoji.
+                entry = source.index(needle, source.index("def main"))
+                help_ = ask("signatureHelp", entry + len(needle))
+                assert help_ and help_["signatures"][0]["label"] == label, help_
+                assert help_["activeParameter"] == param, help_
+            incomplete = source[:member] + source[end:]
+            change(incomplete, 2)
+            retry_response(lambda: details(member, incomplete), lambda items: "text" in items)
+            change(source, 3)
+            client.diagnostics(doc["uri"], 3, nonempty=False)
+            for version, tail, method, expected in [
+                    (4, "greeting_text(", "signatureHelp", "greeting_text(row: Greeting): String"),
+                    (5, "greeti", "completion", "greeting_text"),
+                    (6, "greeting_text(ro", "completion", "row")]:
+                unfinished = source.replace('combine(greeting_text(row), "🍋"))', tail)
+                at = unfinished.index(tail, unfinished.index("def main")) + len(tail)
+                change(unfinished, version)
+                client.diagnostics(doc["uri"], version)
+                if method == "completion":
+                    retry_response(lambda: details(at, unfinished), lambda items: expected in items)
+                else:
+                    retry_response(lambda: ask(method, at, unfinished),
+                                   lambda answer: answer and answer["signatures"][0]["label"] == expected)
+            change(source, 7)
+            client.diagnostics(doc["uri"], 7, nonempty=False)
+            helper_text = helper.read_text().replace("text: String", "text: String\n\tcount: Integer = 0")
+            client.send("textDocument/didOpen", {"textDocument": dict(
+                imported, version=1, languageId="trb", text=helper_text)})
+            fields = retry_response(lambda: details(member), lambda items: "count" in items)
+            assert fields["count"]["detail"] == "Integer", fields
+            client.send("textDocument/didClose", {"textDocument": imported})
+            retry_response(lambda: details(member), lambda items: "text" in items and "count" not in items)
+            assert ask("hover", receiver + 1, document={"uri": unrelated.as_uri()}) is None
+            assert main.read_text() == source and "count:" not in helper.read_text()
+            client.request("shutdown", None, 10000)
+            client.send("exit", None)
+            assert client.proc.wait(timeout=5) == 0
+        print(f"{'configured' if configured else 'standalone'} editor semantic session passed")
+
+
 def discovery_session(executable):
     # Compare complete items, including declaration IDs (UTF-8 bytes) and
     # editor ranges (UTF-16). The emoji occurs both before and inside a case.
@@ -324,6 +441,7 @@ if __name__ == "__main__":
         parser.error("--vscode and --extension must be supplied together")
     for configured in (True, False):
         exercise(args.executable.resolve(), configured)
+        semantic_session(args.executable.resolve(), configured)
     discovery_session(args.executable.resolve())
     if args.vscode:
         extension_host(args.executable.resolve(), args.vscode.resolve(), args.extension.resolve())

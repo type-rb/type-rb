@@ -1,3 +1,4 @@
+import { CheckedPresentation } from state/source_state
 import { concurrent_read_binding, concurrent_value } from frontend/checking/body/concurrency
 import { test_dsl_function, test_provider_kind } from frontend/providers/test_declarations
 import { check_inferred_test_expectation } from frontend/checking/builtins/test_expectations
@@ -30,7 +31,7 @@ import { advance, expect, expect_identifier, skip_newlines, token_is } from fron
 import { mir_enum_construct, mir_enum_operation } from mir/lowering/enums
 import { enum_argument_bindings, enum_type, find_enum_type, find_enum_variant } from frontend/types/enum_types
 import { checked_enum_presentation, checked_submission_result } from frontend/checking/program/submission
-import { nullable_apply, nullable_finish, nullable_logical_condition, nullable_nil_condition, nullable_read } from frontend/checking/nominal/nullable_flow
+import { nullable_apply, nullable_finish, nullable_logical_condition, nullable_lookup, nullable_nil_condition, nullable_read } from frontend/checking/nominal/nullable_flow
 import { nullable_element } from frontend/types/nullable_types
 import { argument_binding_slot } from frontend/resolution/argument_binding
 import { mir_checked_range_new } from mir/lowering/ranges
@@ -52,12 +53,36 @@ import { check_array_literal, checked_hash_literal } from frontend/checking/body
 import { check_newtype_member, check_postfix } from frontend/checking/body/members
 import { check_control_value } from frontend/checking/body/control
 
+def checked_scope_at(mut state: CompilerState, locals: CheckedLocals, origin: Integer)
+	mut query := state.callables.scope_queries[0]
+	if load_integer(state.source_tokens.token_lines, origin) != query.line || load_integer(state.source_tokens.token_columns, origin) != query.column || load_string(state.module_graph.module_files, state.module_graph.active_module[0]) != query.path
+		return
+	end
+	mut bindings := query.bindings
+	query.count[0] = locals.count[0]
+	mut slot := 0
+	while slot < locals.count[0]
+		name := load_string(locals.names, slot)
+		binding := CheckedPresentation.new(name: name, type_name: nullable_lookup(locals, slot, -1, load_string(locals.types, slot)))
+		if slot < bindings.size()
+			bindings[slot] = binding
+		else
+			bindings.push(binding)
+		end
+		slot += 1
+	end
+	return
+end
+
 def check_primary(
 		mut state: CompilerState,
 		mut position: Array<Integer>,
 		mut locals: CheckedLocals,
 		expected: String,
 	): CheckedValue
+	if state.callables.scope_queries.size() > 0
+		checked_scope_at(state, locals, position[0])
+	end
 	if token_is(state, position[0], ":")
 		advance(position)
 		origin := position[0]

@@ -4,6 +4,7 @@ import { find_visible_function, find_visible_record } from frontend/resolution/d
 import { lsp_file_uri, lsp_offset, lsp_range, lsp_token } from lsp/positions
 import { parse_project_config } from project/config
 import { package_json_quote } from project/package_json
+import { CheckedScopeQuery } from state/callable_state
 import { CompilerState, has_diagnostic } from state/state
 import { string_ends_with, string_starts_with } from support/path
 import { load_integer, load_string, sparse_integer_at } from support/storage
@@ -65,7 +66,7 @@ def lsp_configured(workspace: LspWorkspace): CompilerState
 	return load_configured_sources_with_mode(config, workspace.config, workspace.root, workspace.output, CompilerProjectSources.new(paths: paths, sources: sources, error: ""), false, false)
 end
 
-def lsp_analyze(mut workspace: LspWorkspace): CompilerState
+def lsp_analyze(mut workspace: LspWorkspace, queries: Array<CheckedScopeQuery> = []): CompilerState
 	mut paths := workspace.text.keys()
 	mut sources: Array<String> := []
 	paths.each { |path| sources.push(workspace.text[path]) }
@@ -87,6 +88,7 @@ def lsp_analyze(mut workspace: LspWorkspace): CompilerState
 		resolve(state)
 	end
 	if !has_diagnostic(state)
+		queries.each { |query| state.callables.scope_queries.push(query) }
 		check(state)
 	end
 	return state
