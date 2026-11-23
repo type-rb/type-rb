@@ -543,6 +543,24 @@ end
         # unresolved multi-member precedence and REPL-message specifications.
         assert run([args.reference.resolve(), 'run', main]).stdout == encoding_output
 
+    # The first invalid member in traversal order can differ from the first
+    # one visited by the sorted writer. Report the original path in both cases.
+    multiple_errors = encoding_source[:encoding_source.index('def main()')] + '''def main()
+bad := JSON::Value::Float(0.0 / 0.0)
+mut members: Hash<String, JSON::Value> := {}
+keys := ["z", "a", "pear", "apple", "red", "blue"]
+keys.each do |key|
+	members[key] = JSON::Value::Array([JSON::Value::Null, bad])
+end
+puts("/" + members.keys()[0] + "/1")
+report_encoding(JSON::Value::Object(members))
+end
+'''
+    main.write_text(multiple_errors)
+    run([binary, 'build', '--compile', main, '--outfile', program])
+    expected_path, actual_path, message = run([program]).stdout.splitlines()
+    assert actual_path == expected_path and message == 'JSON Float must be finite'
+
     for regression_source, regression_output in ((pointer_source, pointer_output),
                                                   (encoding_source, encoding_output),
                                                   (float_source, float_output)):
