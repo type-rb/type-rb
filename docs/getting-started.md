@@ -49,21 +49,21 @@ command below, and Bun only for the TypeScript command.
 Run the program in Go mode to follow the rest of this guide:
 
 ```sh
-trb hello.trb
+trbg hello.trb
 ```
 
 If you prefer another target, run only the corresponding command:
 
 ```sh
-trb run --mode ruby hello.trb
-trb run --mode typescript --runtime bun hello.trb
+trbg run --mode ruby hello.trb
+trbg run --mode typescript --runtime bun hello.trb
 ```
 
-Start the typed REPL from any directory with `trb`. It uses Go mode when no
+Start the typed REPL from any directory with `trbg`. It uses Go mode when no
 project configuration is present:
 
 ```console
-$ trb
+$ trbg
 trb:go> 1 + 2
 3 : Integer
 ```
@@ -73,7 +73,7 @@ trb:go> 1 + 2
 Create a Go project:
 
 ```sh
-trb init --mode go --module example.com/hello hello
+trbg init --mode go --module example.com/hello hello
 cd hello
 ```
 
@@ -89,9 +89,9 @@ end
 Then format, lint, and run the project:
 
 ```sh
-trb fmt
-trb lint
-trb run
+trbg fmt
+trbg lint
+trbg run
 ```
 
 Use `trb build` to keep generated target source. Go projects can also produce

@@ -202,8 +202,9 @@ language edge case is complete.
 3. Publish and validate both prereleases before updating `Formula/trb.rb`.
    Verify platform archives and checksums, installation, upgrades from v0.4,
    command identity, REPL, a small application, and packaged toolchain assets.
-   Record the available targets and release gaps in the alpha notes. Keep the
-   existing v0.4 install available until its replacement passes on that host.
+   Record the available targets and release gaps in the alpha notes. Hosts
+   awaiting a Native archive can install the matching Go companion as
+   `trbg` and can retrieve v0.4 binaries from their original release.
    Native executable builds need the system C toolchain. Install the pinned QBE
    and library sidecars with the Native compiler.
 4. Update the existing tap through a pull request. The normal `trb` upgrade
