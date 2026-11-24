@@ -21,9 +21,9 @@ known success type, including a directly returned empty Array; unrelated earlier
 statements and explicit returns retain their own typing boundaries.
 
 `String.try_to_i`, `String.try_to_f` and strict `String.to_f` use portable decimal
-syntax and range rules. MIR verifies the scalar conversion and nonthrowing parse
-status independently; existing typed branches construct success or the precise
-`NumberParseErrorKind`. The shared runtime validates the entire byte sequence
+syntax and range rules. A fallible Float parse computes the status and numeric
+value together. MIR verifies that the value comes from that same parse. The
+status selects the success value or the precise `NumberParseErrorKind`. The shared runtime validates the entire byte sequence
 before reporting range errors, rejects whitespace/NUL/hex/NaN/infinity spellings,
 and preserves Float signed zero and subnormal values. Bounded short decimals
 use an exact significand and power of ten followed by one rounded operation;
