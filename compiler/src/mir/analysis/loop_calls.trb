@@ -36,7 +36,10 @@ end
 
 def mir_loop_call_invariant(native_module: MirModule, flow: MirFlow, header: MirBlock, preheader: MirBlock, aliases: MirFlowAliases, argument: Integer): Boolean
 	entry := mir_loop_entry_operand(native_module, flow, aliases, header, preheader, argument)
-	return entry >= 0 && mir_value_available(flow, preheader, preheader.instruction_start + preheader.instruction_count, entry)
+	if entry < 0
+		return false
+	end
+	return mir_value_available(flow, preheader, preheader.instruction_start + preheader.instruction_count, entry)
 end
 
 # A literal has the same immutable bytes when rematerialized inside the loop.
