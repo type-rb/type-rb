@@ -1,6 +1,6 @@
 import { mir_function_control, mir_terminator_branch, mir_terminator_jump } from mir/model/control
-import { MirFunction, MirModule } from mir/model/module
-import { MirFlow, mir_flow_block_index, mir_flow_dominates } from mir/analysis/flow
+import { MirBlock, MirFunction, MirModule } from mir/model/module
+import { MirFlow, MirFlowAliases, mir_flow_alias, mir_flow_block_index, mir_flow_dominates, mir_flow_parameter_slot } from mir/analysis/flow
 import { mir_live_add, mir_managed_contains } from mir/analysis/liveness
 
 record MirNaturalLoop
@@ -47,6 +47,29 @@ def mir_natural_loop(native_module: MirModule, function: MirFunction, flow: MirF
 		end
 	end
 	return MirNaturalLoop.new(preheader: preheader, members: members)
+end
+
+# Resolve the value supplied on entry if every backedge forwards the same
+# header parameter. A definition outside the header keeps its flow identity.
+def mir_loop_entry_operand(native_module: MirModule, flow: MirFlow, aliases: MirFlowAliases, header: MirBlock, preheader: MirBlock, value: Integer): Integer
+	identity := mir_flow_alias(aliases, value)
+	slot := mir_flow_parameter_slot(native_module, header, identity)
+	if slot < 0
+		return identity
+	end
+	header_index := mir_flow_block_index(flow, header.id)
+	mut edge := 0
+	while edge < flow.predecessors[header_index].size()
+		previous := flow.predecessors[header_index][edge]
+		if mir_flow_dominates(flow, header_index, previous)
+			incoming := native_module.arguments[flow.incoming_starts[header_index][edge] + slot]
+			if mir_flow_alias(aliases, incoming) != identity
+				return -1
+			end
+		end
+		edge += 1
+	end
+	return native_module.arguments[preheader.first_argument_start + slot]
 end
 
 # Membership follows reachable backedges and dominance, independently of table order.
