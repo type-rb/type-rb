@@ -9,7 +9,7 @@ const node = (tag, text, className) => {
 };
 const link = (text, href) => {
   const element = node('a', text);
-  if (/^https:\/\/github\.com\/type-rb\/type-rb-native\/actions\/runs\/\d+$/.test(href)) element.href = href;
+  if (/^https:\/\/github\.com\/type-rb\/type-rb(?:-native)?\/actions\/runs\/\d+$/.test(href)) element.href = href;
   return element;
 };
 const date = value => new Date(value).toLocaleString();

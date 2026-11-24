@@ -9,12 +9,12 @@
 </head>
 <body>
 <header class="site-header"><div class="shell header-inner">
-  <a class="brand" href="../"><span class="brand-mark" aria-hidden="true">TR</span><span>TypeRB Native</span><span class="development">Development</span></a>
-  <nav class="site-nav" aria-label="Site navigation"><a href="../">Capabilities</a><a href="./" aria-current="page">Benchmarks</a></nav>
+  <a class="brand" href="https://type-rb.github.io/"><span class="brand-mark" aria-hidden="true">TR</span><span>TypeRB Native</span><span class="development">Development</span></a>
+  <nav class="site-nav" aria-label="Site navigation"><a href="https://type-rb.github.io/type-rb-native/">Capabilities</a><a href="#results" aria-current="page">Benchmarks</a></nav>
 </div></header>
 <main class="shell">
-  <div class="daily-header"><h1>Application workloads</h1><a href="https://github.com/type-rb/type-rb-native/actions/workflows/representative-performance.yml">Measurement runs ↗</a></div>
-  <nav class="daily-nav" aria-label="Benchmark views"><a href="./">Current performance</a><a href="representative.html" aria-current="page">Application workloads</a><a href="trends.html">Trends</a><a href="weekly.html">Other languages</a><a href="comparison.html">Detailed comparison</a></nav>
+  <div class="daily-header"><h1>Application workloads</h1><a href="https://github.com/type-rb/type-rb/actions/workflows/representative-performance.yml">Measurement runs ↗</a></div>
+  <nav class="daily-nav" aria-label="Benchmark views"><a href="https://type-rb.github.io/type-rb-native/benchmarks/">Current performance</a><a href="#results" aria-current="page">Application workloads</a><a href="https://type-rb.github.io/type-rb-native/benchmarks/trends.html">Trends</a><a href="https://type-rb.github.io/type-rb-native/benchmarks/weekly.html">Other languages</a><a href="https://type-rb.github.io/type-rb-native/benchmarks/comparison.html">Detailed comparison</a></nav>
   <p class="representative-intro">JSON, log processing and sustained work, plus input sizes and distributions that expose weaknesses in collections and allocation. Every registered case stays visible, including unmeasured cases.</p>
   <div id="status" class="daily-status" role="status">Loading the latest application measurement…</div>
   <p class="daily-meta">Cadence: on demand after relevant changes and at milestones. This suite has no daily or weekly schedule and does not run comparative timings in PR CI.</p>
@@ -38,7 +38,7 @@
   </details>
   <div class="daily-notes">
     <section><h2>Coverage and interpretation</h2><p>These results are independent of the daily workload score. TypeRB Go compiles the same TypeRB application; Pure Go uses an idiomatic implementation with matching observable output. Differences within 5% are labelled “About the same” as a screening aid, not a statistical guarantee. Missing values never count as wins.</p><p>Input variants include invalid records, missing keys, Unicode text, sorted and duplicate-heavy arrays, and retained objects. Process startup can dominate small inputs. The optional sustained-v1 profile repeats fixed batches to reduce its share of process costs, with distinct input and series identities. Throughput still includes setup and output.</p></section>
-    <section><h2>Remaining gaps</h2><p>Inputs are in memory. File and network I/O, service queueing and latency, parallel scaling and production traces still need dedicated coverage. Worker batch intervals are observer-side diagnostics, not request latency. Sparse samples cannot establish p95 or p99; this page shows process medians and observed ranges when retained. Range overlap is reported separately from the unchanged median screening labels; neither is a statistical significance test.</p><p><a href="https://github.com/type-rb/type-rb-native/blob/main/docs/performance-policy.md">Performance engineering policy ↗</a> · <a href="https://github.com/type-rb/type-rb-native/blob/main/tools/representative-performance/README.md">Inputs and measurement method ↗</a></p></section>
+    <section><h2>Remaining gaps</h2><p>Inputs are in memory. File and network I/O, service queueing and latency, parallel scaling and production traces still need dedicated coverage. Worker batch intervals are observer-side diagnostics, not request latency. Sparse samples cannot establish p95 or p99; this page shows process medians and observed ranges when retained. Range overlap is reported separately from the unchanged median screening labels; neither is a statistical significance test.</p><p><a href="https://github.com/type-rb/type-rb/blob/main/docs/performance-policy.md">Performance engineering policy ↗</a> · <a href="https://github.com/type-rb/type-rb/blob/main/tools/representative-performance/README.md">Inputs and measurement method ↗</a></p></section>
   </div>
 </main>
 <script type="module" src="./representative.js"></script>

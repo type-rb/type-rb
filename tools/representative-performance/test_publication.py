@@ -36,6 +36,21 @@ def manifest():
 
 
 class PublicationTests(unittest.TestCase):
+    def test_canonical_run_preserves_historical_evidence(self):
+        previous = publication.snapshot(manifest(), attempt())
+        with tempfile.TemporaryDirectory() as temporary, patch.dict(publication.os.environ, {
+                "GITHUB_REPOSITORY": "type-rb/type-rb", "GITHUB_RUN_ID": "456"}):
+            path = Path(temporary) / "state.json"
+            publication.daily.write(path, {**publication.empty(), "latest": previous, "history": [previous]})
+            publication.start(path)
+            state = publication.daily.read(path)
+            self.assertEqual(state["attempt"]["runUrl"], "https://github.com/type-rb/type-rb/actions/runs/456")
+            self.assertEqual(state["latest"], previous)
+            self.assertEqual(state["history"], [previous])
+            with patch.dict(publication.os.environ, {"GITHUB_REPOSITORY": "other/type-rb"}):
+                with self.assertRaisesRegex(ValueError, "Unexpected publication repository"):
+                    publication.start(path)
+
     def test_summary_diagnostics_cannot_replace_streaming_results(self):
         data = manifest()
         data["outputMode"] = "summary"
@@ -165,6 +180,27 @@ class PublicationTests(unittest.TestCase):
             self.assertEqual(len(result["history"]), publication.HISTORY_LIMIT)
             self.assertEqual(publication.daily.WORKFLOW, "daily-performance.yml")
             self.assertEqual(publication.daily.ARTIFACT, "daily-performance-state")
+
+    def test_canonical_cancelled_run_links_to_its_repository(self):
+        previous = publication.snapshot(manifest(), attempt())
+        with tempfile.TemporaryDirectory() as temporary, patch.dict(publication.os.environ, {
+                "TRIGGER_RUN_ID": "456", "TRIGGER_HEAD_SHA": "b" * 40, "TRIGGER_CONCLUSION": "cancelled"}):
+            path, output = Path(temporary) / "state.json", Path(temporary) / "site.json"
+            publication.daily.write(path, {**publication.empty(), "latest": previous})
+            publication.site(path, output)
+            state = publication.daily.read(output)
+            self.assertEqual(state["attempt"]["runUrl"], "https://github.com/type-rb/type-rb/actions/runs/456")
+            self.assertEqual(state["attempt"]["status"], "infrastructure-failure")
+            self.assertEqual(state["latest"], previous)
+
+    def test_first_canonical_deployment_inherits_public_native_history(self):
+        previous = {**publication.empty(), "latest": publication.snapshot(manifest(), attempt())}
+        missing = publication.urllib.error.HTTPError(publication.PUBLIC_STATE, 404, "Not found", {}, None)
+        with patch.object(publication.urllib.request, "urlopen", side_effect=[
+                missing, io.BytesIO(json.dumps(previous).encode())]) as fetch:
+            self.assertEqual(publication.read_public_state(), previous)
+            self.assertEqual([call.args[0] for call in fetch.call_args_list],
+                             [publication.PUBLIC_STATE, publication.LEGACY_STATE])
 
     def test_expired_artifacts_fall_back_to_last_public_result(self):
         previous = {**publication.empty(), "latest": publication.snapshot(manifest(), attempt())}
