@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import urllib.error
 import urllib.request
 import zipfile
 from datetime import datetime
@@ -22,12 +23,14 @@ measure = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(measure)
 WORKFLOW = "representative-performance.yml"
 ARTIFACT = "representative-performance-state"
-PUBLIC_STATE = "https://type-rb.github.io/type-rb-native/benchmarks/representative-state.json"
+PUBLIC_STATE = "https://type-rb.github.io/benchmarks/application/representative-state.json"
+LEGACY_STATE = "https://type-rb.github.io/type-rb-native/benchmarks/representative-state.json"
 ROLES = ("native", "typerb-go", "pure-go")
 HISTORY_LIMIT = 12
 HASH = re.compile(r"[0-9a-f]{64}")
 SHA = re.compile(r"[0-9a-f]{40}")
-RUN = re.compile(r"https://github\.com/type-rb/type-rb-native/actions/runs/[0-9]+")
+REPOSITORY = "type-rb/type-rb"
+RUN = re.compile(r"https://github\.com/type-rb/type-rb(?:-native)?/actions/runs/[0-9]+")
 SOURCES = {"sourceSha256": "benchmarks/representative/src/main.trb",
            "goSourceSha256": "benchmarks/representative/go/main.go",
            "suiteSha256": "tools/representative-performance/suite.json",
@@ -136,6 +139,21 @@ def validate(state):
     return state
 
 
+def read_public_state():
+    try:
+        response = urllib.request.urlopen(PUBLIC_STATE, timeout=20)
+    except urllib.error.HTTPError as error:
+        if error.code != 404:
+            raise
+        error.close()
+        # The first canonical deployment inherits the published Native series.
+        response = urllib.request.urlopen(LEGACY_STATE, timeout=20)
+    with response:
+        data = response.read(8_000_001)
+    require(len(data) <= 8_000_000, "Public state exceeds its limit")
+    return validate(json.loads(data))
+
+
 def restore(path):
     warning = None
     try:
@@ -148,10 +166,7 @@ def restore(path):
         state = empty()
         warning = "Artifact retrieval failed. Showing the last available public measurement."
     try:
-        with urllib.request.urlopen(PUBLIC_STATE, timeout=20) as response:
-            data = response.read(8_000_001)
-        require(len(data) <= 8_000_000, "Public state exceeds its limit")
-        previous = validate(json.loads(data))
+        previous = read_public_state()
         # Preserve a newer failed first attempt even if a previous deployment is empty.
         if previous.get("latest"):
             newer_attempt = state.get("attempt")
@@ -171,8 +186,8 @@ def restore(path):
 
 def start(path):
     state = validate(daily.read(path))
-    require(os.environ.get("GITHUB_REPOSITORY") == "type-rb/type-rb-native", "Unexpected publication repository")
-    run_url = f"https://github.com/type-rb/type-rb-native/actions/runs/{os.environ['GITHUB_RUN_ID']}"
+    require(os.environ.get("GITHUB_REPOSITORY") == REPOSITORY, "Unexpected publication repository")
+    run_url = f"https://github.com/{REPOSITORY}/actions/runs/{os.environ['GITHUB_RUN_ID']}"
     state["attempt"] = {"at": daily.now(), "revision": daily.git("rev-parse", "HEAD"), "runUrl": run_url,
                         "status": "running", "fingerprint": fingerprint()}
     state.pop("publicationWarning", None)
@@ -251,7 +266,7 @@ def site(path, output):
     state = validate(daily.read(path))
     trigger = os.environ.get("TRIGGER_RUN_ID")
     if trigger and os.environ.get("TRIGGER_CONCLUSION") in ("failure", "cancelled", "timed_out"):
-        run_url = f"https://github.com/type-rb/type-rb-native/actions/runs/{trigger}"
+        run_url = f"https://github.com/{REPOSITORY}/actions/runs/{trigger}"
         if (state.get("attempt") or {}).get("runUrl") != run_url or state["attempt"]["status"] == "running":
             state["attempt"] = {"at": daily.now(), "revision": os.environ["TRIGGER_HEAD_SHA"],
                                 "status": "infrastructure-failure", "runUrl": run_url}

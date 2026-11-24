@@ -23,8 +23,9 @@ it does not rewrite the daily suite or a completed qualification.
 
 ## Representative coverage
 
-The opt-in [representative suite](../tools/representative-performance/README.md)
-adds three application-shaped workloads: log parsing/grouping/report generation,
+The [Application workloads report](https://type-rb.github.io/benchmarks/application/)
+publishes results from the [representative suite](../tools/representative-performance/README.md)
+for log parsing/grouping/report generation,
 JSON parsing/transformation/serialization, and a persistent stateful worker.
 Its sensitivity matrix varies Hash size and lookup hit rate, UTF-8 string length,
 Array size/order/duplicates, and allocation lifetime/live-set size.

@@ -131,7 +131,7 @@ this does not waive full validation for this change itself.
 
 ## Public application coverage
 
-The Pages application view always lists all registered cases, with independent
+The [Application workloads page](https://type-rb.github.io/benchmarks/application/) lists all registered cases, with independent
 dates, source revisions and environments. `representative-performance.yml` is a
 manual, main-only workflow with an explicit fixed-profile choice for the initial public matrix and later relevant-change
 or milestone measurements. It builds the current CLI through the ordinary pinned
@@ -152,5 +152,7 @@ remain visible.
 Raw evidence and state artifacts last 90 days. Compact state retains twelve
 complete snapshots and the latest attempt; Pages falls back to its previous
 public state when artifacts expire, preserving the original measurement dates.
-Main pushes update freshness metadata without running a benchmark. Public
-measurement happens only on explicit dispatch; local diagnostics are separate.
+After the measurement finishes on canonical main, dispatch the existing Pages
+workflow on main to deploy the report alongside the documentation. The report
+records the deployment source and the measured source separately. The first
+deployment can recover the previous public series from the legacy Native site.

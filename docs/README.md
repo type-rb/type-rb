@@ -46,5 +46,6 @@ larger applications.
 ## Project
 
 - [TypeRB 1.0 capability map](capabilities.md)
+- [Application workload benchmarks](https://type-rb.github.io/benchmarks/application/)
 - [Current status](status.md)
 - [Roadmap](roadmap.md)

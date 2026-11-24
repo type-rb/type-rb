@@ -19,6 +19,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
   pages: write
   id-token: write
 
@@ -91,6 +92,24 @@ jobs:
             go version
             sha256sum .site-generator/go.mod .site-generator/go.sum "$RUNNER_TEMP/trb-site"
           } > dist/site/site-build.txt
+
+      - name: Include the latest application workload measurement
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          report=dist/site/benchmarks/application
+          mkdir -p "$report"
+          cp docs/capabilities/styles.css dist/site/benchmarks/styles.css
+          cp docs/capabilities/benchmarks/{daily.css,representative.css,representative.js,representative-model.mjs,representative-suite.json} "$report/"
+          cp docs/capabilities/benchmarks/representative.html "$report/index.html"
+          python3 tools/representative-performance/publication.py restore --state "$RUNNER_TEMP/representative-state.json"
+
+          # A cancelled run may have finished before uploading a state artifact.
+          latest=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/representative-performance.yml/runs?branch=main&event=workflow_dispatch&status=completed&per_page=1" \
+            --jq '.workflow_runs[] | [.id, .head_sha, .conclusion] | @tsv')
+          IFS=$'\t' read -r TRIGGER_RUN_ID TRIGGER_HEAD_SHA TRIGGER_CONCLUSION <<< "$latest"
+          export TRIGGER_RUN_ID TRIGGER_HEAD_SHA TRIGGER_CONCLUSION
+          python3 tools/representative-performance/publication.py site --state "$RUNNER_TEMP/representative-state.json" --output "$report/representative-state.json"
 
       - name: Prepare legacy Pages redirects
         if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
