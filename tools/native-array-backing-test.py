@@ -131,13 +131,18 @@ int main(void) {
     for (unsigned i = 0; i < 100; ++i) trbn_array_backing_release(blocks[i], 4);
     empty();
     for (unsigned i = 0; i < TOTAL; ++i) blocks[i] = trbn_array_backing_new();
-    for (unsigned i = 0; i < TOTAL; ++i) trbn_array_backing_release(blocks[i], 4);
-    assert(trbn_array_backing_cache[1] == CAP);
-    /* A full small list leaves no room for a sixteen-slot buffer. */
+    for (unsigned i = 0; i < CAP - 4; ++i) trbn_array_backing_release(blocks[i], 4);
+    void *last_large = malloc(128); assert(last_large); ++allocated;
+    trbn_array_backing_release(last_large, 16); /* Fits the remaining four units. */
+    assert(trbn_array_backing_cache[1] == CAP && trbn_array_backing_cache[2] == (uintptr_t)last_large);
+    for (unsigned i = CAP - 4; i < TOTAL; ++i) trbn_array_backing_release(blocks[i], 4);
+    void *one = trbn_array_backing_new(); zero(one);
+    assert(trbn_array_backing_cache[1] == CAP - 1);
     void *large = malloc(128); assert(large); ++allocated;
     size_t old_released = released;
-    trbn_array_backing_release(large, 16);
-    assert(released == old_released + 1 && !trbn_array_backing_cache[2]);
+    trbn_array_backing_release(large, 16); /* One remaining unit is insufficient. */
+    assert(released == old_released + 1 && trbn_array_backing_cache[2] == (uintptr_t)last_large);
+    observe_free(one);
     trbn_array_backing_flush();
     assert(!trbn_array_backing_cache[0] && !trbn_array_backing_cache[1]);
     assert(allocated == released);
