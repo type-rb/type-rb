@@ -50,7 +50,7 @@ def relevant(path):
     if path.endswith((".md", "_test.trb", "_test.py")):
         return False
     return path.startswith(("compiler/", "src/", "benchmarks/representative/", "tools/qbe/")) or path in (
-        "TYPE_RB_REVISION", "trbn", "tools/build-native.sh", "tools/build-reference.py", "tools/compiler_sources.py",
+        "TYPE_RB_REVISION", ".go-version", "trbn", "tools/build-native.sh", "tools/build-reference.py", "tools/compiler_sources.py",
         "tools/qbe_toolchain.py", "tools/bootstrap-seed.sh", "tools/bootstrap-seed-download.sh",
         "tools/representative-performance/measure.py", "tools/representative-performance/suite.json",
         ".github/workflows/representative-performance.yml")
@@ -119,6 +119,13 @@ def validate_snapshot(snapshot):
     require(len(rows) <= len(inputs), "Too many results")
     for tool in snapshot.get("tools", {}).values():
         require(set(tool) == {"sha256", "version"} and HASH.fullmatch(tool["sha256"]) and isinstance(tool["version"], str), "Invalid public tool identity")
+    if "goBuildVersions" in snapshot:
+        build_versions = snapshot["goBuildVersions"]
+        version = snapshot["tools"]["go"]["version"].split()
+        require(len(version) == 4 and version[:2] == ["go", "version"] and
+                re.fullmatch(r"go[0-9]+\.[0-9]+\.[0-9]+", version[2]) and
+                build_versions == dict.fromkeys(("reference", "typerb-go", "pure-go"), version[2]),
+                "Embedded Go toolchains differ from the measured Go release")
     return snapshot
 
 
@@ -231,6 +238,10 @@ def snapshot(manifest, attempt):
     for key, relative in SOURCES.items():
         require(sources[key] == hashlib.sha256((ROOT / relative).read_bytes()).hexdigest(), "Measurement source changed")
     reference_revision = (ROOT / "TYPE_RB_REVISION").read_text().strip()
+    expected_go = "go" + (ROOT / ".go-version").read_text().strip()
+    versions = manifest.get("goBuildVersions")
+    require(versions == dict.fromkeys(("reference", "typerb-go", "pure-go"), expected_go),
+            "Publication needs the registered Go release in all three Go binaries")
     rows = []
     for case in manifest["cases"]:
         require(case["input"] in manifest["plannedCases"], "Unregistered result input")
@@ -251,6 +262,7 @@ def snapshot(manifest, attempt):
              "platform": manifest["platform"], "machine": manifest["machine"],
              "samples": manifest["samples"], "warmups": manifest["warmups"],
              "inputs": manifest["plannedCases"], "rows": rows, "inputProfile": profile,
+             "goBuildVersions": versions,
              "tools": {name: {key: manifest["tools"][name][key] for key in ("sha256", "version")}
                        for name in ("native", "reference", "go")},
              "binaries": {role: {key: manifest["binaries"][role][key] for key in ("sha256", "bytes")} for role in ROLES},
@@ -262,7 +274,7 @@ def snapshot(manifest, attempt):
         value["environment"]["rssTool"] = {key: manifest["environment"]["rssTool"][key] for key in ("sha256", "version")}
     value["series"] = hashlib.sha256(json.dumps([sources, reference_revision, value["samples"], value["warmups"],
                                                value["platform"], value["machine"], value["environment"],
-                                               profile, value["inputs"]], sort_keys=True).encode()).hexdigest()
+                                               profile, value["inputs"], value["tools"]["go"]], sort_keys=True).encode()).hexdigest()
     return validate_snapshot(value)
 
 

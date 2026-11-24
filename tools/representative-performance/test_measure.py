@@ -17,6 +17,11 @@ report_spec.loader.exec_module(report)
 
 
 class MeasurementTests(unittest.TestCase):
+    def test_rejects_a_control_built_by_another_go_release(self):
+        with patch.object(measure.subprocess, "check_output", return_value='{"GoVersion": "go1.27.3"}'):
+            with self.assertRaisesRegex(ValueError, "built with go1.27.3, expected go1.27.4"):
+                measure.verify_go_build(Path("go"), Path("typerb-go"), "go1.27.4", {})
+
     def test_summary_preserves_every_batch_and_final_retained_checksum(self):
         _, cases = measure.load_cases(smoke=True)
         for original in cases:

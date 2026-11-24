@@ -13,6 +13,7 @@ permissions:
   contents: read
 
 env:
+  GOTOOLCHAIN: local
   TYPE_RB_REVISION: cc8c734f73f5149464838825cdbb2165058ed26d
   BENCHMARKSGAME_REVISION: 40296663ed350d5fe4a6ab5e367bab61cb77c219
   BENCHMARKSGAME_ARCHIVE_SHA256: aabcf6726cdc14f0f45b99e5daba48584f94bbb48883fd3711a1d040474d1cb4
@@ -45,7 +46,7 @@ jobs:
       - name: Set up the pinned Go toolchain
         uses: actions/setup-go@v6
         with:
-          go-version-file: .type-rb/go.mod
+          go-version-file: .go-version
           cache-dependency-path: .type-rb/go.sum
 
       - name: Install the registered Linux toolchain and BenchExec

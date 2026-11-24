@@ -19,6 +19,9 @@ concurrency:
   group: representative-performance
   cancel-in-progress: false
 
+env:
+  GOTOOLCHAIN: local
+
 jobs:
   measure:
     if: github.ref == 'refs/heads/main'
@@ -51,7 +54,7 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version-file: .type-rb/go.mod
+          go-version-file: .go-version
           cache-dependency-path: .type-rb/go.sum
 
       - name: Build the current Native CLI and pinned reference

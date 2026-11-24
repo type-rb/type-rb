@@ -4997,7 +4997,8 @@
     "kind": "structured contract",
     "source": "internal/nativepackage/indexer.go",
     "members": [
-      "modules: []string"
+      "modules: []string",
+      "typescriptVersion: string"
     ]
   },
   {
@@ -8286,7 +8287,7 @@
       "TestApplyDeclarationAdapterFilesRejectsUnsafePromiseRejectionResultBridge (internal/nativepackage/declaration_adapter_test.go)",
       "TestApplyDeclarationAdapterFilesRejectsUnsafeRuntimeBoundary (internal/nativepackage/declaration_adapter_test.go)",
       "TestCatalogOwnsOnlyDependenciesAndRuntimeBackedSemanticModules (internal/nativepackage/index_test.go)",
-      "TestGenerateModulesRejectsUnsupportedTypeScriptMajor (internal/nativepackage/index_test.go)",
+      "TestGenerateModulesRejectsUnqualifiedTypeScriptRelease (internal/nativepackage/index_test.go)",
       "TestLoadMarksChangedNativeDependenciesStale (internal/nativepackage/index_test.go)",
       "TestLoadRejectsInvalidAndCyclicNativeCacheReferences (internal/nativepackage/index_test.go)",
       "TestLoadRejectsOlderNativeIndexBeforeLegacyFields (internal/nativepackage/index_test.go)",
@@ -8296,8 +8297,7 @@
       "TestNativeCacheEncodingIsDeterministic (internal/nativepackage/index_test.go)",
       "TestNativeNilRepresentationsSurviveCachePooling (internal/nativepackage/index_test.go)",
       "TestNativeTypeRoundTripsFunctionTypes (internal/nativepackage/index_test.go)",
-      "TestTypeScriptIndexerRecognizesTheDOMFileBoundary (internal/nativepackage/index_test.go)",
-      "TestTypeScriptIndexerUsesSyntaxNodesForSyntheticSymbols (internal/nativepackage/index_test.go)",
+      "TestTypeScriptIndexerReadsMappedPropsAndDOMFile (internal/nativepackage/index_test.go)",
       "TestWriteAndLoadNativePackageIndex (internal/nativepackage/index_test.go)",
       "TestWritePoolsRepeatedNativeComponentMetadata (internal/nativepackage/index_test.go)"
     ]
@@ -8546,6 +8546,7 @@
       "TestLoadPreservesOfficialPackageOptions (internal/project/config_test.go)",
       "TestLoadRejectsUnknownTypeScriptRuntime (internal/project/config_test.go)",
       "TestLoadTypeRBPackageRequirements (internal/project/config_test.go)",
+      "TestManagedProjectDefaultsMatchRegisteredToolchains (internal/project/config_test.go)",
       "TestNewTypeScriptProjectUsesSupportedCompiler (internal/project/config_test.go)",
       "TestSaveAndFindConfig (internal/project/config_test.go)",
       "TestSaveUsesPackageVersionShorthand (internal/project/config_test.go)",
