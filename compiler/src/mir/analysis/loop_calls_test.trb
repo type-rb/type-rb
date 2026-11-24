@@ -39,6 +39,38 @@ describe("MIR invariant loop calls") do
 		loop_call_execute(source, "28\n")
 	end
 
+	test("reuses literal String comparisons across unrelated allocation and writes") do
+		source := "def select_mode(mode: String, limit: Integer): Integer\nmut seen: Array<String> := []\nmut index := 0\nmut total := 0\nwhile index < limit\nseen.push(mode)\nif index > 0 && mode == \"keep\"\ntotal += 10\nend\nif \"skip\" != mode\ntotal += 1\nend\nindex += 1\nend\nreturn total + seen.size()\nend\ndef main()\nputs(select_mode(\"keep\", 3))\nputs(select_mode(\"skip\", 2))\nputs(select_mode(\"keep\", 0))\nend\n"
+		mut state := array_loop_mir_check(source)
+		function := mir_function_index(state.scalar_mir, 0)
+		expect(state.scalar_mir.loop_calls[function].size()).to_equal(2)
+		intrinsic_mir_erase(state)
+		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+			when Result::Ok(actual)
+				expect(actual).to_equal("26\n2\n0\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+		state.scalar_mir.loop_calls[function] = []
+		expect(verify_mir(state.scalar_mir, true)).to_equal("MIR loop-call plan differs")
+	end
+
+	test("distinguishes rebinding a String from reentering a loop with a new String") do
+		changing := "def count(start: String): Integer\nmut mode := start\nmut index := 0\nmut total := 0\nwhile index < 3\nif mode == \"keep\"\ntotal += 1\nend\nmode = \"drop\"\nindex += 1\nend\nreturn total\nend\ndef main()\nputs(count(\"keep\"))\nend\n"
+		state := array_loop_mir_check(changing)
+		expect(state.scalar_mir.loop_calls[mir_function_index(state.scalar_mir, 0)].size()).to_equal(0)
+		loop_call_execute(changing, "1\n")
+		nested := "def count(modes: Array<String>): Integer\nmut outer := 0\nmut total := 0\nwhile outer < modes.size()\nmode := modes[outer]\nmut inner := 0\nwhile inner < 3\nif mode == \"keep\"\ntotal += 1\nend\ninner += 1\nend\nouter += 1\nend\nreturn total\nend\ndef main()\nputs(count([\"drop\", \"keep\", \"drop\"]))\nend\n"
+		nested_state := array_loop_mir_check(nested)
+		expect(nested_state.scalar_mir.loop_calls[mir_function_index(nested_state.scalar_mir, 0)].size()).to_equal(1)
+		loop_call_execute(nested, "3\n")
+	end
+
 	test("rejects alias mutation growth allocation and observable calls anywhere in the loop") do
 		[
 			"total += read_value(values)\nvalues[0] += 1",

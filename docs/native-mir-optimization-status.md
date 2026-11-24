@@ -89,7 +89,10 @@ not a performance improvement.
   external preheader. The first call stays at its original position, preserving
   skipped paths, zero-trip behavior and failure order. Managed return values and
   indirect or external calls remain excluded. The cache stores only a successful
-  Integer, Boolean or Float result and is reset on loop reentry.
+  Integer, Boolean or Float result and is reset on loop reentry. A String equality
+  or inequality against a literal can share this first-use cache when the other
+  String keeps its identity on every backedge. Unrelated writes and allocations
+  preserve the bytes of both immutable Strings.
 - `compiler/src/mir/analysis/array_loops.trb`: verified natural-loop plans, composed
   from separate header, bounds, append and value analyses. Stable storage alone
   permits header reuse; it does not prove an index safe. A dominating successful
