@@ -85,9 +85,13 @@ describe("Shared typed Array sorting functions") do
 	test("keeps a single sorting site in a small caller inline") do
 		mut state := logical_checked_source("def main()\nputs([3, 1, 2].sort()[0])\nend\n")
 		expect(check(state)).to_be_true()
+		mut helpers: Array<String> := []
 		state.scalar_mir.signatures.each do |signature|
-			expect(signature.name.include?("$sort:")).to_be_false()
+			if signature.id >= state.declarations.function_count[0] && signature.kind == mir_signature_ordinary()
+				helpers.push(signature.name)
+			end
 		end
+		expect(helpers).to_equal(["$sort:integer_counts"])
 		expect(verify_mir(state.scalar_mir, true)).to_equal("")
 	end
 
@@ -106,7 +110,7 @@ describe("Shared typed Array sorting functions") do
 				expect(state.scalar_mir.functions[body].line).to_equal(signature.line)
 			end
 		end
-		expect(names).to_equal(["$sort:Array<Integer>:Void", "$sort:Array<Integer>:Void:descending", "$sort:Array<Float>:Void", "$sort:Array<Integer>:Array<Integer>"])
+		expect(names).to_equal(["$sort:integer_counts", "$sort:Array<Integer>:Void", "$sort:Array<Integer>:Void:descending", "$sort:Array<Float>:Void", "$sort:Array<Integer>:Array<Integer>"])
 		expect(verify_mir(state.scalar_mir, true)).to_equal("")
 	end
 
