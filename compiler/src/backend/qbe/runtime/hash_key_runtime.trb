@@ -65,7 +65,7 @@ def emit_hash_probe(mut output: QbeOutput, key_mode: String)
 		strings = true
 	end
 	if concat
-		qbe_output_line(output, "\nfunction l $trbn_hash_concat_key(l %table, l %left, l %right, l %slot_result) {")
+		qbe_output_line(output, "\nfunction l $trbn_hash_concat_key(l %table, l %left, l %right, l %slot_result, w %omit_key_on_miss) {")
 	elsif integer
 		qbe_output_line(output, "\nfunction l $trbn_hash_slot_integer(l %table, l %raw_key) {")
 	elsif strings
@@ -130,7 +130,7 @@ def emit_hash_probe(mut output: QbeOutput, key_mode: String)
 	end
 	qbe_output_line(output, "@use_vacant\n %vacant_result =l sub -1, %index\n")
 	if concat
-		qbe_output_line(output, " jmp @concat_missing\n@concat_missing\n %missing_slot =l phi @empty -1, @use_deleted %deleted_result, @use_vacant %vacant_result\n storel %missing_slot, %slot_result\n %concatenated =l call $trbn_string_concat(l %left, l %right)\n ret %concatenated\n")
+		qbe_output_line(output, " jmp @concat_missing\n@concat_missing\n %missing_slot =l phi @empty -1, @use_deleted %deleted_result, @use_vacant %vacant_result\n storel %missing_slot, %slot_result\n jnz %omit_key_on_miss, @dead_key, @make_key\n@dead_key\n ret 0\n@make_key\n %concatenated =l call $trbn_string_concat(l %left, l %right)\n ret %concatenated\n")
 	else
 		qbe_output_line(output, " ret %vacant_result\n")
 	end

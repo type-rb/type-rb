@@ -70,6 +70,25 @@ describe("MIR Hash concat probes") do
 		hash_concat_run(qbe, "ab\n")
 	end
 
+	test("omits the key when it is dead on the miss edge") do
+		source := "def probe(table: Hash<String, Integer>, left: String, right: String): Integer\nkey := left + right\nif table.key?(key)\nreturn table[key]\nend\nreturn -1\nend\ndef main()\ntable := {\"ab\" => 2}\nempty: Hash<String, Integer> := {}\nputs(probe(table, \"a\", \"b\"))\nputs(probe(table, \"a\", \"c\"))\nputs(probe(empty, \"a\", \"b\"))\nend\n"
+		state := hash_concat_checked(source)
+		plans := state.scalar_mir.hash_concat_probes[0]
+		expect(plans.size()).to_equal(1)
+		expect(plans[0].omit_key_on_miss).to_be_true()
+		qbe := hash_concat_emitted(state)
+		expect(qbe.include?(", l %hash_concat_slot, w 1)")).to_be_true()
+		hash_concat_run(qbe, "2\n-1\n-1\n")
+	end
+
+	test("retains a key read through the miss edge") do
+		state := hash_concat_checked(hash_concat_source("key := left + right\nif table.key?(key)\nreturn \"found\"\nend"))
+		plans := state.scalar_mir.hash_concat_probes[0]
+		expect(plans.size()).to_equal(1)
+		expect(plans[0].omit_key_on_miss).to_be_false()
+		expect(hash_concat_emitted(state).include?(", l %hash_concat_slot, w 0)")).to_be_true()
+	end
+
 	test("rejects intervening observations effects failures new receivers and concat chains") do
 		bodies := [
 			"key := left + right\nputs(key)\nif table.key?(key)\nreturn key\nend",
@@ -96,7 +115,7 @@ describe("MIR Hash concat probes") do
 
 	test("rejects missing duplicated forged and unoptimized plans") do
 		mut mode := 0
-		while mode < 6
+		while mode < 7
 			mut state := hash_concat_checked(hash_concat_source("key := left + right\nif table.key?(key)\nreturn key\nend"))
 			original := state.scalar_mir.hash_concat_probes[0][0]
 			if mode == 0
@@ -104,11 +123,13 @@ describe("MIR Hash concat probes") do
 			elsif mode == 1
 				state.scalar_mir.hash_concat_probes[0].push(original)
 			elsif mode == 2
-				state.scalar_mir.hash_concat_probes[0][0] = MirHashConcatProbe.new(function_id: original.function_id + 1, concat: original.concat, membership: original.membership)
+				state.scalar_mir.hash_concat_probes[0][0] = MirHashConcatProbe.new(function_id: original.function_id + 1, concat: original.concat, membership: original.membership, omit_key_on_miss: original.omit_key_on_miss)
 			elsif mode == 3
-				state.scalar_mir.hash_concat_probes[0][0] = MirHashConcatProbe.new(function_id: original.function_id, concat: original.concat + 1, membership: original.membership)
+				state.scalar_mir.hash_concat_probes[0][0] = MirHashConcatProbe.new(function_id: original.function_id, concat: original.concat + 1, membership: original.membership, omit_key_on_miss: original.omit_key_on_miss)
 			elsif mode == 4
-				state.scalar_mir.hash_concat_probes[0][0] = MirHashConcatProbe.new(function_id: original.function_id, concat: original.concat, membership: original.membership + 1)
+				state.scalar_mir.hash_concat_probes[0][0] = MirHashConcatProbe.new(function_id: original.function_id, concat: original.concat, membership: original.membership + 1, omit_key_on_miss: original.omit_key_on_miss)
+			elsif mode == 5
+				state.scalar_mir.hash_concat_probes[0][0] = MirHashConcatProbe.new(function_id: original.function_id, concat: original.concat, membership: original.membership, omit_key_on_miss: !original.omit_key_on_miss)
 			else
 				expect(verify_mir(state.scalar_mir, false)).to_equal("MIR input cannot supply Hash concat plans")
 				state.scalar_mir.hash_concat_probes[0] = []

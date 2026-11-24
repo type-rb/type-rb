@@ -1,9 +1,28 @@
 import { hash_action_has_key } from mir/model/hash_actions
+import { mir_terminator_branch } from mir/model/control
 import { mir_op_hash_method, mir_op_scalar_literal, mir_op_singleton_literal, mir_op_string_concat, mir_op_string_literal } from mir/model/instructions
-import { mir_instruction_occurrences } from mir/analysis/flow
+import { MirFlow, mir_build_flow, mir_flow_blocks, mir_flow_definition_block, mir_instruction_occurrences } from mir/analysis/flow
+import { mir_live_edge, mir_live_incoming_with_concats, mir_managed_add, mir_managed_contains } from mir/analysis/liveness
 import { mir_function_string_concats, mir_string_concat_index } from mir/analysis/string_concats
-import { MirHashConcatProbe, MirModule, mir_type_id, mir_value_type } from mir/model/module
-import { mir_hash_key_type } from mir/model/types
+import { MirFunction, MirHashConcatProbe, MirModule, mir_type_id, mir_value_type } from mir/model/module
+import { mir_hash_key_type, mir_managed_type } from mir/model/types
+
+# A false edge may forward the key through arbitrary block parameters.
+# Translate canonical live-ins along this edge before discarding the result.
+def mir_hash_concat_false_edge_dead(native_module: MirModule, function: MirFunction, flow: MirFlow, blocks: Hash<String, Integer>, incoming: Array<Array<Integer>>, plan: MirHashConcatProbe): Boolean
+	condition := native_module.instructions[plan.membership].result
+	owner := mir_flow_definition_block(flow, condition)
+	if owner < 0
+		return false
+	end
+	block := native_module.blocks[function.block_start + owner]
+	if block.terminator != mir_terminator_branch() || block.condition != condition || block.instruction_start + block.instruction_count - 1 != plan.membership
+		return false
+	end
+	mut live: Array<Integer> := []
+	mir_live_edge(native_module, function, blocks, block.second_target, block.second_argument_start, live, incoming)
+	return !mir_managed_contains(live, native_module.instructions[plan.concat].result)
+end
 
 # A plain String Hash keeps immutable keys with the same byte semantics as
 # concatenation. Only literal materialization may separate these operations:
@@ -29,7 +48,7 @@ def mir_hash_concat_plans(native_module: MirModule): Array<MirHashConcatProbe>
 					if concat >= 0 && instruction.second == native_module.instructions[concat].result
 						owner_type := mir_value_type(native_module, function.id, instruction.first)
 						if mir_hash_key_type(native_module, owner_type) == mir_type_id("String")
-							candidates.push(MirHashConcatProbe.new(function_id: function.id, concat: concat, membership: index))
+							candidates.push(MirHashConcatProbe.new(function_id: function.id, concat: concat, membership: index, omit_key_on_miss: false))
 						end
 					end
 					concat = -1
@@ -44,9 +63,19 @@ def mir_hash_concat_plans(native_module: MirModule): Array<MirHashConcatProbe>
 			# Another plan owns complete concat chains and their root operands.
 			# Keep this proof limited to an ordinary two-fragment allocation.
 			chains := mir_function_string_concats(native_module, function)
+			blocks := mir_flow_blocks(native_module, function)
+			flow := mir_build_flow(native_module, function, blocks)
+			mut managed: Array<Integer> := []
+			native_module.values.each do |value|
+				if value.function_id == function.id && mir_managed_type(native_module, value.type_id)
+					mir_managed_add(managed, value.id)
+				end
+			end
+			incoming := mir_live_incoming_with_concats(native_module, function, blocks, managed, [])
 			candidates.each do |plan|
 				if mir_string_concat_index(chains, plan.concat) < 0
-					plans.push(plan)
+					omit := mir_hash_concat_false_edge_dead(native_module, function, flow, blocks, incoming, plan)
+					plans.push(MirHashConcatProbe.new(function_id: plan.function_id, concat: plan.concat, membership: plan.membership, omit_key_on_miss: omit))
 				end
 			end
 		end
@@ -73,7 +102,12 @@ def mir_hash_concats_equal(left: Array<MirHashConcatProbe>, right: Array<MirHash
 	end
 	mut index := 0
 	while index < left.size()
-		if left[index].function_id != right[index].function_id || left[index].concat != right[index].concat || left[index].membership != right[index].membership
+		a := left[index]
+		b := right[index]
+		if a.function_id != b.function_id || a.concat != b.concat || a.membership != b.membership
+			return false
+		end
+		if (a.omit_key_on_miss && !b.omit_key_on_miss) || (b.omit_key_on_miss && !a.omit_key_on_miss)
 			return false
 		end
 		index += 1
