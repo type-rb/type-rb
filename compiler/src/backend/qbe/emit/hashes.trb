@@ -147,13 +147,17 @@ def emit_hash_slot_address(owner: String, slot: String, mut context: QbeEmitCont
 end
 
 # The verified plan retains the original safe point and managed roots. A found
-# key is an ordinary retained String; a miss uses ordinary concatenation.
+# key is an ordinary retained String. A miss materializes only a live result.
 def emit_mir_hash_concat(native_module: MirModule, plan: MirHashConcatProbe, operands: Array<String>, mut context: QbeEmitContext, mut output: QbeOutput): QbeValue
 	qbe_require_hash_concat(output)
 	concat := native_module.instructions[plan.concat]
 	membership := native_module.instructions[plan.membership]
 	result := emit_temporary(context)
-	qbe_output_line(output, "\t" + result + " =l call $trbn_hash_concat_key(l " + operands[membership.first] + ", l " + operands[concat.first] + ", l " + operands[concat.second] + ", l %hash_concat_slot)")
+	mut omit := "0"
+	if plan.omit_key_on_miss
+		omit = "1"
+	end
+	qbe_output_line(output, "\t" + result + " =l call $trbn_hash_concat_key(l " + operands[membership.first] + ", l " + operands[concat.first] + ", l " + operands[concat.second] + ", l %hash_concat_slot, w " + omit + ")")
 	qbe_output_line(output, "\t%hash_concat_bucket_" + integer_string(plan.concat) + " =l loadl %hash_concat_slot")
 	return emitted_value(result, "String")
 end
