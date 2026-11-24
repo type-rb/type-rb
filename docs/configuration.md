@@ -25,7 +25,7 @@ accepts line and block comments. Trailing commas are not allowed.
   "devDependencies": {},
   "go": {
     "module": "example.com/my-app",
-    "version": "1.27"
+    "version": "1.27.4"
   }
 }
 ```
@@ -63,8 +63,9 @@ methods introduced in Go 1.27, so projects targeting Go 1.26 are rejected.
 
 ## TypeScript toolchain
 
-New managed TypeScript projects use ESM, npm, and the latest compatible
-TypeScript 6 patch:
+The Native repository validates emitted reference source with TypeScript 7.0.2,
+Node.js 26.13.1 and Bun 1.4.5. Its pinned Go reference compiler creates
+managed projects with ESM, npm and this TypeScript 6 dependency:
 
 ```jsonc
 {
@@ -79,9 +80,8 @@ TypeScript 6 patch:
 }
 ```
 
-TypeScript 6 is the supported toolchain while the TypeScript 7 programmatic API
-and its surrounding package ecosystem stabilize. The range accepts compatible
-6.x patch releases without moving a project to 7.x. Browser applications are
+The pinned reference uses the TypeScript 6 compiler API to read native
+package declarations. Its dependency range selects a compatible 6.x release. Browser applications are
 the primary TypeScript use case; APIs tied to a particular runtime remain
 explicit platform packages.
 
@@ -310,7 +310,7 @@ generated imports are loaded:
 ```jsonc
 {
   "ruby": {
-    "version": "4.0.9",
+    "version": "4.0.10",
     "loader": "zeitwerk"
   }
 }

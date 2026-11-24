@@ -23,13 +23,14 @@ def attempt():
 def manifest():
     summary = {"processWallSeconds": {"count": 3, "p50": 2}, "cpuSeconds": 1,
                "peakRssBytes": 4096, "unitsPerSecond": 100, "firstProcessWallSeconds": 3}
-    return {"smoke": False, "status": "pass", "repositoryRevision": "a" * 40,
+    go_release = "go" + (publication.ROOT / ".go-version").read_text().strip()
+    return {"smoke": False, "status": "pass", "goBuildVersions": dict.fromkeys(("reference", "typerb-go", "pure-go"), go_release), "repositoryRevision": "a" * 40,
             "plannedCases": publication.catalog(),
             "cases": [{"input": case, "summaries": {role: copy.deepcopy(summary) for role in publication.ROLES}}
                       for case in publication.catalog()],
             **{key: hashlib.sha256((publication.ROOT / path).read_bytes()).hexdigest() for key, path in publication.SOURCES.items()},
             "samples": 3, "warmups": 1, "startedAt": "2026-01-01T00:00:00+00:00", "platform": "synthetic", "machine": "arm64",
-            "tools": {name: {"path": "/synthetic/private/tool", "sha256": "c" * 64, "version": "synthetic 1.0"}
+            "tools": {name: {"path": "/synthetic/private/tool", "sha256": "c" * 64, "version": "go version " + go_release + " linux/arm64" if name == "go" else "synthetic 1.0"}
                       for name in ("native", "reference", "go")},
             "binaries": {role: {"sha256": "d" * 64, "bytes": 1000} for role in publication.ROLES},
             "environment": {"GOMAXPROCS": "1", "affinity": [0], "cpuPinning": "inherited single CPU", "filesystemCache": "warm"}}
@@ -50,6 +51,19 @@ class PublicationTests(unittest.TestCase):
             with patch.dict(publication.os.environ, {"GITHUB_REPOSITORY": "other/type-rb"}):
                 with self.assertRaisesRegex(ValueError, "Unexpected publication repository"):
                     publication.start(path)
+
+    def test_go_toolchain_identity_separates_measurement_series(self):
+        data = manifest()
+        original = publication.snapshot(data, attempt())
+        data["tools"]["go"]["sha256"] = "e" * 64
+        updated = publication.snapshot(data, attempt())
+        self.assertNotEqual(original["series"], updated["series"])
+        del data["goBuildVersions"]["pure-go"]
+        with self.assertRaisesRegex(ValueError, "all three Go binaries"):
+            publication.snapshot(data, attempt())
+        legacy = copy.deepcopy(original)
+        del legacy["goBuildVersions"]
+        self.assertEqual(publication.validate_snapshot(legacy), legacy)
 
     def test_summary_diagnostics_cannot_replace_streaming_results(self):
         data = manifest()
@@ -291,7 +305,7 @@ class PublicationTests(unittest.TestCase):
 
     def test_freshness_ignores_docs_but_covers_compiler_workloads_and_controller(self):
         for path in ("compiler/src/value.trb", "src/main.trb", "benchmarks/representative/go/main.go",
-                     "tools/representative-performance/measure.py", ".github/workflows/representative-performance.yml"):
+                     "tools/representative-performance/measure.py", ".go-version", ".github/workflows/representative-performance.yml"):
             self.assertTrue(publication.relevant(path), path)
         for path in ("docs/capabilities/benchmarks/representative.html", "compiler/src/value_test.trb", "docs/performance-policy.md"):
             self.assertFalse(publication.relevant(path), path)

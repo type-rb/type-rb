@@ -43,7 +43,7 @@ describe("Project configuration") do
 		expect(config.out_dir).to_equal("build")
 		expect(config.copy_files).to_be_true()
 		expect(config.package_management).to_equal("managed")
-		expect(config.go_config.version).to_equal("1.27")
+		expect(config.go_config.version).to_equal("1.27.4")
 	end
 
 	test("rejects ambiguous and unsupported configured-project input") do

@@ -43,8 +43,9 @@ end
 ```
 
 TypeRB needs only the toolchain for the target you choose. The Go examples in
-the rest of this guide require Go 1.27. Ruby is required only for the Ruby
-command below, and Bun only for the TypeScript command.
+this guide use Go 1.27.4. The Ruby target runs on Ruby 4.0.10. TypeScript
+output is checked with TypeScript 7.0.2 and runs on Node.js 26.13.1 or Bun
+1.4.5. Install the tools for the target you plan to run.
 
 Run the program in Go mode to follow the rest of this guide:
 

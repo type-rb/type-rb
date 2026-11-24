@@ -17,6 +17,9 @@ concurrency:
   group: daily-performance
   cancel-in-progress: false
 
+env:
+  GOTOOLCHAIN: local
+
 jobs:
   measure:
     if: github.ref == 'refs/heads/main'
@@ -60,7 +63,7 @@ jobs:
       - uses: actions/setup-go@v6
         if: steps.plan.outputs.measure == 'true'
         with:
-          go-version-file: .type-rb/go.mod
+          go-version-file: .go-version
           cache-dependency-path: .type-rb/go.sum
 
       - name: Prepare the registered toolchain and seed

@@ -28,7 +28,7 @@ Input parsing operates in memory; file/network I/O is not measured.
 ## Run locally
 
 Build the current Native CLI once using the repository's ordinary procedure.
-Reuse the pinned reference CLI and a shared Go build cache if comparing controls.
+Build the pinned reference CLI with the Go version in `.go-version` and reuse a shared Go build cache. When comparing controls, the controller checks the embedded Go versions of the reference CLI and both Go applications. The public series identity includes the Go toolchain.
 The controller never builds a compiler and deletes all temporary application
 binaries/generated Go projects when finished or failed.
 

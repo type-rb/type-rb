@@ -41,7 +41,7 @@ jobs:
       - name: Set up Go for the independent HTTP/2 test server
         uses: actions/setup-go@v6
         with:
-          go-version: '1.27.3'
+          go-version-file: .go-version
           cache: false
       - name: Qualify platform filesystem layouts and header-selected symbols
         run: |
@@ -231,7 +231,7 @@ jobs:
         # blocks go/trb, and application execution has an empty PATH.
         uses: actions/setup-go@v6
         with:
-          go-version: '1.27.3'
+          go-version-file: .go-version
           cache: false
       - name: Exercise OIDC HTTP/2 and HTTP/1.1 fallback
         run: |

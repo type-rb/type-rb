@@ -119,7 +119,7 @@ jobs:
       - name: Set up Go for the differential oracle
         uses: actions/setup-go@v6
         with:
-          go-version-file: .type-rb/go.mod
+          go-version-file: .native-target-candidate/.go-version
           cache-dependency-path: .type-rb/go.sum
 
       - name: Build and verify the pinned TypeRB compiler

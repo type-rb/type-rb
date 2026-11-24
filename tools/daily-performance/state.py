@@ -191,7 +191,7 @@ def relevant(path):
     return path.startswith(("compiler/", "src/", "benchmarks/", "tools/daily-performance/", "tools/weekly-performance/",
                             "tools/runtime-memory-soak/", "tools/runtime-worker-soak/",
                             "tools/native-mir-array-loop-recovery/")) or path in (
-        "TYPE_RB_REVISION", ".github/workflows/daily-performance.yml", ".github/workflows/weekly-performance.yml",
+        "TYPE_RB_REVISION", ".go-version", ".github/workflows/daily-performance.yml", ".github/workflows/weekly-performance.yml",
         "tools/bootstrap-seed.sh", "tools/bootstrap-seed-download.sh", "tools/compiler-project.sh",
         "tools/compiler-cost.sh")
 
@@ -207,6 +207,7 @@ def series():
     digest = hashlib.sha256((ROOT / "tools/daily-performance/suite.json").read_bytes())
     digest.update((ROOT / "tools/daily-performance/measure.py").read_bytes())
     digest.update((ROOT / "TYPE_RB_REVISION").read_bytes())
+    digest.update((ROOT / ".go-version").read_bytes())
     for case in suite["cases"]:
         digest.update((ROOT / case["source"]).read_bytes())
         if "pureGoSource" in case:

@@ -35,7 +35,7 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: 24
+          node-version-file: .node-version
           cache: npm
           cache-dependency-path: editors/github/package-lock.json
 

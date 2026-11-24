@@ -45,12 +45,12 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version-file: .site-generator/go.mod
+          go-version-file: .go-version
           cache-dependency-path: .site-generator/go.sum
 
       - uses: actions/setup-node@v6
         with:
-          node-version: 24
+          node-version-file: .node-version
           cache: npm
           cache-dependency-path: .site-generator/tools/site/package-lock.json
 

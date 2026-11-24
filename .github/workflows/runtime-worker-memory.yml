@@ -57,7 +57,7 @@ jobs:
       - name: Set up Go for the exact reference compiler
         uses: actions/setup-go@v6
         with:
-          go-version-file: .type-rb/go.mod
+          go-version-file: .go-version
           cache-dependency-path: .type-rb/go.sum
 
       - name: Build and verify the pinned TypeRB compiler
