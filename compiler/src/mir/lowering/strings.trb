@@ -1,4 +1,4 @@
-import { mir_convert_boolean_to_string, mir_convert_float_to_integer, mir_convert_float_to_string, mir_convert_integer_to_string, mir_convert_string_float_status, mir_convert_string_integer_status, mir_convert_string_to_float, mir_convert_string_to_integer, mir_nil_test_not_equal, mir_puts_any_mode, mir_puts_scalar_mode, mir_string_case_lower, mir_string_case_upper, mir_string_compare_before, mir_string_compare_equal, mir_string_compare_not_equal, mir_string_query_contains, mir_string_query_first, mir_string_sequence_chars, mir_string_sequence_codepoints, mir_string_sequence_reverse, mir_string_trim_both, mir_string_trim_right } from mir/model/operation_modes
+import { mir_convert_boolean_to_string, mir_convert_float_to_integer, mir_convert_float_to_string, mir_convert_integer_to_string, mir_convert_parsed_float, mir_convert_string_float_status, mir_convert_string_integer_status, mir_convert_string_to_float, mir_convert_string_to_integer, mir_nil_test_not_equal, mir_puts_any_mode, mir_puts_scalar_mode, mir_string_case_lower, mir_string_case_upper, mir_string_compare_before, mir_string_compare_equal, mir_string_compare_not_equal, mir_string_query_contains, mir_string_query_first, mir_string_sequence_chars, mir_string_sequence_codepoints, mir_string_sequence_reverse, mir_string_trim_both, mir_string_trim_right } from mir/model/operation_modes
 import { checked_category_value } from frontend/types/value_categories
 import { mir_type_boolean, mir_type_float, mir_type_integer, mir_type_string } from mir/model/type_ids
 import { mir_op_array_join, mir_op_nil_test, mir_op_nullable_extract, mir_op_puts, mir_op_scalar_conversion, mir_op_string_case, mir_op_string_compare, mir_op_string_concat, mir_op_string_index, mir_op_string_literal, mir_op_string_query, mir_op_string_replace, mir_op_string_sequence, mir_op_string_size, mir_op_string_slice, mir_op_string_split, mir_op_string_trim, mir_op_union_extract, mir_op_union_inject, mir_op_union_test } from mir/model/instructions
@@ -11,7 +11,7 @@ import { union_parts } from frontend/types/union_types
 import { CheckedValue, checked_mir_value, checked_value, mir_checked_value, scalar_mir_disable, scalar_mir_instruction, scalar_mir_value } from frontend/checking/body/values
 import { MirBlock, MirFunction, MirInstruction, MirModule } from mir/model/module
 import { mir_control_active, mir_control_allocate, mir_control_branch, mir_control_enter, mir_control_jump, mir_control_prepare } from mir/build/control
-import { MirFlow, mir_flow_type, mir_value_available } from mir/analysis/flow
+import { MirFlow, mir_flow_position, mir_flow_type, mir_value_available } from mir/analysis/flow
 import { mir_semantic_type_id, mir_semantic_type_name } from mir/model/types
 import { CompilerState } from state/state
 import { CheckedLocals } from state/local_state
@@ -276,6 +276,16 @@ def mir_string_instruction_error(flow: MirFlow, native_module: MirModule, functi
 			return ""
 		end
 		if kind == mir_op_scalar_conversion()
+			if instruction.payload == mir_convert_parsed_float() && first == mir_type_integer() && result == mir_type_float()
+				position := mir_flow_position(flow, instruction.first)
+				if position >= 0
+					producer := native_module.instructions[position]
+					if producer.kind == mir_op_scalar_conversion() && producer.payload == mir_convert_string_float_status()
+						return ""
+					end
+				end
+				return "MIR Float payload requires its checked parse"
+			end
 			if first == mir_type_string() && ((instruction.payload == mir_convert_string_to_float() && result == mir_type_float()) || ((instruction.payload == mir_convert_string_integer_status() || instruction.payload == mir_convert_string_float_status()) && result == mir_type_integer()))
 				return ""
 			end

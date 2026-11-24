@@ -1,4 +1,4 @@
-import { mir_convert_string_float_status, mir_convert_string_integer_status, mir_convert_string_to_float, mir_convert_string_to_integer } from mir/model/operation_modes
+import { mir_convert_parsed_float, mir_convert_string_float_status, mir_convert_string_integer_status, mir_convert_string_to_integer } from mir/model/operation_modes
 import { checked_category_value } from frontend/types/value_categories
 import { mir_op_scalar_conversion } from mir/model/instructions
 import { mir_builtin_error } from frontend/checking/builtins/lookup
@@ -40,7 +40,7 @@ def mir_builtin_number_parse(mut state: CompilerState, mut locals: CheckedLocals
 	mut status_mode := mir_convert_string_integer_status()
 	if floating
 		number = "Float"
-		conversion = mir_convert_string_to_float()
+		conversion = mir_convert_parsed_float()
 		status_mode = mir_convert_string_float_status()
 	end
 	result_type := builtin_result_type(state, number, "NumberParseError")
@@ -55,7 +55,11 @@ def mir_builtin_number_parse(mut state: CompilerState, mut locals: CheckedLocals
 	valid := scalar_mir_binary(state, locals, "==", status, zero, "Boolean", origin)
 	mut join := mir_value_join(locals, line)
 	failure := mir_control_branch(state, locals, valid, line)
-	value := mir_checked_string_operation(state, locals, mir_op_scalar_conversion(), checked_mir_value(receiver), -1, conversion, number, origin)
+	mut input := checked_mir_value(receiver)
+	if floating
+		input = checked_mir_value(status)
+	end
+	value := mir_checked_string_operation(state, locals, mir_op_scalar_conversion(), input, -1, conversion, number, origin)
 	success := mir_enum_construct(state, locals, builtin_result_variant(state, result_type, true), [checked_mir_value(value)], origin)
 	mir_value_exit(state, locals, join, success)
 	mir_control_enter(state, locals, failure, line)

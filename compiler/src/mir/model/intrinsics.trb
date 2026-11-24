@@ -11,7 +11,7 @@ import { mir_adapter_set_oidc_link } from mir/model/call_kinds
 import { oidc_kind, oidc_mutable, oidc_names, oidc_parameters, oidc_result } from mir/model/oidc_contract
 import { crypto_adapter_start, crypto_names, crypto_parameters, crypto_result, crypto_signature_name } from mir/model/crypto_contract
 import { mir_adapter_gzip, mir_adapter_set_compression_link, mir_adapter_set_crypto_link } from mir/model/call_kinds
-import { builder_adapter_start, builder_mutates, builder_names, builder_parameters, builder_result, builder_signature_name } from mir/model/string_builder_contract
+import { builder_kind, builder_mutates, builder_names, builder_parameters, builder_result, builder_signature_name } from mir/model/string_builder_contract
 import { network_adapter_start, network_names, network_parameters, network_result } from mir/model/network_contract
 import { callable_type } from frontend/types/callable_types
 import { mir_adapter_collect_package_files, mir_adapter_collect_project_sources, mir_adapter_collect_test_paths, mir_adapter_entropy, mir_adapter_eputs, mir_adapter_file_exists, mir_adapter_host, mir_adapter_literal_byte, mir_adapter_none, mir_adapter_reset_temporary_storage, mir_adapter_runtime_fail, mir_adapter_runtime_recover, mir_adapter_set_network_link, mir_adapter_source_is_utf8, mir_adapter_source_slice, mir_adapter_sqrt, mir_adapter_string_bytes, mir_adapter_time_clock, mir_adapter_time_zone_data, mir_adapter_time_zone_environment, mir_signature_compiler_runtime, mir_signature_host, mir_signature_interface, mir_signature_ordinary, mir_signature_standard } from mir/model/call_kinds
@@ -101,8 +101,8 @@ def mir_call_symbol(signature: MirSignature): String
 	if signature.kind == mir_signature_compiler_runtime() && signature.adapter == mir_adapter_set_compression_link()
 		return "trbn_set_compression_link"
 	end
-	if signature.kind == mir_signature_standard() && signature.adapter >= builder_adapter_start() && signature.adapter < builder_adapter_start() + builder_names().size()
-		return "trbn_builder_" + builder_names()[signature.adapter - builder_adapter_start()]
+	if signature.kind == mir_signature_standard() && builder_kind(signature.adapter) >= 0
+		return "trbn_builder_" + builder_names()[builder_kind(signature.adapter)]
 	end
 	if signature.kind == mir_signature_standard()
 		if signature.adapter >= network_adapter_start() && signature.adapter < network_adapter_start() + network_names().size()
@@ -355,8 +355,8 @@ def mir_intrinsic_signature_error(native_module: MirModule, signature: MirSignat
 			name = "trb/internal/network_host." + network_names()[network]
 			parameters = network_parameters(network)
 			result = network_result(network)
-		elsif signature.adapter >= builder_adapter_start() && signature.adapter < builder_adapter_start() + builder_names().size()
-			builder := signature.adapter - builder_adapter_start()
+		elsif builder_kind(signature.adapter) >= 0
+			builder := builder_kind(signature.adapter)
 			name = builder_signature_name(builder)
 			parameters = builder_parameters(builder)
 			result = builder_result(builder)
@@ -380,7 +380,7 @@ def mir_intrinsic_signature_error(native_module: MirModule, signature: MirSignat
 			if oidc_kind(signature.adapter) >= 0
 				mutable = oidc_mutable(oidc_kind(signature.adapter), index)
 			end
-			if signature.adapter == mir_adapter_time_clock() || signature.adapter == mir_adapter_time_zone_environment() || (signature.adapter == mir_adapter_time_zone_data() && index == 3) || (index == 0 && signature.adapter >= builder_adapter_start() && signature.adapter < builder_adapter_start() + builder_names().size() && builder_mutates(signature.adapter - builder_adapter_start()))
+			if signature.adapter == mir_adapter_time_clock() || signature.adapter == mir_adapter_time_zone_environment() || (signature.adapter == mir_adapter_time_zone_data() && index == 3) || (index == 0 && builder_kind(signature.adapter) >= 0 && builder_mutates(builder_kind(signature.adapter)))
 				mutable = 1
 			end
 			if signature.parameter_types[index] != parameters[index] || signature.parameter_mutable[index] != mutable

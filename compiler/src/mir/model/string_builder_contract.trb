@@ -2,6 +2,10 @@ def builder_append_bytes(): Integer
 	return 8
 end
 
+def builder_snapshot_bytes(): Integer
+	return 9
+end
+
 # Operation IDs belong to the checked StringBuilder contract, not source names.
 def builder_new(): Integer
 	return 0
@@ -39,11 +43,31 @@ def builder_adapter_start(): Integer
 	return 25
 end
 
+# The original adapter range ends before other standard-library adapters.
+def builder_adapter(kind: Integer): Integer
+	if kind == builder_snapshot_bytes()
+		return 90
+	end
+	return builder_adapter_start() + kind
+end
+
+def builder_kind(adapter: Integer): Integer
+	if adapter >= builder_adapter_start() && adapter <= builder_adapter_start() + builder_append_bytes()
+		return adapter - builder_adapter_start()
+	elsif adapter == builder_adapter(builder_snapshot_bytes())
+		return builder_snapshot_bytes()
+	end
+	return -1
+end
+
 def builder_names(): Array<String>
-	return ["new", "from_string", "append", "append_codepoint", "length", "empty", "to_string", "clear", "append_bytes"]
+	return ["new", "from_string", "append", "append_codepoint", "length", "empty", "to_string", "clear", "append_bytes", "snapshot_bytes"]
 end
 
 def builder_parameters(kind: Integer): Array<String>
+	if kind == builder_snapshot_bytes()
+		return ["Bytes", "Integer", "Integer"]
+	end
 	if kind == builder_append_bytes()
 		return ["StringBuilder", "Bytes", "Integer", "Integer"]
 	end
@@ -66,7 +90,7 @@ def builder_result(kind: Integer): String
 		return "Integer"
 	elsif kind == builder_empty()
 		return "Boolean"
-	elsif kind == builder_to_string()
+	elsif kind == builder_to_string() || kind == builder_snapshot_bytes()
 		return "String"
 	end
 	return "Void"
@@ -97,8 +121,8 @@ def builder_method(name: String): Integer
 end
 
 def builder_signature_name(kind: Integer): String
-	if kind == builder_append_bytes()
-		return "trb/internal/string_builder_storage.append_bytes"
+	if kind == builder_append_bytes() || kind == builder_snapshot_bytes()
+		return "trb/internal/string_builder_storage." + builder_names()[kind]
 	end
 	if kind <= builder_from_string()
 		return "trb/std/string_builder." + builder_names()[kind]
@@ -113,6 +137,8 @@ def builder_parameter_names(kind: Integer): Array<String>
 		return ["value"]
 	elsif kind == builder_append_bytes()
 		return ["builder", "bytes", "start", "finish"]
+	elsif kind == builder_snapshot_bytes()
+		return ["bytes", "start", "finish"]
 	end
 	return []
 end

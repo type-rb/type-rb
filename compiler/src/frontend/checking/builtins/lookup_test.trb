@@ -1,3 +1,4 @@
+import { mir_convert_parsed_float, mir_convert_string_integer_status } from mir/model/operation_modes
 import { compiler_test_instruction_with_cell } from testing/compiler
 import { check, emit_qbe } from compiler
 import { control_test_output } from testing/mir/control
@@ -108,13 +109,41 @@ describe("MIR builtin values") do
 			end
 		end
 	end
+	test("keeps both values when a function parses successive Floats") do
+		mut state := logical_checked_source("def main()\nleft := \"2.25\".try_to_f() catch |error|\nputs(error.message)\n0.0\nend\nright := \"-3.5\".try_to_f() catch |error|\nputs(error.message)\n0.0\nend\nputs(left)\nputs(right)\nend\n")
+		expect(check(state)).to_be_true()
+		output := control_test_output(emit_qbe(state))
+		expect(output.split("l %float_parse_slot)").size()).to_equal(3)
+		expect(output.split("%float_parse_slot =l alloc8 8").size()).to_equal(2)
+		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
+		if qbe != nil
+			case logical_run_qbe(qbe, output)
+			when Result::Ok(text)
+				expect(text).to_equal("2.25\n-3.5\n")
+			when Result::Err(error)
+				puts(error)
+				expect(false).to_be_true()
+			end
+		end
+	end
+
 	test("independently rejects forged parse status and conversion types") do
 		mut state := logical_checked_source("def main()\nputs(\"1.5\".to_f())\ninteger := \"7\".try_to_i() catch |error|\nputs(error.message)\n0\nend\nputs(integer)\nfloating := \"2.5\".try_to_f() catch |error|\nputs(error.message)\n0.0\nend\nputs(floating)\nend\n")
 		expect(check(state)).to_be_true()
 		mut found := 0
+		mut integer_status := -1
 		state.scalar_mir.instructions.each.with_index do |instruction, index|
+			if instruction.kind == 17 && instruction.payload == mir_convert_string_integer_status()
+				integer_status = instruction.result
+			end
+			if instruction.kind == 17 && instruction.payload == mir_convert_parsed_float()
+				expect(integer_status >= 0).to_be_true()
+				state.scalar_mir.instructions[index] = compiler_test_instruction_with_cell(instruction, 2, integer_status)
+				expect(verify_mir(state.scalar_mir, true)).to_equal("MIR Float payload requires its checked parse")
+				state.scalar_mir.instructions[index] = instruction
+			end
 			if instruction.kind == 17 && instruction.payload >= 6
-				state.scalar_mir.instructions[index] = compiler_test_instruction_with_cell(instruction, 4, 9)
+				state.scalar_mir.instructions[index] = compiler_test_instruction_with_cell(instruction, 4, 10)
 				expect(verify_mir(state.scalar_mir, true).empty?()).to_be_false()
 				state.scalar_mir.instructions[index] = compiler_test_instruction_with_cell(instruction, 4, 1)
 				expect(verify_mir(state.scalar_mir, true).empty?()).to_be_false()

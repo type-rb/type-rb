@@ -17,7 +17,7 @@ import { standard_crypto } from frontend/resolution/crypto_intrinsics
 import { standard_compression } from frontend/resolution/compression_intrinsics
 import { mir_adapter_gzip } from mir/model/call_kinds
 import { standard_string_builder } from frontend/resolution/string_builder_intrinsics
-import { builder_adapter_start, builder_signature_name } from mir/model/string_builder_contract
+import { builder_adapter, builder_signature_name } from mir/model/string_builder_contract
 import { network_adapter_start, network_names } from mir/model/network_contract
 import { standard_network_host } from frontend/resolution/network_intrinsics
 import { standard_entropy } from frontend/resolution/secure_random_intrinsics
@@ -185,7 +185,7 @@ def mir_declare_signatures(mut state: CompilerState)
 		builder := standard_string_builder(state, index)
 		if builder >= 0
 			kind = mir_signature_standard()
-			adapter = builder_adapter_start() + builder
+			adapter = builder_adapter(builder)
 			name = builder_signature_name(builder)
 		end
 		if standard_entropy(state, index)

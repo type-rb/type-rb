@@ -387,7 +387,7 @@ def standard_source_function(kind: Integer, name: String): Boolean
 		return name == "::gzip"
 	end
 	if kind == standard_source_string_builder_storage()
-		return name == "::append_bytes"
+		return name == "::append_bytes" || name == "::snapshot_bytes"
 	end
 	if kind == standard_source_string_builder()
 		if name == "::new" || name == "::from_string"

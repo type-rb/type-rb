@@ -85,6 +85,9 @@ def emit_function(mut state: CompilerState, function_index: Integer, value_group
 	if result_type != "Void"
 		qbe_output_line(output, "\t%return_value =l alloc8 8")
 	end
+	if context.float_parse_slot_used[0]
+		qbe_output_line(output, "\t%float_parse_slot =l alloc8 8")
+	end
 	# All fused calls finish using this table before the next call. Allocate it
 	# once in the entry block so loop iterations reuse a fixed stack frame.
 	mut hash_concat := false
