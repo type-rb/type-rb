@@ -237,6 +237,46 @@ class PublicationTests(unittest.TestCase):
             self.assertEqual(result["latest"], previous["latest"])
             self.assertEqual(result["attempt"], failed)
 
+    def test_short_canonical_artifact_recovers_older_history_and_preserves_failed_attempt(self):
+        original = publication.snapshot(manifest(), attempt())
+        old = [dict(original, at=f"2026-01-0{day}T00:00:00+00:00",
+                    runUrl=f"https://github.com/type-rb/type-rb-native/actions/runs/{day}") for day in (1, 2, 3)]
+        latest = dict(original, at="2026-02-01T00:00:00+00:00",
+                      runUrl="https://github.com/type-rb/type-rb/actions/runs/4")
+        failed = dict(attempt(), at="2026-02-02T00:00:00+00:00", status="measurement-failure",
+                      runUrl="https://github.com/type-rb/type-rb/actions/runs/5")
+        current = {**publication.empty(), "latest": latest, "history": [latest], "attempt": failed}
+        previous = {**publication.empty(), "latest": old[-1], "history": old}
+        with tempfile.TemporaryDirectory() as tmp, patch.object(publication, "HISTORY_LIMIT", 3):
+            path = Path(tmp) / "state.json"
+            publication.daily.write(path, current)
+            with patch.object(publication.daily, "restore"), patch.object(publication, "read_state_url", return_value=previous) as read:
+                publication.restore(path)
+                restored = publication.daily.read(path)
+                self.assertEqual(restored, {**current, "history": [old[1], old[2], latest]})
+                # A full window is self-contained on the next restore.
+                publication.restore(path)
+                self.assertEqual(publication.daily.read(path), restored)
+                read.assert_called_once_with(publication.LEGACY_STATE)
+
+    def test_archive_failure_retains_canonical_measurement_and_recovers_on_retry(self):
+        old = publication.snapshot(manifest(), attempt())
+        latest = dict(old, at="2026-02-01T00:00:00+00:00", runUrl="https://github.com/type-rb/type-rb/actions/runs/4")
+        current = {**publication.empty(), "latest": latest, "history": [latest]}
+        previous = {**publication.empty(), "latest": old, "history": [old]}
+        with tempfile.TemporaryDirectory() as tmp, patch.object(publication.daily, "restore"):
+            path = Path(tmp) / "state.json"
+            publication.daily.write(path, current)
+            with patch.object(publication, "read_state_url", side_effect=OSError("unavailable")):
+                publication.restore(path)
+            restored = publication.daily.read(path)
+            self.assertIn("archived Native site", restored.pop("publicationWarning"))
+            self.assertEqual(restored, current)
+            with patch.object(publication, "read_state_url", return_value=previous):
+                publication.restore(path)
+                publication.restore(path)
+            self.assertEqual(publication.daily.read(path), {**current, "history": [old, latest]})
+
     def test_main_refresh_keeps_original_measurement_identity_and_reports_pending_changes(self):
         previous = publication.snapshot(manifest(), attempt())
         with tempfile.TemporaryDirectory() as temporary, patch.object(publication.daily, "git", return_value="b" * 40), \

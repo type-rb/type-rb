@@ -139,29 +139,31 @@ def validate(state):
     return state
 
 
-def read_public_state():
-    try:
-        response = urllib.request.urlopen(PUBLIC_STATE, timeout=20)
-    except urllib.error.HTTPError as error:
-        if error.code != 404:
-            raise
-        error.close()
-        # The first canonical deployment inherits the published Native series.
-        response = urllib.request.urlopen(LEGACY_STATE, timeout=20)
-    with response:
+def read_state_url(url):
+    with urllib.request.urlopen(url, timeout=20) as response:
         data = response.read(8_000_001)
     require(len(data) <= 8_000_000, "Public state exceeds its limit")
     return validate(json.loads(data))
 
 
-def restore(path):
+def read_public_state():
+    try:
+        return read_state_url(PUBLIC_STATE)
+    except urllib.error.HTTPError as error:
+        if error.code != 404:
+            raise
+        error.close()
+        return read_state_url(LEGACY_STATE)
+
+
+def restore_current(path):
     warning = None
     try:
         daily.restore(path, workflow=WORKFLOW, artifact_name=ARTIFACT, validator=validate)
         state = daily.read(path)
         # No artifact exists before the first run, or after the 90-day expiry.
         if state.get("profile") == "representative" and state.get("latest"):
-            return
+            return state
     except (OSError, ValueError, KeyError, TypeError, zipfile.BadZipFile, subprocess.SubprocessError):
         state = empty()
         warning = "Artifact retrieval failed. Showing the last available public measurement."
@@ -175,12 +177,38 @@ def restore(path):
                 state["attempt"] = newer_attempt
         elif not state.get("attempt"):
             state = previous
-    except (OSError, ValueError, KeyError, TypeError):
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        print(f"Public application state unavailable: {error}", flush=True)
         if state.get("profile") != "representative":
             state = empty()
         warning = warning or "No retained measurement is available yet. All registered cases remain listed."
     if warning:
         state["publicationWarning"] = warning
+    return state
+
+
+def restore(path):
+    state = restore_current(path)
+    latest = state.get("latest")
+    history = state["history"]
+    # A successful first run can produce a valid artifact even if the archive
+    # was unavailable. Fill only the older part of the bounded history.
+    if latest and latest["runUrl"].startswith(f"https://github.com/{REPOSITORY}/") and len(history) < HISTORY_LIMIT:
+        warning = "Earlier application measurements could not be restored from the archived Native site."
+        try:
+            previous = read_state_url(LEGACY_STATE)
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            print(f"{warning} {error}", flush=True)
+            state.setdefault("publicationWarning", warning)
+        else:
+            current = history or [latest]
+            oldest = min(datetime.fromisoformat(item["at"]) for item in current)
+            older = [item for item in previous["history"]
+                     if item["runUrl"].startswith("https://github.com/type-rb/type-rb-native/")
+                     and datetime.fromisoformat(item["at"]) < oldest]
+            state["history"] = (older + current)[-HISTORY_LIMIT:]
+            if state.get("publicationWarning") == warning:
+                state.pop("publicationWarning")
     daily.write(path, validate(state))
 
 
