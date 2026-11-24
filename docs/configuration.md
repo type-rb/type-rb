@@ -63,14 +63,12 @@ methods introduced in Go 1.27, so projects targeting Go 1.26 are rejected.
 
 ## TypeScript toolchain
 
-The Native repository validates emitted reference source with TypeScript 7.0.2,
-Node.js 26.13.1 and Bun 1.4.5. Its pinned Go reference compiler creates
-managed projects with ESM, npm and this TypeScript 6 dependency:
+New managed TypeScript projects created by the Go companion use ESM, npm, and TypeScript 7.0.2:
 
 ```jsonc
 {
   "devDependencies": {
-    "typescript": "^6.0.0"
+    "typescript": "7.0.2"
   },
   "typescript": {
     "packageManager": "npm",
@@ -80,17 +78,18 @@ managed projects with ESM, npm and this TypeScript 6 dependency:
 }
 ```
 
-The pinned reference uses the TypeScript 6 compiler API to read native
-package declarations. Its dependency range selects a compatible 6.x release. Browser applications are
-the primary TypeScript use case; APIs tied to a particular runtime remain
+The generated manifest fixes the TypeScript compiler version. Browser
+applications are the primary TypeScript use case. Runtime-specific APIs use
 explicit platform packages.
 
 After native dependencies are installed, `trb install` also indexes supported
 `.d.ts` exports into `.trb/native-types.json`. TypeRB source can import those
 configured packages directly; ordinary builds and completion use the cached
 index and generated TypeScript keeps the original package specifier. Native
-declaration indexing requires TypeScript 6.x and reports the installed version
-when another major version is detected.
+declaration indexing uses the TypeScript 7.0.2 asynchronous compiler API.
+Install that exact version for both npm and Bun projects. The Native
+qualification suite keeps its historical reference compiler pinned and
+checks its generated source with the registered TypeScript compiler.
 
 `typescript.runtime` selects `browser`, `bun`, or `node` and defaults to
 `node`. `browser` projects compile source for a browser application or bundler

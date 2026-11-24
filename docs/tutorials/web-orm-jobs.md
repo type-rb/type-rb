@@ -461,7 +461,7 @@ loader. For TypeScript server execution, select Bun:
 {
   "mode": "typescript",
   "devDependencies": {
-    "typescript": "^6.0.0"
+    "typescript": "7.0.2"
   },
   "typescript": {
     "runtime": "bun",
