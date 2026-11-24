@@ -193,6 +193,24 @@ end
             "8128\n0\n2\n6\n",
         ),
         (
+            'codepoint-growth',
+            f"""import trb/std/string_builder
+
+def main()
+	mut writer := StringBuilder.new()
+	writer.append("{'x' * 63}")
+	saved := writer.to_s()
+	writer.append_codepoint(128)
+	writer.append_codepoint(2048)
+	writer.append_codepoint(1114111)
+	puts(writer.to_s())
+	writer.clear()
+	puts(saved)
+end
+""",
+            'x' * 63 + '\u0080\u0800\U0010ffff\n' + 'x' * 63 + '\n',
+        ),
+        (
             'display',
             """import trb/std/string_builder
 def show(value: Any)
