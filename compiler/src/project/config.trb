@@ -66,7 +66,7 @@ def parse_project_go_config(
 		mut error_line: Array<Integer>,
 	): ProjectGoConfig
 	mut module_name := ""
-	mut version := "1.27"
+	mut version := "1.27.4"
 	mut sqldef_present := false
 	mut sqldef_command := ""
 	mut sqldef_database := ""
@@ -116,7 +116,7 @@ def parse_project_go_config(
 		end
 	end
 	if version == ""
-		version = "1.27"
+		version = "1.27.4"
 	end
 	return ProjectGoConfig.new(
 		module_name: module_name,
@@ -632,7 +632,7 @@ def parse_project_config(source: String): ProjectConfig
 	mut package_management := "managed"
 	mut go_config := ProjectGoConfig.new(
 		module_name: "",
-		version: "1.27",
+		version: "1.27.4",
 		sqldef_present: false,
 		sqldef_command: "",
 		sqldef_database: "",

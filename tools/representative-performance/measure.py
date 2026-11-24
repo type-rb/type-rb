@@ -313,6 +313,14 @@ def load_cases(smoke=False, selected=None, profile="registered"):
     return suite, cases
 
 
+def verify_go_build(go, binary, expected, env):
+    metadata = subprocess.check_output([go, "version", "-m", "-json", binary], env=env, text=True)
+    actual = json.loads(metadata)["GoVersion"]
+    if actual != expected:
+        raise ValueError(f"{binary.name} was built with {actual}, expected {expected}")
+    return actual
+
+
 def build_programs(args, workspace, evidence, env):
     binaries = {}
     if args.native:
@@ -412,14 +420,28 @@ def main():
     write(evidence / "manifest.json", result)
     try:
         with tempfile.TemporaryDirectory(prefix="representative-performance-") as temporary:
+            if args.go:
+                expected_go = "go" + (ROOT / ".go-version").read_text().strip()
+                env.update(PATH=os.pathsep.join([str(args.go.parent), env["PATH"]]), GOTOOLCHAIN="local")
+                actual = subprocess.check_output([args.go, "env", "GOVERSION"], env=env, text=True).strip()
+                if actual != expected_go:
+                    raise ValueError(f"Go control uses {actual}, expected {expected_go}")
+                result["goBuildVersions"] = {}
+                if args.reference:
+                    result["goBuildVersions"]["reference"] = verify_go_build(args.go, args.reference, expected_go, env)
             binaries = build_programs(args, Path(temporary), evidence, env)
+            if args.go:
+                result["goBuildVersions"].update({
+                    role: verify_go_build(args.go, binary, expected_go, env)
+                    for role, binary in binaries.items() if role in ("typerb-go", "pure-go")
+                })
             result["binaries"] = {role: {"sha256": digest(binary), "bytes": binary.stat().st_size}
                                   for role, binary in binaries.items()}
             result["tools"] = {name: {"path": str(getattr(args, name)), "sha256": digest(getattr(args, name))}
                                for name in ("native", "reference", "go") if getattr(args, name)}
             for name, tool in result["tools"].items():
                 version = subprocess.run([tool["path"], "--version" if name == "native" else "version"],
-                                         capture_output=True, text=True, timeout=10)
+                                         capture_output=True, text=True, timeout=10, env=env)
                 if version.returncode:
                     raise RuntimeError(name + " version query failed")
                 tool["version"] = version.stdout.strip()

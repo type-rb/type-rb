@@ -23,13 +23,14 @@ def attempt():
 def manifest():
     summary = {"processWallSeconds": {"count": 3, "p50": 2}, "cpuSeconds": 1,
                "peakRssBytes": 4096, "unitsPerSecond": 100, "firstProcessWallSeconds": 3}
-    return {"smoke": False, "status": "pass", "repositoryRevision": "a" * 40,
+    go_release = "go" + (publication.ROOT / ".go-version").read_text().strip()
+    return {"smoke": False, "status": "pass", "goBuildVersions": dict.fromkeys(("reference", "typerb-go", "pure-go"), go_release), "repositoryRevision": "a" * 40,
             "plannedCases": publication.catalog(),
             "cases": [{"input": case, "summaries": {role: copy.deepcopy(summary) for role in publication.ROLES}}
                       for case in publication.catalog()],
             **{key: hashlib.sha256((publication.ROOT / path).read_bytes()).hexdigest() for key, path in publication.SOURCES.items()},
             "samples": 3, "warmups": 1, "startedAt": "2026-01-01T00:00:00+00:00", "platform": "synthetic", "machine": "arm64",
-            "tools": {name: {"path": "/synthetic/private/tool", "sha256": "c" * 64, "version": "synthetic 1.0"}
+            "tools": {name: {"path": "/synthetic/private/tool", "sha256": "c" * 64, "version": "go version " + go_release + " linux/arm64" if name == "go" else "synthetic 1.0"}
                       for name in ("native", "reference", "go")},
             "binaries": {role: {"sha256": "d" * 64, "bytes": 1000} for role in publication.ROLES},
             "environment": {"GOMAXPROCS": "1", "affinity": [0], "cpuPinning": "inherited single CPU", "filesystemCache": "warm"}}
@@ -50,6 +51,19 @@ class PublicationTests(unittest.TestCase):
             with patch.dict(publication.os.environ, {"GITHUB_REPOSITORY": "other/type-rb"}):
                 with self.assertRaisesRegex(ValueError, "Unexpected publication repository"):
                     publication.start(path)
+
+    def test_go_toolchain_identity_separates_measurement_series(self):
+        data = manifest()
+        original = publication.snapshot(data, attempt())
+        data["tools"]["go"]["sha256"] = "e" * 64
+        updated = publication.snapshot(data, attempt())
+        self.assertNotEqual(original["series"], updated["series"])
+        del data["goBuildVersions"]["pure-go"]
+        with self.assertRaisesRegex(ValueError, "all three Go binaries"):
+            publication.snapshot(data, attempt())
+        legacy = copy.deepcopy(original)
+        del legacy["goBuildVersions"]
+        self.assertEqual(publication.validate_snapshot(legacy), legacy)
 
     def test_summary_diagnostics_cannot_replace_streaming_results(self):
         data = manifest()
@@ -237,6 +251,46 @@ class PublicationTests(unittest.TestCase):
             self.assertEqual(result["latest"], previous["latest"])
             self.assertEqual(result["attempt"], failed)
 
+    def test_short_canonical_artifact_recovers_older_history_and_preserves_failed_attempt(self):
+        original = publication.snapshot(manifest(), attempt())
+        old = [dict(original, at=f"2026-01-0{day}T00:00:00+00:00",
+                    runUrl=f"https://github.com/type-rb/type-rb-native/actions/runs/{day}") for day in (1, 2, 3)]
+        latest = dict(original, at="2026-02-01T00:00:00+00:00",
+                      runUrl="https://github.com/type-rb/type-rb/actions/runs/4")
+        failed = dict(attempt(), at="2026-02-02T00:00:00+00:00", status="measurement-failure",
+                      runUrl="https://github.com/type-rb/type-rb/actions/runs/5")
+        current = {**publication.empty(), "latest": latest, "history": [latest], "attempt": failed}
+        previous = {**publication.empty(), "latest": old[-1], "history": old}
+        with tempfile.TemporaryDirectory() as tmp, patch.object(publication, "HISTORY_LIMIT", 3):
+            path = Path(tmp) / "state.json"
+            publication.daily.write(path, current)
+            with patch.object(publication.daily, "restore"), patch.object(publication, "read_state_url", return_value=previous) as read:
+                publication.restore(path)
+                restored = publication.daily.read(path)
+                self.assertEqual(restored, {**current, "history": [old[1], old[2], latest]})
+                # A full window is self-contained on the next restore.
+                publication.restore(path)
+                self.assertEqual(publication.daily.read(path), restored)
+                read.assert_called_once_with(publication.LEGACY_STATE)
+
+    def test_archive_failure_retains_canonical_measurement_and_recovers_on_retry(self):
+        old = publication.snapshot(manifest(), attempt())
+        latest = dict(old, at="2026-02-01T00:00:00+00:00", runUrl="https://github.com/type-rb/type-rb/actions/runs/4")
+        current = {**publication.empty(), "latest": latest, "history": [latest]}
+        previous = {**publication.empty(), "latest": old, "history": [old]}
+        with tempfile.TemporaryDirectory() as tmp, patch.object(publication.daily, "restore"):
+            path = Path(tmp) / "state.json"
+            publication.daily.write(path, current)
+            with patch.object(publication, "read_state_url", side_effect=OSError("unavailable")):
+                publication.restore(path)
+            restored = publication.daily.read(path)
+            self.assertIn("archived Native site", restored.pop("publicationWarning"))
+            self.assertEqual(restored, current)
+            with patch.object(publication, "read_state_url", return_value=previous):
+                publication.restore(path)
+                publication.restore(path)
+            self.assertEqual(publication.daily.read(path), {**current, "history": [old, latest]})
+
     def test_main_refresh_keeps_original_measurement_identity_and_reports_pending_changes(self):
         previous = publication.snapshot(manifest(), attempt())
         with tempfile.TemporaryDirectory() as temporary, patch.object(publication.daily, "git", return_value="b" * 40), \
@@ -251,7 +305,7 @@ class PublicationTests(unittest.TestCase):
 
     def test_freshness_ignores_docs_but_covers_compiler_workloads_and_controller(self):
         for path in ("compiler/src/value.trb", "src/main.trb", "benchmarks/representative/go/main.go",
-                     "tools/representative-performance/measure.py", ".github/workflows/representative-performance.yml"):
+                     "tools/representative-performance/measure.py", ".go-version", ".github/workflows/representative-performance.yml"):
             self.assertTrue(publication.relevant(path), path)
         for path in ("docs/capabilities/benchmarks/representative.html", "compiler/src/value_test.trb", "docs/performance-policy.md"):
             self.assertFalse(publication.relevant(path), path)

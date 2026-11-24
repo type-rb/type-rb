@@ -255,12 +255,14 @@
     },
     {
       "id": "reference-tools",
-      "name": "Go reference compiler and Node.js",
+      "name": "Reference compiler and source target toolchains",
       "status": "current",
       "scope": "Validation",
       "role": "Reference conformance/recovery and documentation/tooling checks.",
-      "configuration": "TypeRB 0.4.12-dev at cc8c734f73f5149464838825cdbb2165058ed26d, built with Go 1.27 as declared in the pinned go.mod; CI uses Node.js 24 for tooling and synthetic browser Fetch checks. Validation tools are separate from the ordinary Native semantic build and application runtime.",
+      "configuration": "TypeRB 0.4.12-dev at cc8c734f73f5149464838825cdbb2165058ed26d, built with Go 1.27.4. The application workload controls use the same Go toolchain. Reference source output is checked with Ruby 4.0.10, TypeScript 7.0.2, Node.js 26.13.1 and Bun 1.4.5. Node.js also runs the tooling and synthetic browser Fetch checks. Validation tools are separate from the ordinary Native semantic build and application runtime.",
       "evidence": [
+        ".go-version",
+        "tools/check-source-toolchains.sh",
         "TYPE_RB_REVISION",
         "compatibility/current.json",
         "results/2026-09-07-string-escape-reference-compatibility/browser-contract-identity/README.md",
@@ -599,19 +601,20 @@
       "name": "Pinned Go site generator and highlighter",
       "scope": "Site CI only",
       "role": "Keep canonical documentation publishing through the Native repository transition.",
-      "configuration": "Selected documentation-only mode at v0.5 cutover. Build trb-site from a fixed Go implementation source with recorded Go/module identities; feed current canonical docs and pinned Node/Shiki highlighting. No application runtime or hosted WASM requirement.",
+      "configuration": "Canonical Pages builds trb-site from type-rb/type-rb-go commit 7638f15416544c562bc22d01ec640bff755b815d with Go 1.27.4. It renders canonical documentation in docs-only mode, verifies the shared feature contract, and highlights code with Node.js 26.13.1 and the locked Shiki package.",
       "requiredBy": [
         "distribution"
       ],
       "referenceBehavior": "Keep updated installation, CLI differences, navigation, versions and browser-unavailable pages. Go local play/tour remains required; Native local execution and hosted Run/Transpile/Format have scoped approved deferrals.",
-      "next": "Rehearse source/tool hashes and canonical docs ownership in #1168; restore local Native play/tour before evaluating Native TS browser output.",
+      "next": "Verify the generator revision, tool versions and source hashes in the deployed site-build.txt after a toolchain change.",
       "evidence": [
-        "https://github.com/type-rb/type-rb/blob/main/docs/native-transition.md",
-        "https://github.com/type-rb/type-rb-native/issues/1255",
+        ".github/workflows/pages.yml",
+        "https://github.com/type-rb/type-rb-go/tree/7638f15416544c562bc22d01ec640bff755b815d/tools/site",
+        "https://type-rb.github.io/site-build.txt",
         "docs/native-dependency-policy.md"
       ],
-      "status": "candidate",
-      "decision": "selected"
+      "status": "current",
+      "decision": "retain"
     },
     {
       "id": "float-decimal",

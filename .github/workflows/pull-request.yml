@@ -60,7 +60,16 @@ jobs:
       - uses: actions/setup-node@v5
         if: (needs.plan.outputs.code == 'true' || needs.plan.outputs.cli == 'true') && needs.plan.outputs.registry_only != 'true'
         with:
-          node-version: '24'
+          node-version-file: .node-version
+      - uses: ruby/setup-ruby@v1
+        if: (needs.plan.outputs.code == 'true' || needs.plan.outputs.cli == 'true') && needs.plan.outputs.registry_only != 'true'
+      - uses: oven-sh/setup-bun@v2
+        if: (needs.plan.outputs.code == 'true' || needs.plan.outputs.cli == 'true') && needs.plan.outputs.registry_only != 'true'
+        with:
+          bun-version-file: .bun-version
+      - name: Install the TypeScript compiler for source target checks
+        if: (needs.plan.outputs.code == 'true' || needs.plan.outputs.cli == 'true') && needs.plan.outputs.registry_only != 'true'
+        run: npm install --global "typescript@$(cat .typescript-version)"
       - name: Check compiler responsibility boundaries
         if: needs.plan.outputs.registry_only != 'true'
         run: |
@@ -91,13 +100,16 @@ jobs:
       - uses: actions/setup-go@v6
         if: needs.plan.outputs.code == 'true' || needs.plan.outputs.cli == 'true'
         with:
-          go-version-file: .type-rb/go.mod
+          go-version-file: .go-version
           cache-dependency-path: .type-rb/go.sum
       - name: Build the pinned reference compiler
         if: needs.plan.outputs.code == 'true' || needs.plan.outputs.cli == 'true'
         run: |
           test "$(cat TYPE_RB_REVISION)" = "$(git -C .type-rb rev-parse HEAD)"
           python3 tools/build-reference.py .type-rb "$RUNNER_TEMP/trb"
+      - name: Run the reference source targets with the registered toolchains
+        if: (needs.plan.outputs.code == 'true' || needs.plan.outputs.cli == 'true') && needs.plan.outputs.registry_only != 'true'
+        run: sh tools/check-source-toolchains.sh "$RUNNER_TEMP/trb"
       - name: Check canonical compatibility metadata before matrix fan-out
         if: needs.plan.outputs.code == 'true' || needs.plan.outputs.cli == 'true'
         run: |
@@ -213,7 +225,7 @@ jobs:
           path: .type-rb
       - uses: actions/setup-go@v6
         with:
-          go-version-file: .type-rb/go.mod
+          go-version-file: .go-version
           cache-dependency-path: .type-rb/go.sum
       - name: Build the exact reference compiler
         run: |

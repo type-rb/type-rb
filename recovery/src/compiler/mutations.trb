@@ -411,5 +411,7 @@ def compiler_recovery_mutations(): Array<Array<String>>
 		["frontend/providers/orm_queries", "\"SELECT \"", "\"SELECT ~\""],
 		["frontend/checking/body/orm_queries", "\" expects named columns\"", "\" expects named columns~\""],
 		["mir/analysis/split_fields", ">= 0", ">= 1"],
+		["frontend/checking/builtins/array_sorting_counts", "\"4096\"", "\"4096~\""],
+		["frontend/checking/builtins/array_sorting_support", "\"TRBN4004\"", "\"TRBN4004~\""],
 	]
 end

@@ -118,7 +118,7 @@ end
 dependency subpaths imported by project source, and writes an ignored
 `.trb/native-types.json` index. Builds and editor completion read that index
 without starting TypeScript. Index generation currently requires the supported
-TypeScript 6.x toolchain. Runtime output imports the original npm package
+TypeScript 7.0.2 toolchain. Runtime output imports the original npm package
 unchanged. The compiler-owned cache pools repeated types, fields, and
 diagnostics, so component suites with shared or inherited DOM props store that
 metadata once instead of once per component. Run `trb install` to regenerate

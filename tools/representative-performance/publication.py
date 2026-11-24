@@ -50,7 +50,7 @@ def relevant(path):
     if path.endswith((".md", "_test.trb", "_test.py")):
         return False
     return path.startswith(("compiler/", "src/", "benchmarks/representative/", "tools/qbe/")) or path in (
-        "TYPE_RB_REVISION", "trbn", "tools/build-native.sh", "tools/build-reference.py", "tools/compiler_sources.py",
+        "TYPE_RB_REVISION", ".go-version", "trbn", "tools/build-native.sh", "tools/build-reference.py", "tools/compiler_sources.py",
         "tools/qbe_toolchain.py", "tools/bootstrap-seed.sh", "tools/bootstrap-seed-download.sh",
         "tools/representative-performance/measure.py", "tools/representative-performance/suite.json",
         ".github/workflows/representative-performance.yml")
@@ -119,6 +119,13 @@ def validate_snapshot(snapshot):
     require(len(rows) <= len(inputs), "Too many results")
     for tool in snapshot.get("tools", {}).values():
         require(set(tool) == {"sha256", "version"} and HASH.fullmatch(tool["sha256"]) and isinstance(tool["version"], str), "Invalid public tool identity")
+    if "goBuildVersions" in snapshot:
+        build_versions = snapshot["goBuildVersions"]
+        version = snapshot["tools"]["go"]["version"].split()
+        require(len(version) == 4 and version[:2] == ["go", "version"] and
+                re.fullmatch(r"go[0-9]+\.[0-9]+\.[0-9]+", version[2]) and
+                build_versions == dict.fromkeys(("reference", "typerb-go", "pure-go"), version[2]),
+                "Embedded Go toolchains differ from the measured Go release")
     return snapshot
 
 
@@ -139,29 +146,31 @@ def validate(state):
     return state
 
 
-def read_public_state():
-    try:
-        response = urllib.request.urlopen(PUBLIC_STATE, timeout=20)
-    except urllib.error.HTTPError as error:
-        if error.code != 404:
-            raise
-        error.close()
-        # The first canonical deployment inherits the published Native series.
-        response = urllib.request.urlopen(LEGACY_STATE, timeout=20)
-    with response:
+def read_state_url(url):
+    with urllib.request.urlopen(url, timeout=20) as response:
         data = response.read(8_000_001)
     require(len(data) <= 8_000_000, "Public state exceeds its limit")
     return validate(json.loads(data))
 
 
-def restore(path):
+def read_public_state():
+    try:
+        return read_state_url(PUBLIC_STATE)
+    except urllib.error.HTTPError as error:
+        if error.code != 404:
+            raise
+        error.close()
+        return read_state_url(LEGACY_STATE)
+
+
+def restore_current(path):
     warning = None
     try:
         daily.restore(path, workflow=WORKFLOW, artifact_name=ARTIFACT, validator=validate)
         state = daily.read(path)
         # No artifact exists before the first run, or after the 90-day expiry.
         if state.get("profile") == "representative" and state.get("latest"):
-            return
+            return state
     except (OSError, ValueError, KeyError, TypeError, zipfile.BadZipFile, subprocess.SubprocessError):
         state = empty()
         warning = "Artifact retrieval failed. Showing the last available public measurement."
@@ -175,12 +184,38 @@ def restore(path):
                 state["attempt"] = newer_attempt
         elif not state.get("attempt"):
             state = previous
-    except (OSError, ValueError, KeyError, TypeError):
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        print(f"Public application state unavailable: {error}", flush=True)
         if state.get("profile") != "representative":
             state = empty()
         warning = warning or "No retained measurement is available yet. All registered cases remain listed."
     if warning:
         state["publicationWarning"] = warning
+    return state
+
+
+def restore(path):
+    state = restore_current(path)
+    latest = state.get("latest")
+    history = state["history"]
+    # A successful first run can produce a valid artifact even if the archive
+    # was unavailable. Fill only the older part of the bounded history.
+    if latest and latest["runUrl"].startswith(f"https://github.com/{REPOSITORY}/") and len(history) < HISTORY_LIMIT:
+        warning = "Earlier application measurements could not be restored from the archived Native site."
+        try:
+            previous = read_state_url(LEGACY_STATE)
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            print(f"{warning} {error}", flush=True)
+            state.setdefault("publicationWarning", warning)
+        else:
+            current = history or [latest]
+            oldest = min(datetime.fromisoformat(item["at"]) for item in current)
+            older = [item for item in previous["history"]
+                     if item["runUrl"].startswith("https://github.com/type-rb/type-rb-native/")
+                     and datetime.fromisoformat(item["at"]) < oldest]
+            state["history"] = (older + current)[-HISTORY_LIMIT:]
+            if state.get("publicationWarning") == warning:
+                state.pop("publicationWarning")
     daily.write(path, validate(state))
 
 
@@ -203,6 +238,10 @@ def snapshot(manifest, attempt):
     for key, relative in SOURCES.items():
         require(sources[key] == hashlib.sha256((ROOT / relative).read_bytes()).hexdigest(), "Measurement source changed")
     reference_revision = (ROOT / "TYPE_RB_REVISION").read_text().strip()
+    expected_go = "go" + (ROOT / ".go-version").read_text().strip()
+    versions = manifest.get("goBuildVersions")
+    require(versions == dict.fromkeys(("reference", "typerb-go", "pure-go"), expected_go),
+            "Publication needs the registered Go release in all three Go binaries")
     rows = []
     for case in manifest["cases"]:
         require(case["input"] in manifest["plannedCases"], "Unregistered result input")
@@ -223,6 +262,7 @@ def snapshot(manifest, attempt):
              "platform": manifest["platform"], "machine": manifest["machine"],
              "samples": manifest["samples"], "warmups": manifest["warmups"],
              "inputs": manifest["plannedCases"], "rows": rows, "inputProfile": profile,
+             "goBuildVersions": versions,
              "tools": {name: {key: manifest["tools"][name][key] for key in ("sha256", "version")}
                        for name in ("native", "reference", "go")},
              "binaries": {role: {key: manifest["binaries"][role][key] for key in ("sha256", "bytes")} for role in ROLES},
@@ -234,7 +274,7 @@ def snapshot(manifest, attempt):
         value["environment"]["rssTool"] = {key: manifest["environment"]["rssTool"][key] for key in ("sha256", "version")}
     value["series"] = hashlib.sha256(json.dumps([sources, reference_revision, value["samples"], value["warmups"],
                                                value["platform"], value["machine"], value["environment"],
-                                               profile, value["inputs"]], sort_keys=True).encode()).hexdigest()
+                                               profile, value["inputs"], value["tools"]["go"]], sort_keys=True).encode()).hexdigest()
     return validate_snapshot(value)
 
 

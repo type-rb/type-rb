@@ -25,7 +25,7 @@ accepts line and block comments. Trailing commas are not allowed.
   "devDependencies": {},
   "go": {
     "module": "example.com/my-app",
-    "version": "1.27"
+    "version": "1.27.4"
   }
 }
 ```
@@ -63,13 +63,12 @@ methods introduced in Go 1.27, so projects targeting Go 1.26 are rejected.
 
 ## TypeScript toolchain
 
-New managed TypeScript projects use ESM, npm, and the latest compatible
-TypeScript 6 patch:
+New managed TypeScript projects created by the Go companion use ESM, npm, and TypeScript 7.0.2:
 
 ```jsonc
 {
   "devDependencies": {
-    "typescript": "^6.0.0"
+    "typescript": "7.0.2"
   },
   "typescript": {
     "packageManager": "npm",
@@ -79,18 +78,18 @@ TypeScript 6 patch:
 }
 ```
 
-TypeScript 6 is the supported toolchain while the TypeScript 7 programmatic API
-and its surrounding package ecosystem stabilize. The range accepts compatible
-6.x patch releases without moving a project to 7.x. Browser applications are
-the primary TypeScript use case; APIs tied to a particular runtime remain
+The generated manifest fixes the TypeScript compiler version. Browser
+applications are the primary TypeScript use case. Runtime-specific APIs use
 explicit platform packages.
 
 After native dependencies are installed, `trb install` also indexes supported
 `.d.ts` exports into `.trb/native-types.json`. TypeRB source can import those
 configured packages directly; ordinary builds and completion use the cached
 index and generated TypeScript keeps the original package specifier. Native
-declaration indexing requires TypeScript 6.x and reports the installed version
-when another major version is detected.
+declaration indexing uses the TypeScript 7.0.2 asynchronous compiler API.
+Install that exact version for both npm and Bun projects. The Native
+qualification suite keeps its historical reference compiler pinned and
+checks its generated source with the registered TypeScript compiler.
 
 `typescript.runtime` selects `browser`, `bun`, or `node` and defaults to
 `node`. `browser` projects compile source for a browser application or bundler
@@ -310,7 +309,7 @@ generated imports are loaded:
 ```jsonc
 {
   "ruby": {
-    "version": "4.0.9",
+    "version": "4.0.10",
     "loader": "zeitwerk"
   }
 }

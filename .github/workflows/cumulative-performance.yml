@@ -16,6 +16,9 @@ concurrency:
   group: cumulative-performance
   cancel-in-progress: false
 
+env:
+  GOTOOLCHAIN: local
+
 jobs:
   measure:
     # A failed cohort is evidence, not an invitation to rerun for a pass.
@@ -67,7 +70,7 @@ jobs:
 
       - uses: actions/setup-go@v6
         with:
-          go-version-file: .type-rb/go.mod
+          go-version-file: .go-version
           cache-dependency-path: .type-rb/go.sum
 
       - name: Prepare the unchanged daily toolchain and published seeds

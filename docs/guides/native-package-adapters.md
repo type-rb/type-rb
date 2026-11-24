@@ -26,7 +26,7 @@ export that the native package does not have.
 ## 2. Try the existing path
 
 For a TypeScript package, configure the native dependency and the supported
-TypeScript 6.x toolchain, then use `trb install`. Installation indexes supported
+TypeScript 7.0.2 toolchain, then use `trb install`. Installation indexes supported
 named exports from the package's `.d.ts` files. Write the ordinary native import
 in `.trb` source and obtain structured diagnostics:
 

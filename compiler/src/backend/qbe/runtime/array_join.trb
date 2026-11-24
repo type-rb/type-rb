@@ -27,7 +27,7 @@ def emit_array_join_runtime(mut output: QbeOutput)
 	qbe_output_line(output, "@copy_initial\n jmp @copy_element\n")
 	qbe_output_line(output, "@copy_element\n %target =l phi @copy_initial %cursor, @copy_separator %after_separator\n %item_offset =l mul %position, 8\n %item_slot =l add %storage, %item_offset\n %text =l loadl %item_slot\n %text_length_address =l add %text, 8\n %text_length =l loadl %text_length_address\n %text_data =l add %text, 24\n %single_byte =w ceql %text_length, 1\n jnz %single_byte, @copy_byte, @check_short_span")
 	qbe_output_line(output, "\n@copy_byte\n %byte =w loadub %text_data\n storeb %byte, %target\n jmp @copy_advance")
-	# Two four-byte copies cover lengths 4–8. Any overlap writes the same bytes.
+	# Two four-byte copies cover lengths from 4 to 8. Any overlap writes the same bytes.
 	qbe_output_line(output, "\n@check_short_span\n %tail_offset =l sub %text_length, 4\n %short_span =w culel %tail_offset, 4\n jnz %short_span, @copy_short_span, @copy_span")
 	qbe_output_line(output, "\n@copy_short_span\n blit %text_data, %target, 4\n %source_tail =l add %text_data, %tail_offset\n %target_tail =l add %target, %tail_offset\n blit %source_tail, %target_tail, 4\n jmp @copy_advance")
 	qbe_output_line(output, "\n@copy_span\n call $memcpy(l %target, l %text_data, l %text_length)\n jmp @copy_advance")
