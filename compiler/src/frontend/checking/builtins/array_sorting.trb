@@ -1,26 +1,23 @@
+import { mir_sort_counted } from frontend/checking/builtins/array_sorting_counts
+import { mir_sort_assign, mir_sort_helper_body, mir_sort_helper_id, mir_sort_helper_return, mir_sort_item } from frontend/checking/builtins/array_sorting_support
 import { mir_adapter_none, mir_signature_ordinary } from mir/model/call_kinds
 import { MirSignature } from mir/model/module
 import { mir_semantic_type_id } from mir/model/types
 import { mir_checked_call } from mir/lowering/calls
-import { mir_state_enabled_slot, mir_state_failure_block_slot, mir_state_function_slot, mir_state_return_value_slot } from state/local_slots
 import { mir_array_copy_duplicate, mir_string_compare_before } from mir/model/operation_modes
 import { checked_category_value } from frontend/types/value_categories
-import { mir_op_array_copy, mir_op_array_load, mir_op_array_size, mir_op_array_store, mir_op_string_compare } from mir/model/instructions
+import { mir_op_array_copy, mir_op_array_size, mir_op_array_store, mir_op_string_compare } from mir/model/instructions
 import { mir_literal_scalar } from mir/lowering/nullable
 import { mir_array_query_advance, mir_array_query_binding } from frontend/checking/builtins/array_queries
 import { CheckedValue, checked_mir_value, checked_value, mir_add_value, mir_checked_value, scalar_mir_binary, scalar_mir_literal } from frontend/checking/body/values
 import { mir_checked_array_operation } from mir/lowering/arrays
 import { mir_binding_read } from mir/build/bindings
-import { mir_control_active, mir_control_allocate, mir_control_begin, mir_control_branch, mir_control_commit_signature, mir_control_enter, mir_control_jump, mir_control_loop_begin, mir_control_loop_branch, mir_control_loop_end, mir_control_prepare, mir_control_return } from mir/build/control
+import { mir_control_active, mir_control_allocate, mir_control_branch, mir_control_enter, mir_control_jump, mir_control_loop_begin, mir_control_loop_branch, mir_control_loop_end, mir_control_prepare } from mir/build/control
 import { mir_checked_string_operation } from mir/lowering/strings
-import { CompilerState, diagnostic } from state/state
-import { CheckedLocals, locals_new } from state/local_state
-import { load_integer, store_integer } from support/storage
+import { CompilerState } from state/state
+import { CheckedLocals } from state/local_state
+import { load_integer } from support/storage
 import { array_element_type } from frontend/resolution/type_resolution
-
-def mir_sort_assign(mut locals: CheckedLocals, slot: Integer, value: CheckedValue)
-	store_integer(locals.mir_values, slot, checked_mir_value(value) + 1)
-end
 
 # Return min(start + width, limit) without evaluating an overflowing sum.
 def mir_sort_bound(mut state: CompilerState, mut locals: CheckedLocals, start: CheckedValue, width: CheckedValue, limit: CheckedValue, origin: Integer): CheckedValue
@@ -82,12 +79,6 @@ def mir_sort_before(mut state: CompilerState, mut locals: CheckedLocals, first_i
 	value := mir_binding_read(state, locals, result, origin)
 	locals.count[0] = outer
 	return value
-end
-
-def mir_sort_item(mut state: CompilerState, mut locals: CheckedLocals, owner: Integer, cursor: Integer, element: String, origin: Integer): CheckedValue
-	array := mir_binding_read(state, locals, owner, origin)
-	index := mir_binding_read(state, locals, cursor, origin)
-	return mir_checked_array_operation(state, locals, mir_op_array_load(), checked_mir_value(array), checked_mir_value(index), 0, element, origin)
 end
 
 # The first pair chooses nondecreasing or strictly decreasing order. Check each
@@ -365,6 +356,13 @@ def mir_sort_buffers(mut state: CompilerState, mut locals: CheckedLocals, copy: 
 	mir_control_enter(state, locals, unchanged, line)
 	mir_control_jump(state, locals, join, bindings)
 	mir_control_enter(state, locals, mixed, line)
+	if keys < 0 && ordering_type == "Integer"
+		values := mir_binding_read(state, locals, owner, origin)
+		counted := mir_sort_counted(state, locals, values, descending, origin)
+		merge := mir_control_branch(state, locals, counted, line)
+		mir_control_jump(state, locals, join, bindings)
+		mir_control_enter(state, locals, merge, line)
+	end
 	current_copy := mir_binding_read(state, locals, owner, origin)
 	scratch := mir_checked_array_operation(state, locals, mir_op_array_copy(), checked_mir_value(current_copy), -1, mir_array_copy_duplicate(), copy.type_name, origin)
 	destination := mir_array_query_binding(state, locals, "$sort.destination", scratch, origin)
@@ -425,14 +423,7 @@ def mir_sort_call(mut state: CompilerState, mut locals: CheckedLocals, values: C
 	if descending
 		name += ":descending"
 	end
-	mut callee := state.declarations.function_count[0]
-	while callee < state.scalar_mir.signatures.size()
-		signature := state.scalar_mir.signatures[callee]
-		if signature.kind == mir_signature_ordinary() && signature.name == name
-			break
-		end
-		callee += 1
-	end
+	callee := mir_sort_helper_id(state, name)
 	mut arguments := [checked_mir_value(values)]
 	if keys.type_name != "Void"
 		arguments.push(checked_mir_value(keys))
@@ -447,12 +438,7 @@ def mir_sort_call(mut state: CompilerState, mut locals: CheckedLocals, values: C
 		end
 		signature := MirSignature.new(id: callee, kind: mir_signature_ordinary(), name: name, adapter: mir_adapter_none(), source_id: state.module_graph.active_module[0], line: line, parameter_types: parameters, parameter_mutable: mutable, result_type: values.type_name)
 		state.scalar_mir.signatures.push(signature)
-		mut body := locals_new(32)
-		body.mir_state[mir_state_enabled_slot()] = 1
-		body.mir_state[mir_state_function_slot()] = callee
-		body.mir_state[mir_state_failure_block_slot()] = callee * 2 + 1
-		body.mir_state[mir_state_return_value_slot()] = -1
-		mir_control_begin(body, line)
+		mut body := mir_sort_helper_body(callee, line)
 		value_id := mir_add_value(state, body, mir_semantic_type_id(state.scalar_mir, values.type_name), line)
 		input := mir_checked_value(values.type_name, value_id, origin, 1)
 		mut key_input := checked_value("Void", checked_category_value(), origin, 0)
@@ -461,11 +447,7 @@ def mir_sort_call(mut state: CompilerState, mut locals: CheckedLocals, values: C
 			key_input = mir_checked_value(keys.type_name, key_id, origin, 1)
 		end
 		result := mir_sort_buffers(state, body, input, key_input, descending, origin)
-		mir_control_return(state, body, checked_mir_value(result))
-		error := mir_control_commit_signature(state, signature, body)
-		if error != ""
-			diagnostic(state, "TRBN4004", line, error)
-		end
+		mir_sort_helper_return(state, body, signature, result, line)
 	end
 	return mir_checked_call(state, locals, callee, arguments, values.type_name, origin)
 end

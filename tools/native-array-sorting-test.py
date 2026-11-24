@@ -134,6 +134,57 @@ end
     # records and cached keys in the keyed oracle.
     check_forced_collection('\n'.join(expected) + '\n', 3, 476)
 
+    # Exercise both frequency limits, both portable Integer endpoints and a
+    # late outlier. Emit the original after both sorts to check copy ownership.
+    source.write_text('''import trb/std/process
+
+def main()
+args := Process.argv()
+size := args[0].to_i()
+width := args[1].to_i()
+base := args[2].to_i()
+mut values: Array<Integer> := []
+mut seed := 191
+(0...size).each do |index|
+seed = (seed * 48271) % 2147483647
+mut value := base + seed % width
+if index == 0
+value = base
+elsif index == 1
+value = base + (width - 1)
+elsif index == size - 1 && args[3] == "outlier"
+value = -9007199254740991
+end
+values.push(value)
+end
+up := values.sort()
+down := values.sort_descending()
+up.each { |value| puts(value) }
+down.each { |value| puts(value) }
+values.each { |value| puts(value) }
+end
+''')
+    application = root / 'integer-order'
+    run([binary, 'build', '--compile', source, '--outfile', application])
+    maximum = 2**53 - 1
+    for size, width, base, mode in (
+            (63, 8, -4, 'dense'), (64, 8, -4, 'dense'), (65, 8, -4, 'dense'),
+            (128, 63, -maximum, 'dense'), (128, 64, maximum - 63, 'dense'),
+            (128, 65, -32, 'wide'), (128, 64, maximum - 63, 'outlier'),
+            (8194, 4095, -2047, 'dense'), (8194, 4096, -2048, 'dense'),
+            (8194, 4097, -2048, 'wide')):
+        seed, values = 191, []
+        for i in range(size):
+            seed = seed * 48271 % 2147483647
+            values.append(base + seed % width)
+        values[0], values[1] = base, base + width - 1
+        if mode == 'outlier':
+            values[-1] = -maximum
+        observed = run([application, size, width, base, mode])
+        assert not observed.stderr, observed.stderr
+        assert list(map(int, observed.stdout.splitlines())) == (
+            sorted(values) + sorted(values, reverse=True) + values), (size, width, base, mode)
+
     # Keep this small ordinary program separate: folding a dead branch in its
     # generated code once moved the input copy ahead of the Float pushes.
     cases = json.loads((repository / 'tools/native-language-cases.json').read_text())['cases']
