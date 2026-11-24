@@ -39,7 +39,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: type-rb/type-rb-go
-          ref: 942dcc763678f0c7e315014690f095c5ef6e7876
+          ref: 7638f15416544c562bc22d01ec640bff755b815d
           path: .site-generator
           persist-credentials: false
 
@@ -59,6 +59,7 @@ jobs:
           (cd .site-generator && go test ./internal/site ./internal/releasecontract ./tools/release-contract)
           (cd .site-generator && go run ./tools/release-contract --check)
           cmp contracts/v0.5/manifest.json .site-generator/contracts/v0.5/manifest.json
+          cmp contracts/v0.5/surfaces.json .site-generator/contracts/v0.5/surfaces.json
           cmp docs/v0.5-feature-contract.md .site-generator/docs/v0.5-feature-contract.md
           npm ci --prefix .site-generator/tools/site
           npm test --prefix .site-generator/tools/site
@@ -77,6 +78,7 @@ jobs:
           "$RUNNER_TEMP/trb-site" --out dist/site --docs docs --version "$(cat NATIVE_VERSION)" --docs-only
           node .site-generator/tools/site/highlight.mjs dist/site syntaxes/typerb.tmLanguage.json
           cp llms.txt dist/site/llms.txt
+          cp docs/capabilities/styles.css dist/site/styles.css
           cp -R docs/capabilities/dependencies dist/site/dependencies
           test -s dist/site/docs/getting-started/index.html
           test -s dist/site/docs/native-cli/index.html

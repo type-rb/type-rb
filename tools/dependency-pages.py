@@ -61,7 +61,7 @@ def render():
 <title>Dependencies · TypeRB Native</title><link rel="stylesheet" href="../styles.css"><link rel="stylesheet" href="./style.css"></head>
 <body><header class="site-header"><div class="shell header-inner">
 <a class="brand" href="../"><span class="brand-mark" aria-hidden="true">TR</span><span>TypeRB Native</span><span class="development">Development</span></a>
-<nav class="site-nav" aria-label="Site navigation"><a href="../">Capabilities</a><a href="../benchmarks/">Benchmarks</a><a href="./" aria-current="page">Dependencies</a></nav></div></header>
+<nav class="site-nav" aria-label="Site navigation"><a href="../">Home</a><a href="../benchmarks/application/">Benchmarks</a><a href="./" aria-current="page">Dependencies</a></nav></div></header>
 <main class="shell dependency-page"><p class="eyebrow">RUNTIME · SYSTEM DATA · TOOLCHAIN</p><h1>What does Native depend on?</h1>
 <p class="lead">The current source uses platform services and a small set of external tools and libraries. Candidates below, including selected implementation directions, are not installed dependencies. Build tools, runtime libraries and system data have different distribution costs.</p>
 <p>Read the <a href="https://github.com/type-rb/type-rb/blob/main/docs/native-dependency-policy.md">v0.5 linking, trust and distribution policy</a>. Adoption decisions require separate implementation and artifact qualification.</p>

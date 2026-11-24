@@ -3,7 +3,7 @@
   "release": "0.5.0",
   "sourceRepository": "type-rb/type-rb",
   "sourceRevision": "3f67cb8ecc39c330df6e1e1bdc75eb7d53f18271",
-  "catalogSHA256": "4b7bc5454060cb389ad1d6b56d43e40e6d60b36a2d44d94e4de31e97e477df64",
+  "catalogSHA256": "10325f8f58d27e91fff9be13f90903890e48dac7e190170616eca2f896f38277",
   "hosts": [
     "darwin-amd64",
     "darwin-arm64",
