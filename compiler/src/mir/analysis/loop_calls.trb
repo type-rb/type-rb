@@ -162,11 +162,13 @@ def mir_loop_calls_at_header(native_module: MirModule, function: MirFunction, fl
 			# reuse the comparison if its other operand also keeps its identity.
 			left_literal := mir_loop_string_literal(native_module, flow, aliases, instruction.first)
 			right_literal := mir_loop_string_literal(native_module, flow, aliases, instruction.second)
-			if left_literal != right_literal
-				mut operand := instruction.first
-				if left_literal
-					operand = instruction.second
-				end
+			mut operand := -1
+			if left_literal && !right_literal
+				operand = instruction.second
+			elsif right_literal && !left_literal
+				operand = instruction.first
+			end
+			if operand >= 0
 				invariant = mir_loop_call_invariant(native_module, function, flow, header, header_index, preheader, members, aliases, operand)
 			end
 		elsif ordinary_reads
