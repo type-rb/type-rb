@@ -1,0 +1,51 @@
+import { CheckedValue, checked_mir_value } from frontend/checking/body/values
+import { mir_binding_read } from mir/build/bindings
+import { mir_control_begin, mir_control_commit_signature, mir_control_return } from mir/build/control
+import { mir_checked_array_operation } from mir/lowering/arrays
+import { mir_signature_ordinary } from mir/model/call_kinds
+import { mir_op_array_load } from mir/model/instructions
+import { MirSignature } from mir/model/module
+import { CheckedLocals, locals_new } from state/local_state
+import { mir_state_enabled_slot, mir_state_failure_block_slot, mir_state_function_slot, mir_state_return_value_slot } from state/local_slots
+import { CompilerState, diagnostic } from state/state
+import { store_integer } from support/storage
+
+def mir_sort_assign(mut locals: CheckedLocals, slot: Integer, value: CheckedValue)
+	store_integer(locals.mir_values, slot, checked_mir_value(value) + 1)
+end
+
+def mir_sort_item(mut state: CompilerState, mut locals: CheckedLocals, owner: Integer, cursor: Integer, element: String, origin: Integer): CheckedValue
+	array := mir_binding_read(state, locals, owner, origin)
+	index := mir_binding_read(state, locals, cursor, origin)
+	return mir_checked_array_operation(state, locals, mir_op_array_load(), checked_mir_value(array), checked_mir_value(index), 0, element, origin)
+end
+
+def mir_sort_helper_id(state: CompilerState, name: String): Integer
+	mut callee := state.declarations.function_count[0]
+	while callee < state.scalar_mir.signatures.size()
+		signature := state.scalar_mir.signatures[callee]
+		if signature.kind == mir_signature_ordinary() && signature.name == name
+			break
+		end
+		callee += 1
+	end
+	return callee
+end
+
+def mir_sort_helper_body(callee: Integer, line: Integer): CheckedLocals
+	mut body := locals_new(32)
+	body.mir_state[mir_state_enabled_slot()] = 1
+	body.mir_state[mir_state_function_slot()] = callee
+	body.mir_state[mir_state_failure_block_slot()] = callee * 2 + 1
+	body.mir_state[mir_state_return_value_slot()] = -1
+	mir_control_begin(body, line)
+	return body
+end
+
+def mir_sort_helper_return(mut state: CompilerState, mut body: CheckedLocals, signature: MirSignature, result: CheckedValue, line: Integer)
+	mir_control_return(state, body, checked_mir_value(result))
+	error := mir_control_commit_signature(state, signature, body)
+	if error != ""
+		diagnostic(state, "TRBN4004", line, error)
+	end
+end

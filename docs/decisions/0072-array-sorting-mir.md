@@ -61,3 +61,13 @@ using its previously supported source subset; no new seed syntax is required.
 Full recovery, ordinary fixed points and target correctness remain integration
 requirements. This does not establish complete language coverage or performance
 qualification.
+
+For mixed, unkeyed Integer inputs with at least 64 elements, one typed helper shared
+by both directions checks whether the values fit in at most half the input length and at
+most 4,096 consecutive bins. It rejects wider spans before allocating counters
+or writing to the copy. Checking the width before subtracting the endpoints
+preserves the portable Integer range. For a qualifying span it counts each
+value, then fills the private result in the requested direction. This takes
+O(n + width) work and uses at most 32 KiB of counter payload. Equal Integers
+have the same value. Keyed sorting continues to preserve the distinct elements
+associated with equal keys using the stable merge.
