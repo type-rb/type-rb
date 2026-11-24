@@ -77,8 +77,8 @@ def emit_float_parse_runtime(mut output: QbeOutput)
 	qbe_output_line(output, "\n@fallback\n %fallback_value =d call $strtod(l %data, l 0)\n jmp @converted")
 	qbe_output_line(output, "\n@converted\n %value =d phi @multiply %product, @divide %quotient, @fallback %fallback_value\n %difference =d sub %value, %value\n %finite =w ceqd %difference, %difference\n jnz %finite, @success, @range")
 	qbe_output_line(output, "\n@success\n stored %value, %output\n ret 0")
-	qbe_output_line(output, "\n@invalid\n stored d_0, %output\n ret 1")
-	qbe_output_line(output, "\n@range\n stored d_0, %output\n ret 2\n}\n")
+	qbe_output_line(output, "\n@invalid\n ret 1")
+	qbe_output_line(output, "\n@range\n ret 2\n}\n")
 end
 
 def emit_number_parsing_runtime(mut output: QbeOutput)

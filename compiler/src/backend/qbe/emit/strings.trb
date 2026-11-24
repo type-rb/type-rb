@@ -79,9 +79,10 @@ def emit_mir_string_instruction(state: CompilerState, value_types: Array<Integer
 		output.runtime_flags[qbe_runtime_process_slot()] = 1
 		mut storage := "l"
 		if instruction.payload == mir_convert_string_float_status()
-			# Copy each parsed number into its own SSA value before reusing
-			# the function's stack slot for a later conversion.
+			# The parser leaves its output untouched on failure. Initialize this
+			# slot for each call and capture its value before the next conversion.
 			context.float_parse_slot_used[0] = true
+			qbe_output_line(output, "\tstored d_0, %float_parse_slot")
 			qbe_output_line(output, "\t" + result + " =l call $trbn_parse_float(l " + first + ", l %float_parse_slot)")
 			qbe_output_line(output, "\t%parsed_float" + integer_string(instruction.result) + " =d loadd %float_parse_slot")
 			return emitted_value(result, "Integer")

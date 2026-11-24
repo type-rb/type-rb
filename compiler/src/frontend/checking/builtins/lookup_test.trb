@@ -114,6 +114,7 @@ describe("MIR builtin values") do
 		expect(check(state)).to_be_true()
 		output := control_test_output(emit_qbe(state))
 		expect(output.split("l %float_parse_slot)").size()).to_equal(3)
+		expect(output.split("stored d_0, %float_parse_slot").size()).to_equal(3)
 		expect(output.split("%float_parse_slot =l alloc8 8").size()).to_equal(2)
 		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
 		if qbe != nil
