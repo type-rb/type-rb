@@ -46,9 +46,12 @@ describe("MIR invariant loop calls") do
 		expect(state.scalar_mir.loop_calls[function].size()).to_equal(2)
 		intrinsic_mir_erase(state)
 		expect(verify_mir(state.scalar_mir, true)).to_equal("")
+		output := control_test_output(emit_qbe(state))
+		expect(output.include?("%mir_loop_known")).to_be_true()
+		expect(output.include?("%mir_loop_ready")).to_be_false()
 		qbe := Process.environment("TYPE_RB_NATIVE_QBE")
 		if qbe != nil
-			case logical_run_qbe(qbe, control_test_output(emit_qbe(state)))
+			case logical_run_qbe(qbe, output)
 			when Result::Ok(actual)
 				expect(actual).to_equal("26\n2\n0\n")
 			when Result::Err(error)

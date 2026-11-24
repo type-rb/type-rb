@@ -6,7 +6,7 @@ import { emit_mir_array_cache_boundaries } from backend/qbe/emit/array_caches
 import { qbe_mir_block_label, qbe_mir_edge_label } from backend/qbe/emit/loop_peels
 import { mir_guard_clamp_bounds, mir_guard_concurrent_limit, mir_guard_enum_variant, mir_guard_slice_size } from mir/model/operation_modes
 import { mir_terminator_branch, mir_terminator_jump, mir_terminator_return } from mir/model/control
-import { mir_op_array_copy, mir_op_array_join, mir_op_array_mutate, mir_op_array_new, mir_op_array_push, mir_op_bytes_valid_utf8, mir_op_callable_new, mir_op_direct_call, mir_op_enum_compare, mir_op_enum_new, mir_op_global_read, mir_op_global_write, mir_op_guard, mir_op_hash_method, mir_op_hash_new, mir_op_indirect_call, mir_op_literal_widen, mir_op_newtype_construct, mir_op_newtype_project, mir_op_nullable_extract, mir_op_nullable_none, mir_op_object_convert, mir_op_object_new, mir_op_object_store, mir_op_puts, mir_op_range_field, mir_op_range_new, mir_op_record_field, mir_op_record_new, mir_op_singleton_literal, mir_op_string_case, mir_op_string_literal, mir_op_string_query, mir_op_string_sequence, mir_op_string_slice, mir_op_string_split, mir_op_string_to_bytes, mir_op_string_trim, mir_op_union_extract, mir_op_union_inject, mir_op_value_copy } from mir/model/instructions
+import { mir_op_array_copy, mir_op_array_join, mir_op_array_mutate, mir_op_array_new, mir_op_array_push, mir_op_bytes_valid_utf8, mir_op_callable_new, mir_op_direct_call, mir_op_enum_compare, mir_op_enum_new, mir_op_global_read, mir_op_global_write, mir_op_guard, mir_op_hash_method, mir_op_hash_new, mir_op_indirect_call, mir_op_literal_widen, mir_op_newtype_construct, mir_op_newtype_project, mir_op_nullable_extract, mir_op_nullable_none, mir_op_object_convert, mir_op_object_new, mir_op_object_store, mir_op_puts, mir_op_range_field, mir_op_range_new, mir_op_record_field, mir_op_record_new, mir_op_singleton_literal, mir_op_string_case, mir_op_string_compare, mir_op_string_literal, mir_op_string_query, mir_op_string_sequence, mir_op_string_slice, mir_op_string_split, mir_op_string_to_bytes, mir_op_string_trim, mir_op_union_extract, mir_op_union_inject, mir_op_value_copy } from mir/model/instructions
 import { mir_hash_concat_at_producer } from mir/analysis/hash_concats
 import { mir_array_join_elides, mir_join_site_present } from mir/analysis/array_joins
 import { emit_mir_bytes_instruction } from backend/qbe/emit/bytes
@@ -172,10 +172,18 @@ def emit_control_mir(state: CompilerState, function_index: Integer, result_type:
 			mut cache_complete := ""
 			loop_calls.each do |plan|
 				if plan.instruction == index
-					cache = "%mir_loop_result" + integer_string(index)
+					name := integer_string(index)
+					cache = "%mir_loop_result" + name
 					cache_complete = emit_label(context)
 					first_call := emit_label(context)
-					qbe_output_branch(output, "%mir_loop_ready" + integer_string(index), cache_complete, first_call)
+					mut ready := "%mir_loop_ready" + name
+					if instruction.kind == mir_op_string_compare()
+						# String equality and inequality produce only zero or one.
+						# A negative initial value keeps one live name per comparison.
+						ready = "%mir_loop_known" + name
+						qbe_output_line(output, "\t" + ready + " =w cnel " + cache + ", -1")
+					end
+					qbe_output_branch(output, ready, cache_complete, first_call)
 					qbe_output_line(output, first_call)
 				end
 			end
@@ -309,7 +317,9 @@ def emit_control_mir(state: CompilerState, function_index: Integer, result_type:
 			end
 			if cache != ""
 				qbe_output_line(output, "\t" + cache + " =" + qbe_type(types[instruction.result]) + " copy " + value.operand)
-				qbe_output_line(output, "\t%mir_loop_ready" + integer_string(index) + " =w copy 1")
+				if instruction.kind != mir_op_string_compare()
+					qbe_output_line(output, "\t%mir_loop_ready" + integer_string(index) + " =w copy 1")
+				end
 				qbe_output_line(output, "\tjmp " + cache_complete)
 				qbe_output_line(output, cache_complete)
 				value = emitted_value(cache, types[instruction.result])
@@ -322,14 +332,18 @@ def emit_control_mir(state: CompilerState, function_index: Integer, result_type:
 		end
 		loop_calls.each do |plan|
 			if plan.preheader == block.id
-				result := state.scalar_mir.instructions[plan.instruction].result
-				mut zero := "0"
-				if types[result] == "Float"
-					zero = "d_0"
-				end
+				instruction := state.scalar_mir.instructions[plan.instruction]
 				name := integer_string(plan.instruction)
-				qbe_output_line(output, "\t%mir_loop_ready" + name + " =w copy 0")
-				qbe_output_line(output, "\t%mir_loop_result" + name + " =" + qbe_type(types[result]) + " copy " + zero)
+				mut initial := "0"
+				if instruction.kind == mir_op_string_compare()
+					initial = "-1"
+				else
+					qbe_output_line(output, "\t%mir_loop_ready" + name + " =w copy 0")
+					if types[instruction.result] == "Float"
+						initial = "d_0"
+					end
+				end
+				qbe_output_line(output, "\t%mir_loop_result" + name + " =" + qbe_type(types[instruction.result]) + " copy " + initial)
 			end
 		end
 		emit_mir_array_headers(array_loops, block.id, operands, context, output)
