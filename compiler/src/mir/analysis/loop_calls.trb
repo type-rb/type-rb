@@ -6,9 +6,10 @@ import { mir_string_compare_equal, mir_string_compare_not_equal } from mir/model
 import { mir_effect_failure, mir_effect_none } from mir/model/effects
 import { integer_string } from support/literals
 import { MirBlock, MirFunction, MirLoopCall, MirModule, MirValue, mir_function_index } from mir/model/module
-import { MirFlow, MirFlowAliases, mir_build_flow_with_values, mir_flow_alias, mir_flow_aliases, mir_flow_blocks, mir_flow_definition_block, mir_flow_dominates, mir_flow_parameter_slot, mir_flow_position, mir_flow_type } from mir/analysis/flow
+import { MirFlow, MirFlowAliases, mir_build_flow_with_values, mir_flow_alias, mir_flow_aliases, mir_flow_blocks, mir_flow_dominates, mir_flow_parameter_slot, mir_flow_position, mir_flow_type, mir_value_available } from mir/analysis/flow
 import { mir_instruction_effects } from mir/analysis/call_effects
 import { mir_live_add } from mir/analysis/liveness
+import { mir_natural_loop } from mir/analysis/loops
 import { mir_numeric_blocks } from mir/analysis/numeric
 
 # The first successful call stays at its original position. Only scalar results
@@ -33,7 +34,7 @@ def mir_loop_call_candidate(native_module: MirModule, position: Integer, flow: M
 	return mir_function_index(native_module, call.callee) >= 0
 end
 
-def mir_loop_call_invariant(native_module: MirModule, function: MirFunction, flow: MirFlow, header: MirBlock, header_index: Integer, preheader: Integer, members: Hash<String, Integer>, aliases: MirFlowAliases, argument: Integer): Boolean
+def mir_loop_call_invariant(native_module: MirModule, flow: MirFlow, header: MirBlock, header_index: Integer, preheader: MirBlock, aliases: MirFlowAliases, argument: Integer): Boolean
 	identity := mir_flow_alias(aliases, argument)
 	if identity < 0
 		return false
@@ -53,18 +54,8 @@ def mir_loop_call_invariant(native_module: MirModule, function: MirFunction, flo
 		end
 		return true
 	end
-	mut index := function.parameter_start
-	while index < function.parameter_start + function.parameter_count
-		if native_module.arguments[index] == identity
-			return true
-		end
-		index += 1
-	end
-	owner := mir_flow_definition_block(flow, identity)
-	if owner < 0 || members.key?(integer_string(owner))
-		return false
-	end
-	return mir_flow_dominates(flow, owner, preheader)
+	# A value already available before entry cannot be defined inside the loop.
+	return mir_value_available(flow, preheader, preheader.instruction_start + preheader.instruction_count, identity)
 end
 
 # A literal has the same immutable bytes when rematerialized inside the loop.
@@ -82,51 +73,19 @@ end
 
 def mir_loop_calls_at_header(native_module: MirModule, function: MirFunction, flow: MirFlow, header_index: Integer, has_comparison: Boolean): Array<MirLoopCall>
 	mut plans: Array<MirLoopCall> := []
-	if flow.ranks[header_index] < 0
+	loop := mir_natural_loop(native_module, function, flow, header_index)
+	if loop.preheader < 0
 		return plans
 	end
 	header := native_module.blocks[function.block_start + header_index]
-	mut preheader := -1
-	mut pending: Array<Integer> := []
-	flow.predecessors[header_index].each do |previous|
-		if mir_flow_dominates(flow, header_index, previous)
-			pending.push(previous)
-		else
-			if preheader != -1 || native_module.blocks[function.block_start + previous].terminator != mir_terminator_jump()
-				preheader = -2
-			else
-				preheader = previous
-			end
-		end
-	end
-	if preheader < 0 || pending.size() == 0
-		return plans
-	end
-	mut members: Hash<String, Integer> := {}
-	members[integer_string(header_index)] = 1
-	mut ordered := [header_index]
-	mut cursor := 0
-	while cursor < pending.size()
-		current := pending[cursor]
-		cursor += 1
-		if !members.key?(integer_string(current))
-			if !mir_flow_dominates(flow, header_index, current)
-				return plans
-			end
-			members[integer_string(current)] = 1
-			ordered.push(current)
-			flow.predecessors[current].each do |previous|
-				pending.push(previous)
-			end
-		end
-	end
+	preheader := native_module.blocks[function.block_start + loop.preheader]
 	# Even a write to a different operand can alias a callee's readable state.
 	# Screen every backedge path before reusing an ordinary call result.
 	mut ordinary_reads := true
 	mut candidates: Array<Integer> := []
 	mut member := 0
-	while member < ordered.size()
-		block := native_module.blocks[function.block_start + ordered[member]]
+	while member < loop.members.size()
+		block := native_module.blocks[function.block_start + loop.members[member]]
 		mut position := block.instruction_start
 		while position < block.instruction_start + block.instruction_count
 			instruction := native_module.instructions[position]
@@ -169,21 +128,21 @@ def mir_loop_calls_at_header(native_module: MirModule, function: MirFunction, fl
 				operand = instruction.first
 			end
 			if operand >= 0
-				invariant = mir_loop_call_invariant(native_module, function, flow, header, header_index, preheader, members, aliases, operand)
+				invariant = mir_loop_call_invariant(native_module, flow, header, header_index, preheader, aliases, operand)
 			end
 		elsif ordinary_reads
 			call := native_module.calls[instruction.payload]
 			invariant = true
 			mut argument := call.argument_start
 			while argument < call.argument_start + call.argument_count
-				if !mir_loop_call_invariant(native_module, function, flow, header, header_index, preheader, members, aliases, native_module.arguments[argument])
+				if !mir_loop_call_invariant(native_module, flow, header, header_index, preheader, aliases, native_module.arguments[argument])
 					invariant = false
 				end
 				argument += 1
 			end
 		end
 		if invariant
-			plans.push(MirLoopCall.new(header: header.id, preheader: native_module.blocks[function.block_start + preheader].id, instruction: position))
+			plans.push(MirLoopCall.new(header: header.id, preheader: preheader.id, instruction: position))
 		end
 	end
 	return plans
