@@ -15,11 +15,12 @@ decoded = '\n'.join(json.loads(s) for s in re.findall(r'"(?:[^"\\]|\\.)*"', sour
 data = re.findall(r'^data \$trbn_array_backing_cache = [^\n]+', decoded, re.M)
 assert len(data) == 1
 bodies = ['export ' + data[0]]
-for name in ['trbn_array_backing_new', 'trbn_array_backing_release', 'trbn_array_backing_flush']:
+for name in ['trbn_array_backing_new', 'trbn_array_backing_grow', 'trbn_array_backing_release',
+             'trbn_array_backing_free_chain', 'trbn_array_backing_flush']:
     matches = re.findall(r'^function (?:l )?\$' + name + r'\([^\n]*\) \{.*?^\}', decoded, re.M | re.S)
     assert len(matches) == 1, name
     bodies.append('export ' + matches[0].replace('call $calloc(', 'call $observe_calloc(')
-                  .replace('call $free(', 'call $observe_free('))
+                  .replace('call $free(', 'call $observe_free(').replace('call $realloc(', 'call $observe_realloc('))
 
 observer = r'''
 #include <assert.h>
@@ -30,7 +31,8 @@ observer = r'''
 extern void *trbn_array_backing_new(void);
 extern void trbn_array_backing_release(void *, int64_t);
 extern void trbn_array_backing_flush(void);
-extern uintptr_t trbn_array_backing_cache[2];
+extern void *trbn_array_backing_grow(void *, int64_t, int64_t);
+extern uintptr_t trbn_array_backing_cache[3];
 enum { CAP = 8192, EXTRA = 37, TOTAL = CAP + EXTRA };
 static void *blocks[TOTAL];
 static size_t allocated, released;
@@ -39,6 +41,9 @@ void *observe_calloc(size_t count, size_t width) {
     assert(count == 4 && width == 8);
     if (fail) return NULL;
     void *p = calloc(count, width); assert(p); ++allocated; return p;
+}
+void *observe_realloc(void *p, size_t size) {
+    return fail ? NULL : realloc(p, size);
 }
 void observe_free(void *p) { assert(p); ++released; free(p); }
 static void zero(void *p) {
@@ -87,12 +92,30 @@ int main(void) {
     trbn_array_backing_release(p, 4);
     uint64_t *reused = trbn_array_backing_new(); assert(reused == p); zero(reused);
     for (unsigned i = 0; i < 4; ++i) reused[i] = UINT64_C(0x1234567800000000) + i;
-    uint64_t *grown = realloc(reused, 128); assert(grown);
+    fail = 1;
+    assert(!trbn_array_backing_grow(reused, 4, 128));
+    fail = 0;
+    uint64_t *grown = trbn_array_backing_grow(reused, 4, 128); assert(grown);
     for (unsigned i = 0; i < 4; ++i) assert(grown[i] == UINT64_C(0x1234567800000000) + i);
     trbn_array_backing_release(grown, 16);
-    assert(!trbn_array_backing_cache[0] && allocated == released);
+    assert(trbn_array_backing_cache[1] == 4 && trbn_array_backing_cache[2] == (uintptr_t)grown);
+    uint64_t *small = trbn_array_backing_new(); zero(small);
+    for (unsigned i = 0; i < 4; ++i) small[i] = i + 100;
+    fail = 1;
+    assert(!trbn_array_backing_grow(small, 4, 64)); /* Other growth still needs realloc. */
+    uint64_t *cached = trbn_array_backing_grow(small, 4, 128);
+    assert(cached == grown && trbn_array_backing_cache[1] == 1);
+    for (unsigned i = 0; i < 4; ++i) assert(cached[i] == i + 100);
+    uint64_t *again = trbn_array_backing_new(); zero(again);
+    assert(again == small && cached != again);
+    trbn_array_backing_release(again, 4);
+    trbn_array_backing_release(cached, 16);
+    trbn_array_backing_flush();
+    assert(!trbn_array_backing_cache[0] && !trbn_array_backing_cache[1] && !trbn_array_backing_cache[2]);
+    assert(allocated == released);
+    fail = 0;
     /* All uncached capacities take the normal release path. */
-    int64_t capacities[] = {0, 1, 2, 3, 5, 8, 16, 256};
+    int64_t capacities[] = {0, 1, 2, 3, 5, 8, 15, 17, 256};
     for (unsigned i = 0; i < sizeof capacities / sizeof *capacities; ++i) {
         void *data = calloc((size_t)capacities[i] + 1, 8); assert(data); ++allocated;
         trbn_array_backing_release(data, capacities[i]);
@@ -108,8 +131,18 @@ int main(void) {
     for (unsigned i = 0; i < 100; ++i) trbn_array_backing_release(blocks[i], 4);
     empty();
     for (unsigned i = 0; i < TOTAL; ++i) blocks[i] = trbn_array_backing_new();
-    for (unsigned i = 0; i < TOTAL; ++i) trbn_array_backing_release(blocks[i], 4);
-    assert(trbn_array_backing_cache[1] == CAP);
+    for (unsigned i = 0; i < CAP - 4; ++i) trbn_array_backing_release(blocks[i], 4);
+    void *last_large = malloc(128); assert(last_large); ++allocated;
+    trbn_array_backing_release(last_large, 16); /* Fits the remaining four units. */
+    assert(trbn_array_backing_cache[1] == CAP && trbn_array_backing_cache[2] == (uintptr_t)last_large);
+    for (unsigned i = CAP - 4; i < TOTAL; ++i) trbn_array_backing_release(blocks[i], 4);
+    void *one = trbn_array_backing_new(); zero(one);
+    assert(trbn_array_backing_cache[1] == CAP - 1);
+    void *large = malloc(128); assert(large); ++allocated;
+    size_t old_released = released;
+    trbn_array_backing_release(large, 16); /* One remaining unit is insufficient. */
+    assert(released == old_released + 1 && trbn_array_backing_cache[2] == (uintptr_t)last_large);
+    observe_free(one);
     trbn_array_backing_flush();
     assert(!trbn_array_backing_cache[0] && !trbn_array_backing_cache[1]);
     assert(allocated == released);

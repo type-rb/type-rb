@@ -22,7 +22,8 @@ with tempfile.TemporaryDirectory(prefix='native-storage-emission-') as temporary
 
 bodies = []
 for name in ['trbn_storage_alloc', 'trbn_storage_free', 'trbn_storage_insert',
-             'trbn_storage_unlink', 'trbn_array_backing_new', 'trbn_array_backing_release', 'trbn_array_backing_flush',
+             'trbn_storage_unlink', 'trbn_array_backing_new', 'trbn_array_backing_release',
+             'trbn_array_backing_free_chain', 'trbn_array_backing_flush',
              'trbn_gc_sweep', 'trbn_gc_mark', 'trbn_gc_enqueue', 'trbn_gc_mark_grow', 'trbn_gc_scan_fixed', 'trbn_gc_scan_array']:
     matches = re.findall(r'^function (?:l )?\$' + name + r'\([^\n]*\) \{.*?^\}', decoded, re.M | re.S)
     assert len(matches) == 1, name
@@ -56,7 +57,7 @@ extern void trbn_gc_mark(void *);
 extern void *trbn_array_backing_new(void);
 extern void trbn_array_backing_release(void *, int64_t);
 extern void trbn_array_backing_flush(void);
-extern uintptr_t trbn_array_backing_cache[2];
+extern uintptr_t trbn_array_backing_cache[3];
 void trbn_fatal(const void *message, int64_t bytes) { (void)message; (void)bytes; abort(); }
 void *trbn_gc_heap;
 int64_t trbn_gc_heap_bytes, trbn_gc_reclaimed_bytes;
@@ -205,7 +206,7 @@ int main(void) {
     }
     assert(trbn_array_backing_cache[1] == 2);
     trbn_array_backing_flush();
-    assert(!trbn_array_backing_cache[0] && !trbn_array_backing_cache[1]);
+    assert(!trbn_array_backing_cache[0] && !trbn_array_backing_cache[1] && !trbn_array_backing_cache[2]);
     puts("Mixed-object sweep, backing reuse, cyclic roots and accounting passed");
 }
 '''
