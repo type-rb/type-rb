@@ -3,6 +3,9 @@
 The v0.5 alpha installs this compiler as `trb`. Development builds in this
 repository also provide the `trbn` launcher.
 
+Run `trb -v` or `trb --version` to see the installed compiler version. An
+interactive REPL shows the same version at startup.
+
 `trbn` is TypeRB Native's command-line executable. Its default mode is
 `trb`, including a standalone file, a configuration without `mode`, and the
 REPL. An explicit configuration mode is authoritative. `go`, `ruby`, and
