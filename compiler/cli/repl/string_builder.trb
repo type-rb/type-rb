@@ -1,5 +1,5 @@
 import { compiler_literal_byte } from frontend/syntax/string_escapes
-import { builder_append, builder_append_bytes, builder_append_codepoint, builder_clear, builder_empty, builder_from_string, builder_length, builder_new } from mir/model/string_builder_contract
+import { builder_append, builder_append_bytes, builder_snapshot_bytes, builder_append_codepoint, builder_clear, builder_empty, builder_from_string, builder_length, builder_new } from mir/model/string_builder_contract
 import { ReplStore, repl_boolean, repl_integer, repl_string, repl_value } from repl/model
 import { native_cli_byte_length, native_cli_byte, native_cli_character } from host
 
@@ -19,6 +19,21 @@ def repl_builder_append(mut store: ReplStore, receiver: Integer, text: Integer)
 	end
 end
 
+def repl_builder_byte_span(mut store: ReplStore, bytes: String, start: Integer, finish: Integer): Integer
+	if start < 0 || finish < start || finish > native_cli_byte_length(bytes)
+		store.error[0] = "StringBuilder byte range is out of bounds"
+		return 0
+	end
+	# Preserve raw octets until joining, including split UTF-8 fragments.
+	mut index := start
+	mut fragments: Array<String> := []
+	while index < finish
+		fragments.push(compiler_literal_byte(native_cli_byte(bytes, index)))
+		index += 1
+	end
+	return repl_string(store, fragments.join(""))
+end
+
 def repl_builder_call(mut store: ReplStore, kind: Integer, arguments: Array<Integer>): Integer
 	if kind == builder_new()
 		return repl_value(store, "StringBuilder", 0, 0.0, "", [])
@@ -28,23 +43,13 @@ def repl_builder_call(mut store: ReplStore, kind: Integer, arguments: Array<Inte
 		return created
 	end
 	receiver := arguments[0]
-	if kind == builder_append_bytes()
-		bytes := store.texts[arguments[1]]
-		start := store.integers[arguments[2]]
-		finish := store.integers[arguments[3]]
-		if start < 0 || finish < start || finish > native_cli_byte_length(bytes)
-			store.error[0] = "StringBuilder byte range is out of bounds"
-			return 0
+	if kind == builder_snapshot_bytes()
+		return repl_builder_byte_span(store, store.texts[arguments[0]], store.integers[arguments[1]], store.integers[arguments[2]])
+	elsif kind == builder_append_bytes()
+		text := repl_builder_byte_span(store, store.texts[arguments[1]], store.integers[arguments[2]], store.integers[arguments[3]])
+		if store.error[0] == ""
+			repl_builder_append(store, receiver, text)
 		end
-		# Preserve raw octets until joining, including split UTF-8 fragments.
-		mut index := start
-		mut fragments: Array<String> := []
-		while index < finish
-			fragments.push(compiler_literal_byte(native_cli_byte(bytes, index)))
-			index += 1
-		end
-		text := repl_string(store, fragments.join(""))
-		repl_builder_append(store, receiver, text)
 		return 0
 	elsif kind == builder_append()
 		repl_builder_append(store, receiver, arguments[1])

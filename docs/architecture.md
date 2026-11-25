@@ -376,10 +376,11 @@ used-byte count. Capacity belongs to private byte storage and is never exposed
 as an immutable String. Appends root the owner and source across geometric
 growth; snapshots copy initialized bytes and compute Unicode length after
 joining fragments. Clearing retains at most the initial small buffer and drops
-larger backing storage. JSON parsing reuses one such scratch builder, clearing it
-after each independent string snapshot. The JSON implementation alone may load the checked byte-span
-adapter. MIR independently verifies its argument and mutation contract, while
-the runtime checks byte bounds before copying.
+larger backing storage. JSON decoding reuses a scratch builder for string
+fragments. Number tokens and diagnostic text copy a range of the original
+input directly into an independent String. Only the JSON implementation can
+load these byte-range operations. MIR verifies their argument and mutation
+contracts. The runtime checks the bounds and roots the source across allocation.
 
 Managed snapshot recovery uses an exact-root, non-moving tracing collector for dynamic Strings,
 Arrays, closures, and recursively reference-containing aggregates.

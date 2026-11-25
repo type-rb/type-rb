@@ -1,7 +1,19 @@
-import { builder_adapter_start, builder_names } from mir/model/string_builder_contract
+import { builder_kind } from mir/model/string_builder_contract
 import { mir_signature_standard } from mir/model/call_kinds
 import { MirModule } from mir/model/module
 import { QbeOutput, qbe_output_line } from backend/qbe/output
+
+def emit_builder_range_check(mut output: QbeOutput)
+	qbe_output_line(output, " %lengthp =l add %bytes, 8\n")
+	qbe_output_line(output, " %length =l loadl %lengthp\n")
+	qbe_output_line(output, " %ordered =w culel %start, %finish\n")
+	qbe_output_line(output, " %within =w culel %finish, %length\n")
+	qbe_output_line(output, " %valid =w and %ordered, %within\n")
+	qbe_output_line(output, " jnz %valid, @valid, @fail\n")
+	qbe_output_line(output, "@fail\n")
+	qbe_output_line(output, " call $trbn_fail(l $trbn_builder_range_error, l 49)\n")
+	qbe_output_line(output, " hlt\n")
+end
 
 # A builder owns a traced backing allocation and an exact used-byte length.
 # Backing storage uses the existing variable byte-allocation descriptor with
@@ -11,7 +23,7 @@ import { QbeOutput, qbe_output_line } from backend/qbe/output
 def emit_string_builder_runtime(native_module: MirModule, mut output: QbeOutput)
 	mut needed := false
 	native_module.signatures.each do |signature|
-		if signature.kind == mir_signature_standard() && signature.adapter >= builder_adapter_start() && signature.adapter < builder_adapter_start() + builder_names().size()
+		if signature.kind == mir_signature_standard() && builder_kind(signature.adapter) >= 0
 			needed = true
 		end
 	end
@@ -128,19 +140,26 @@ def emit_string_builder_runtime(native_module: MirModule, mut output: QbeOutput)
 	qbe_output_line(output, "data $trbn_builder_range_error = { b \"panic: StringBuilder byte range is out of bounds\", b 10 }\n")
 	qbe_output_line(output, "function $trbn_builder_append_bytes(l %builder, l %bytes, l %start, l %finish) {\n")
 	qbe_output_line(output, "@start\n")
-	qbe_output_line(output, " %lengthp =l add %bytes, 8\n")
-	qbe_output_line(output, " %length =l loadl %lengthp\n")
-	qbe_output_line(output, " %ordered =w culel %start, %finish\n")
-	qbe_output_line(output, " %within =w culel %finish, %length\n")
-	qbe_output_line(output, " %valid =w and %ordered, %within\n")
-	qbe_output_line(output, " jnz %valid, @append, @fail\n")
-	qbe_output_line(output, "@fail\n")
-	qbe_output_line(output, " call $trbn_fail(l $trbn_builder_range_error, l 49)\n")
-	qbe_output_line(output, " hlt\n")
-	qbe_output_line(output, "@append\n")
+	emit_builder_range_check(output)
+	qbe_output_line(output, "@valid\n")
 	qbe_output_line(output, " %count =l sub %finish, %start\n")
 	qbe_output_line(output, " call $trbn_builder_append_span(l %builder, l %bytes, l %start, l %count)\n")
 	qbe_output_line(output, " ret\n")
+	qbe_output_line(output, "}\n")
+
+	# Keep the Bytes owner alive while allocating the independent String.
+	qbe_output_line(output, "function l $trbn_builder_snapshot_bytes(l %bytes, l %start, l %finish) {\n")
+	qbe_output_line(output, "@start\n")
+	emit_builder_range_check(output)
+	qbe_output_line(output, "@valid\n")
+	qbe_output_line(output, " %roots =l loadl $trbn_gc_temp_count\n")
+	qbe_output_line(output, " call $trbn_gc_temp_push(l %bytes)\n")
+	qbe_output_line(output, " %data =l add %bytes, 24\n")
+	qbe_output_line(output, " %begin =l add %data, %start\n")
+	qbe_output_line(output, " %count =l sub %finish, %start\n")
+	qbe_output_line(output, " %result =l call $trbn_string_from_bytes(l %begin, l %count)\n")
+	qbe_output_line(output, " storel %roots, $trbn_gc_temp_count\n")
+	qbe_output_line(output, " ret %result\n")
 	qbe_output_line(output, "}\n")
 	qbe_output_line(output, "\n")
 	qbe_output_line(output, "function l $trbn_builder_from_string(l %value) {\n")

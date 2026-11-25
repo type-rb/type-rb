@@ -5,7 +5,7 @@ import { scoped_call_failures, scoped_call_graph, scoped_call_node } from mir/an
 import { mir_adapter_runtime_fail, mir_signature_ordinary, mir_signature_standard } from mir/model/call_kinds
 import { mir_function_fixture } from mir/model/control
 import { mir_op_direct_call, mir_op_indirect_call } from mir/model/instructions
-import { builder_adapter_start, builder_append_bytes } from mir/model/string_builder_contract
+import { builder_kind } from mir/model/string_builder_contract
 import { mir_type_composite_start } from mir/model/type_ids
 import { MirModule, MirSignature } from mir/model/module
 
@@ -32,7 +32,7 @@ def mir_resource_standard_call(signature: MirSignature): Boolean
 	if process_kind(signature.adapter) >= 0 || signature.adapter == mir_adapter_runtime_fail()
 		return true
 	end
-	if signature.adapter >= builder_adapter_start() && signature.adapter <= builder_adapter_start() + builder_append_bytes()
+	if builder_kind(signature.adapter) >= 0
 		return true
 	end
 	return false

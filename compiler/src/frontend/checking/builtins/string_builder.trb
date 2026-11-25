@@ -1,4 +1,4 @@
-import { builder_adapter_start, builder_method, builder_mutates, builder_parameters, builder_result, builder_signature_name } from mir/model/string_builder_contract
+import { builder_adapter, builder_method, builder_mutates, builder_parameters, builder_result, builder_signature_name } from mir/model/string_builder_contract
 import { mir_signature_standard } from mir/model/call_kinds
 import { MirSignature } from mir/model/module
 import { mir_semantic_type_id } from mir/model/types
@@ -11,7 +11,7 @@ import { load_integer } from support/storage
 # Frontend mutability checks precede this shared verified call boundary.
 def mir_builder_call(mut state: CompilerState, mut locals: CheckedLocals, method: String, arguments: Array<Integer>, origin: Integer): CheckedValue
 	kind := builder_method(method)
-	adapter := builder_adapter_start() + kind
+	adapter := builder_adapter(kind)
 	mut callee := state.declarations.function_count[0]
 	while callee < state.scalar_mir.signatures.size()
 		if state.scalar_mir.signatures[callee].kind == mir_signature_standard() && state.scalar_mir.signatures[callee].adapter == adapter

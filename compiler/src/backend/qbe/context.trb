@@ -5,6 +5,7 @@ record QbeEmitContext
 	temporary_count: Array<Integer>
 	label_count: Array<Integer>
 	integer_range_failure_used: Array<Boolean>
+	float_parse_slot_used: Array<Boolean>
 	enum_stack_type: Array<Integer>
 end
 
@@ -14,7 +15,7 @@ record QbeValue
 end
 
 def emit_context_new(): QbeEmitContext
-	return QbeEmitContext.new(temporary_count: [0], label_count: [0], integer_range_failure_used: [false], enum_stack_type: [0])
+	return QbeEmitContext.new(temporary_count: [0], label_count: [0], integer_range_failure_used: [false], float_parse_slot_used: [false], enum_stack_type: [0])
 end
 
 def emitted_value(operand: String, type_name: String): QbeValue

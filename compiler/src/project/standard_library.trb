@@ -411,7 +411,7 @@ def standard_source_text(kind: Integer): String
 		return "module SecureCompare\nend\ndef equal(left: Bytes, right: Bytes): Boolean\nend\n"
 	end
 	if kind == standard_source_string_builder_storage()
-		return "module StringBuilderStorage\nend\ndef append_bytes(mut builder: StringBuilder, bytes: Bytes, start: Integer, finish: Integer)\nend\n"
+		return "module StringBuilderStorage\nend\ndef append_bytes(mut builder: StringBuilder, bytes: Bytes, start: Integer, finish: Integer)\nend\ndef snapshot_bytes(bytes: Bytes, start: Integer, finish: Integer): String\nend\n"
 	end
 	if kind == standard_source_string_builder()
 		return "module StringBuilder\nend\ndef new(): StringBuilder\nend\ndef from_string(value: String): StringBuilder\nend\n"

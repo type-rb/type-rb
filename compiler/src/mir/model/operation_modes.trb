@@ -36,6 +36,12 @@ def mir_convert_string_float_status(): Integer
 	return 8
 end
 
+# Obtain the numeric payload of a checked Float parse. Failed parses carry
+# zero; the existing status distinguishes invalid input from range errors.
+def mir_convert_parsed_float(): Integer
+	return 9
+end
+
 # puts
 
 def mir_puts_scalar_mode(): Integer

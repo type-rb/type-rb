@@ -53,16 +53,6 @@ def _byte(parser: JsonParser): Integer
 	return parser.bytes.at(parser.position)
 end
 
-# Preserve byte offsets until the complete span has been copied.
-def _source_slice(mut parser: JsonParser, start: Integer, finish: Integer): String
-	mut builder := parser.string_buffer
-	builder.clear()
-	BuilderStorage.append_bytes(builder, parser.bytes, start, finish)
-	text := builder.to_s()
-	builder.clear()
-	return text
-end
-
 # Leave the cursor on the next token and return the byte that stopped the scan.
 def _next_token_byte(mut parser: JsonParser): Integer
 	bytes := parser.bytes
@@ -219,7 +209,7 @@ def _bad(mut parser: JsonParser, context: String)
 		_syntax(parser, "unexpected EOF", -1)
 	else
 		width := _byte_width(parser.bytes, parser.position, parser.bytes.size())
-		character := _source_slice(parser, parser.position, parser.position + width)
+		character := BuilderStorage.snapshot_bytes(parser.bytes, parser.position, parser.position + width)
 		_syntax(parser, "invalid character " + _quoted(character) + " " + context, parser.position + width - 1)
 	end
 end
@@ -311,7 +301,7 @@ def _unicode(mut parser: JsonParser): Integer
 	end
 	if !valid || count != 4
 		# Successful escapes need only the code point, not a diagnostic String.
-		sequence := "\\u" + _source_slice(parser, start, parser.position)
+		sequence := "\\u" + BuilderStorage.snapshot_bytes(parser.bytes, start, parser.position)
 		_syntax(parser, "invalid escape sequence " + _escape_diagnostic(sequence) + " in string", parser.position - 1)
 		return -1
 	end
@@ -507,7 +497,7 @@ def _number(mut parser: JsonParser, first: Integer): JsonNode
 		end
 		return JsonNode::PortableInteger(integer)
 	end
-	return JsonNode::Number(_source_slice(parser, start, parser.position))
+	return JsonNode::Number(BuilderStorage.snapshot_bytes(parser.bytes, start, parser.position))
 end
 
 def _literal(mut parser: JsonParser, literal: String)

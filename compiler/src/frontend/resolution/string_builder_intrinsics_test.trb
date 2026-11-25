@@ -108,7 +108,7 @@ describe("StringBuilder ownership and MIR") do
 end
 
 def builder_span_test_state(): CompilerState
-	source := "import trb/std/string_builder\nimport trb/internal/string_builder_storage as Storage\ndef main()\nmut writer := StringBuilder.new()\nStorage.append_bytes(writer, \"abc\".to_bytes(), 1, 3)\nputs(writer.to_s())\nend\n"
+	source := "import trb/std/string_builder\nimport trb/internal/string_builder_storage as Storage\ndef main()\nmut writer := StringBuilder.new()\nStorage.append_bytes(writer, \"abc\".to_bytes(), 1, 3)\nputs(writer.to_s())\nputs(Storage.snapshot_bytes(\"abcd\".to_bytes(), 1, 3))\nend\n"
 	mut state := compiler_new(1048576)
 	expect_compiler_phase(state, "lex", lex(state, source))
 	store_integer(state.standard_modules, 0, standard_source_internal_json())
@@ -132,6 +132,7 @@ describe("StringBuilder private byte spans") do
 		expect(verify_mir(state.scalar_mir, true)).to_equal("")
 		before := control_test_output(emit_qbe(state))
 		expect(before.include?("call $trbn_builder_append_bytes")).to_be_true()
+		expect(before.include?("call $trbn_builder_snapshot_bytes")).to_be_true()
 		intrinsic_mir_erase(state)
 		expect(control_test_output(emit_qbe(state))).to_equal(before)
 	end

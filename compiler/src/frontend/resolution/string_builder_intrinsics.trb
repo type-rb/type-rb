@@ -1,5 +1,5 @@
 import { standard_source_string_builder, standard_source_string_builder_storage } from state/standard_source_kinds
-import { builder_append_bytes, builder_from_string, builder_mutates, builder_new, builder_parameter_names, builder_parameters, builder_result } from mir/model/string_builder_contract
+import { builder_append_bytes, builder_from_string, builder_mutates, builder_new, builder_parameter_names, builder_parameters, builder_result, builder_snapshot_bytes } from mir/model/string_builder_contract
 import { CompilerState } from state/state
 import { load_integer, load_string, sparse_integer_at } from support/storage
 
@@ -19,8 +19,12 @@ def standard_string_builder(state: CompilerState, function: Integer): Integer
 		elsif name == "from_string"
 			kind = builder_from_string()
 		end
-	elsif source == standard_source_string_builder_storage() && name == "append_bytes"
-		kind = builder_append_bytes()
+	elsif source == standard_source_string_builder_storage()
+		if name == "append_bytes"
+			kind = builder_append_bytes()
+		elsif name == "snapshot_bytes"
+			kind = builder_snapshot_bytes()
+		end
 	end
 	if kind < 0
 		return -1

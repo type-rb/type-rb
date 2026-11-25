@@ -1,4 +1,4 @@
-import { mir_convert_boolean_to_string, mir_convert_float_to_integer, mir_convert_float_to_string, mir_convert_string_float_status, mir_convert_string_integer_status, mir_convert_string_to_float, mir_convert_string_to_integer, mir_puts_any_mode, mir_string_compare_before, mir_string_compare_not_equal, mir_string_sequence_reverse } from mir/model/operation_modes
+import { mir_convert_boolean_to_string, mir_convert_float_to_integer, mir_convert_float_to_string, mir_convert_parsed_float, mir_convert_string_float_status, mir_convert_string_integer_status, mir_convert_string_to_float, mir_convert_string_to_integer, mir_puts_any_mode, mir_string_compare_before, mir_string_compare_not_equal, mir_string_sequence_reverse } from mir/model/operation_modes
 import { qbe_runtime_boolean_output_slot, qbe_runtime_float_string_slot, qbe_runtime_process_slot } from backend/qbe/runtime_slots
 import { mir_type_boolean } from mir/model/type_ids
 import { mir_op_array_join, mir_op_puts, mir_op_scalar_conversion, mir_op_string_case, mir_op_string_compare, mir_op_string_index, mir_op_string_literal, mir_op_string_query, mir_op_string_replace, mir_op_string_sequence, mir_op_string_size, mir_op_string_slice, mir_op_string_split, mir_op_string_trim } from mir/model/instructions
@@ -78,6 +78,17 @@ def emit_mir_string_instruction(state: CompilerState, value_types: Array<Integer
 	elsif kind == mir_op_scalar_conversion()
 		output.runtime_flags[qbe_runtime_process_slot()] = 1
 		mut storage := "l"
+		if instruction.payload == mir_convert_string_float_status()
+			# The parser leaves its output untouched on failure. Initialize this
+			# slot for each call and capture its value before the next conversion.
+			context.float_parse_slot_used[0] = true
+			qbe_output_line(output, "\tstored d_0, %float_parse_slot")
+			qbe_output_line(output, "\t" + result + " =l call $trbn_parse_float(l " + first + ", l %float_parse_slot)")
+			qbe_output_line(output, "\t%parsed_float" + integer_string(instruction.result) + " =d loadd %float_parse_slot")
+			return emitted_value(result, "Integer")
+		elsif instruction.payload == mir_convert_parsed_float()
+			return emitted_value("%parsed_float" + integer_string(instruction.first), "Float")
+		end
 		mut conversion := "$trbn_integer_to_string(l "
 		if instruction.payload == mir_convert_string_to_integer()
 			conversion = "$trbn_string_to_integer(l "
@@ -95,8 +106,6 @@ def emit_mir_string_instruction(state: CompilerState, value_types: Array<Integer
 			storage = "d"
 		elsif instruction.payload == mir_convert_string_integer_status()
 			conversion = "$trbn_string_integer_status(l "
-		elsif instruction.payload == mir_convert_string_float_status()
-			conversion = "$trbn_string_float_status(l "
 		end
 		qbe_output_line(output, "\t" + result + " =" + storage + " call " + conversion + first + ")")
 	else
