@@ -14,7 +14,11 @@ TypeScript source workflows and is maintained in
 [type-rb/type-rb-go](https://github.com/type-rb/type-rb-go).
 
 - [Getting started](docs/getting-started.md)
+- [Language guide](docs/language.md)
+- [Language specification](docs/specification.md)
 - [Native commands and build modes](docs/native-cli.md)
+- [Native performance results](https://type-rb.github.io/type-rb-native/benchmarks/)
+- [Native capability map and coverage](https://type-rb.github.io/type-rb-native/)
 - [Changelog](CHANGELOG.md)
 - [v0.5 transition and shared contract](docs/native-transition.md)
 - [Contributing to the Native compiler](CONTRIBUTING.md)
