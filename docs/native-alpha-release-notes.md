@@ -1,12 +1,17 @@
-TypeRB v0.5.0-alpha.1 introduces Native as the default compiler on Arm64 macOS
-and Linux. The archives contain `trb`, QBE, and the libraries used to build
+TypeRB v0.5.0-alpha.2 adds the `trb -v` shortcut and fixes the version shown
+at startup in the Native REPL. Native also reduces temporary allocations in
+JSON number parsing, JSON string encoding and selected String, Array, and
+Hash operations.
+
+Native remains the default compiler on Arm64 macOS and Linux.
+The archives contain `trb`, QBE, and the libraries used to build
 Native applications. Building Native executables uses the system C toolchain.
 Keep the libraries and QBE alongside the binary when extracting an archive.
 
 After the Homebrew tap update, use `brew install type-rb/tap/trb` or
 `brew upgrade type-rb/tap/trb`. Install `type-rb/tap/trbg` alongside it for
 Go, Ruby, and TypeScript source workflows. The
-[same-version Go companion](https://github.com/type-rb/type-rb-go/releases/tag/v0.5.0-alpha.1)
+[same-version Go companion](https://github.com/type-rb/type-rb-go/releases/tag/v0.5.0-alpha.2)
 supports Arm64 and x86-64 on macOS and Linux.
 
 This alpha supports Native executable builds, a typed REPL, Native project

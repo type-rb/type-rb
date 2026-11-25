@@ -27,7 +27,7 @@ brew install type-rb/tap/trbg
 trbg --version
 ```
 
-Both commands can be installed together. See the [alpha release](https://github.com/type-rb/type-rb/releases/tag/v0.5.0-alpha.1)
+Both commands can be installed together. See the [alpha release](https://github.com/type-rb/type-rb/releases/tag/v0.5.0-alpha.2)
 for platform archives and known feature gaps.
 
 ## Run a standalone program

@@ -352,7 +352,7 @@ def native_cli_main(): Integer
 	if command == "help"
 		return cli_usage()
 	end
-	version := "0.5.0-alpha.1"
+	version := "0.5.0-alpha.2"
 	if command == "version"
 		puts(cli_name() + " " + version + " (development; default mode: trb)")
 		return 0

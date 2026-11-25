@@ -3,7 +3,7 @@
 TypeRB is a statically typed language with a TypeRB-authored Native compiler.
 The v0.5 alpha series introduces Native as the default implementation.
 
-| Command | Homebrew | Platforms in alpha.1 |
+| Command | Homebrew | Alpha platforms |
 | --- | --- | --- |
 | `trb` (Native) | `brew install type-rb/tap/trb` | Arm64 macOS and Linux |
 | `trbg` (Go) | `brew install type-rb/tap/trbg` | Arm64 and x86-64 macOS and Linux |
