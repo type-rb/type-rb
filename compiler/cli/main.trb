@@ -96,6 +96,7 @@ end
 def cli_usage(): Integer
 	tool := cli_name()
 	puts("Usage: " + tool + " [COMMAND] [OPTIONS] [SOURCE]")
+	puts("  " + tool + " -v, --version           Show the compiler version")
 	puts("  " + tool + "                         Start a REPL in an interactive terminal")
 	puts("  " + tool + " FILE.trb [-- ARGS...]    Build and run a file")
 	puts("  " + tool + " check [SOURCE]          Check a file or project")
@@ -175,7 +176,7 @@ def cli_parse_argument(mut options: CliOptions, arguments: Array<String>, mut in
 		options.command[0] = "help"
 		return
 	end
-	if argument == "--version"
+	if cli_any(argument == "--version", argument == "-v")
 		options.command[0] = "version"
 		return
 	end
@@ -351,8 +352,9 @@ def native_cli_main(): Integer
 	if command == "help"
 		return cli_usage()
 	end
+	version := "0.5.0-alpha.2"
 	if command == "version"
-		puts(cli_name() + " 0.5.0-alpha.1 (development; default mode: trb)")
+		puts(cli_name() + " " + version + " (development; default mode: trb)")
 		return 0
 	end
 	if command == ""
@@ -468,7 +470,7 @@ def native_cli_main(): Integer
 		return cli_error("unsupported host platform")
 	end
 	if command == "repl"
-		return repl_run(config)
+		return repl_run(config, version)
 	end
 	if !compiler_file_exists(source)
 		return cli_error("cannot read source " + source)

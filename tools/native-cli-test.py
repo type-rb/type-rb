@@ -342,9 +342,14 @@ end
     assert 'unexpected effect' not in failed_condition
     assert 'wrong' not in failed_condition
 
-    assert 'default mode: trb' in run('--version')
+    version = (repository / 'NATIVE_VERSION').read_text().strip()
+    version_line = f'{binary.name} {version} (development; default mode: trb)\n'
+    for flag in ('version', '--version', '-v'):
+        assert run(flag) == version_line
     assert 'Usage:' in run()
-    assert 'Usage:' in run('-h')
+    help_text = run('-h')
+    assert 'Usage:' in help_text
+    assert '-v, --version' in help_text
     for arguments in [('fmt',), ('--mode=',), ('--config',), ('build', '--compile', '--stdout')]:
         run(*arguments, success=False)
     standard_fixture = repository / 'compiler/conformance/valid/standard-package-calls.trb'
@@ -637,6 +642,7 @@ pair
         os.write(descriptor, text.encode())
 
     try:
+        expect(f'TypeRB Native {version} - development REPL (trb)\r\n')
         expect('trbn:trb> ')
         send('mut apples := 4\n')
         expect('4 : Integer')

@@ -2,6 +2,13 @@
 
 This file records user-visible changes in TypeRB releases.
 
+## 0.5.0-alpha.2 - 2026-11-25
+
+- `trb -v` reports the Native compiler version. The interactive REPL shows
+  the same version at startup.
+- Native reduces temporary allocations in JSON number parsing, JSON string
+  encoding and selected String, Array, and Hash operations.
+
 ## 0.5.0-alpha.1 - 2026-11-23
 
 - The default `trb` command installs the Native compiler on Arm64 macOS and

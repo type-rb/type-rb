@@ -375,7 +375,7 @@ def repl_command(mut session: ReplSession, authored: String, config: String): Re
 	return ReplCommand.new(session: session, running: true)
 end
 
-def repl_run(config: String): Integer
+def repl_run(config: String, version: String): Integer
 	project := repl_project(config)
 	if project.error != ""
 		native_cli_write("trbn: " + project.error + "\n", 2)
@@ -417,7 +417,7 @@ def repl_run(config: String): Integer
 		if history != ""
 			history_entries = repl_history_load(history)
 		end
-		puts("TypeRB Native 0.1.0-dev - development REPL (trb)")
+		puts("TypeRB Native " + version + " - development REPL (trb)")
 		puts("Type :help for help.")
 	end
 	mut running := true
