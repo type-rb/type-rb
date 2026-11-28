@@ -426,6 +426,10 @@ def main()
                                      '{"n":3,"n":' + number + '}'))
         cursor_documents.extend([' \t\r\n', '[ \r\n 0 , \t -2E+3 \n ]', '{} []',
                                  '{ \t "a" \r\n : \t [false, ]}', '[0, - ]'])
+        # Syntax and escape errors use different quote rules at these boundaries.
+        for point in (8, 9, 13, 14, 31, 32, 33, 39, 92, 96, 126, 127, 128, 160, 161, 0xfffd):
+            character = chr(point)
+            cursor_documents.extend(('{' + character, '"\\u00' + character + 'X"'))
         # The reference checks both parsed values and diagnostic positions after
         # comment masking, including individual UTF-8 bytes, quotes and CR/LF.
         comment_documents = [

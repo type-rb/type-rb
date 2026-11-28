@@ -167,6 +167,21 @@ def _diagnostic_range(data: String, point: Integer): Boolean
 	return false
 end
 
+# ASCII properties are checked directly. The generated tables cover other code points.
+def _diagnostic_printable(point: Integer): Boolean
+	if point < 128
+		return point >= 32 && point <= 126
+	end
+	return _diagnostic_range(_diagnostic_printable_data(), point)
+end
+
+def _diagnostic_space(point: Integer): Boolean
+	if point < 128
+		return point == 32 || (point >= 9 && point <= 13)
+	end
+	return _diagnostic_range(_diagnostic_space_data(), point)
+end
+
 def _diagnostic_character(character: String, quote: String): String
 	if !character.to_bytes().valid_utf8?()
 		return "\\x" + _diagnostic_hex(character.to_bytes().at(0), 2)
@@ -175,7 +190,7 @@ def _diagnostic_character(character: String, quote: String): String
 		return "\\" + character
 	end
 	point := character.codepoints()[0]
-	if _diagnostic_range(_diagnostic_printable_data(), point)
+	if _diagnostic_printable(point)
 		return character
 	end
 	if point == 7
@@ -266,7 +281,7 @@ def _escape_diagnostic(sequence: String): String
 			end
 			character := raw.to_bytes().to_s()
 			point := character.codepoints()[0]
-			if point == 96 || point == 65533 || !_diagnostic_range(_diagnostic_printable_data(), point) || _diagnostic_range(_diagnostic_space_data(), point)
+			if point == 96 || point == 65533 || !_diagnostic_printable(point) || _diagnostic_space(point)
 				needs_quotes = true
 			end
 			encoded += _diagnostic_character(character, "\"")
